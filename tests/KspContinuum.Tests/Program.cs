@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using System.Text.Json;
 using KspContinuum;
 
 static class Program
@@ -47,6 +49,37 @@ static class Program
         Reject(() => new Box(1, double.NaN, 1, 1, 1));
         Reject(() => AssemblyModel.Combine(new[] { B(double.MaxValue, 0), B(double.MaxValue, 1) }));
         Reject(() => AssemblyModel.Combine(new[] { default(Box) }));
-        Console.WriteLine("PASS: " + count + " analytic assertions (no Unity or KSP runtime exercised).");
+        var culture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            var report = new BenchReport { samples = new[] { new Sample { boxes = 128, millisecondsPerStep = 0.125 } } };
+            using (var json = JsonDocument.Parse(ReportJson.Encode(report)))
+            {
+                Near(1, json.RootElement.GetProperty("samples").GetArrayLength());
+                Near(128, json.RootElement.GetProperty("samples")[0].GetProperty("boxes").GetInt32());
+                Near(0.125, json.RootElement.GetProperty("samples")[0].GetProperty("millisecondsPerStep").GetDouble());
+            }
+            var text = "quote\" slash\\ newline\n control\u0001 rocket🚀";
+            using (var json = JsonDocument.Parse(ReportJson.Encode(new VesselReport {
+                inventory = new[] { new PartReport { partType = text, parentIndex = -1 } } })))
+            {
+                if (json.RootElement.GetProperty("inventory")[0].GetProperty("partType").GetString() != text)
+                    throw new Exception("Report string changed");
+                count++;
+            }
+            using (var json = JsonDocument.Parse(ReportJson.Encode(new ProbeReport { markers = new[] {
+                new MarkerReport { nanoseconds = new[] { long.MaxValue }, blocks = new int[0] } } })))
+            {
+                if (json.RootElement.GetProperty("markers")[0].GetProperty("nanoseconds")[0].GetInt64() != long.MaxValue)
+                    throw new Exception("Report integer lost precision");
+                count++;
+                Near(0, json.RootElement.GetProperty("markers")[0].GetProperty("blocks").GetArrayLength());
+            }
+            Reject(() => ReportJson.Encode(new Sample { millisecondsPerStep = double.NaN }));
+            Reject(() => ReportJson.Encode(new object()));
+        }
+        finally { CultureInfo.CurrentCulture = culture; }
+        Console.WriteLine("PASS: " + count + " analytic/report assertions (no Unity or KSP runtime exercised).");
     }
 }

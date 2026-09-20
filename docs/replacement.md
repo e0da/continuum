@@ -8,6 +8,8 @@ The installed Mac KSP executable is x86_64. Its managed assemblies expose Unity 
 
 Unity supports [native libraries called from managed code](https://docs.unity3d.com/2019.4/Documentation/Manual/NativePlugins.html). [Harmony](https://harmony.pardeike.net/v2/articles/patching.html) supports managed method patches; this is not a universal hook into Unity's native physics internals. [Community Fixes](https://github.com/KSPModdingLibs/KSPCommunityFixes) demonstrates substantial KSP managed-code replacement. These establish possible entry mechanisms, not a working solver handoff.
 
+See [community integration boundaries](compatibility.md) for existing integrator, lifecycle and joint owners that must be accounted for before takeover.
+
 ## Proposed boundary
 
 Capture immutable arrays of body IDs, poses, velocities, mass properties, shape references, joints, and external forces at a defined physics tick. Run the backend using those arrays. Return poses, velocities, contact impulses, and break events with the input tick and topology generation. Reject stale results. Cache stable geometry and topology rather than rebuilding them every tick.
@@ -22,10 +24,12 @@ Stage separation, docking, breakage, packing/timewarp, floating-origin shifts, s
 
 | Candidate | Why test it | Main unresolved cost |
 | --- | --- | --- |
-| Native CPU library in KSP | SIMD and multicore processing without process transport; [Jolt](https://github.com/jrouwe/JoltPhysics) is one candidate | x86_64 host ABI, solver mapping, and force interception |
+| Native CPU library in KSP | SIMD and multicore processing without process transport; [Jolt](https://github.com/jrouwe/JoltPhysics) and [Box3D](https://github.com/erincatto/box3d) are candidates | x86_64 host ABI, solver mapping, and force interception |
 | Separate native ARM process on Apple silicon | Runs outside the Intel game's process architecture | Shared-memory protocol, synchronization, crash handling, and end-to-end latency |
 | Metal compute backend | Apple GPU parallelism | Kernel design, constraint scheduling, contact generation, and mandatory readback/synchronization |
 | GPU PhysX on supported hosts | Existing GPU rigid-body solver | [CUDA platform requirements](https://nvidia-omniverse.github.io/PhysX/physx/5.7.0/docs/GPURigidBodies.html); not a Mac switch |
+
+[Box3D's announcement](https://box2d.org/posts/2026/06/announcing-box3d/) describes graph coloring, SIMD contacts, multithreading hooks, double-precision positions, and recording/replay. Its [upstream repository](https://github.com/erincatto/box3d) documents a C17 implementation, a C API, Mac support, SSE2/Neon, and an MIT license. This makes it a concrete native-backend candidate. Pin a source revision before comparing it; no Box3D build, bridge, or performance result is present here. Test coupled joint chains, uneven masses, contacts, breakage and step-size sensitivity alongside transfer overhead. Local rigid-body simulation does not replace long-horizon orbital integration. The announcement described alpha maturity; qualify the revision actually selected rather than infer readiness from the feature list.
 
 Thread-level parallelism, SIMD, better memory layout, fewer allocations, and a better solver are separate interventions. A connected rocket has dependent constraints; graph coloring or a parallel iterative method can expose work, but extra cores do not remove convergence requirements. The goal can retain flexible joints rather than eliminate them.
 

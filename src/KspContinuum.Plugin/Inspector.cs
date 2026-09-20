@@ -4,21 +4,6 @@ using UnityEngine;
 
 namespace KspContinuum
 {
-    [Serializable] public sealed class VesselReport
-    {
-        public string schema = "ksp-continuum-vessel/v1";
-        public string status = "read-only-candidate-inventory-not-merge-approval";
-        public string utc = DateTime.UtcNow.ToString("o");
-        public int parts, rigidbodies, joints, colliders, candidateParts;
-        public bool packed;
-        public PartReport[] inventory;
-    }
-    [Serializable] public sealed class PartReport
-    {
-        public string partType, exclusion;
-        public int index, parentIndex;
-        public float dryMass;
-    }
     public static class Inspector
     {
         static readonly HashSet<string> Structural = new HashSet<string> { "structuralPanel1", "structuralPanel2", "structuralIBeam1", "structuralIBeam2", "structuralIBeam3", "strutCube", "strutOcto" };

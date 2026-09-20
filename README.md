@@ -2,7 +2,7 @@
 
 An experimental KSP 1 plugin for measuring the cost of jointed structures and testing alternatives. The goal is faster, believable structural physics, including flex and breakage. Rigid grouping is one experiment, not a commitment to making every ship rigid.
 
-**Status: compiled against KSP 1.12.5; analytic tests pass; not yet run inside KSP.** This is not a gameplay fix or a replacement physics engine. No speedup or mod compatibility has been demonstrated.
+**Status: the isolated benchmark passes in headless KSP 1.12.5; 37 analytic/report assertions pass.** This is a research harness, not a gameplay fix or a replacement physics engine. Synthetic timings are recorded in the validation receipt; stock-vessel speedup and mod compatibility remain unverified.
 
 ## What exists
 
@@ -12,7 +12,7 @@ An experimental KSP 1 plugin for measuring the cost of jointed structures and te
 - An optional 300-frame timing capture records available Unity markers. Unsupported markers are reported as unavailable, never as evidence of zero cost.
 - A pure C# model verifies aligned-box aggregation and impulse-free separation without proprietary assemblies.
 
-The plugin never automatically runs a benchmark, demotes a part, modifies a vessel, or edits a save. Reports are generated only when a panel button is pressed and go to `GameData/KspContinuum/PluginData/`. Reports omit player names, vessel names, save names, and local paths. Part type and module names can identify installed mods.
+The plugin runs only when a panel button is pressed or the game is explicitly launched with `--continuum-bench`. It never demotes a part, modifies a vessel, or edits a save. Reports go to `GameData/KspContinuum/PluginData/`. Reports omit player names, vessel names, save names, and local paths. Part type and module names can identify installed mods.
 
 ## Build
 
@@ -30,10 +30,12 @@ dotnet build src/KspContinuum.Plugin -c Release
 python3 scripts/package.py
 ```
 
-The build reads game references but never copies them or installs anything. The local archive in `artifacts/` contains only this project's plugin and documentation. There is no published CKAN release yet. Use CKAN for a future packaged installation; runtime qualification and packaging metadata must be completed first. Do not deploy into an instance another process or agent is using.
+The build reads game references but never copies them or installs anything. The local archive in `artifacts/` contains only this project's plugin and documentation. There is no published CKAN release yet. The local experiment was installed through CKAN in an independent test copy; public release metadata and gameplay qualification remain incomplete. Do not deploy into an instance another process or agent is using.
+
+For automated engine qualification in an owned test copy, launch its KSP executable with `-batchmode -nographics --continuum-bench`. At the main menu, the addon runs the isolated benchmark, writes its report, and exits with code 0 when all report checks pass or 1 on failure. An unsupported KSP version exits with code 2. Normal launches do not auto-run or exit. Headless execution does not verify the visible panels or live-vessel inspector.
 
 ## Research direction
 
 The next consequential experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, and GPU compute remain candidates rather than assumed winners.
 
-See [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md). Work uses Git and GitHub on reviewable branches.
+See [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.

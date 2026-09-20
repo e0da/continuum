@@ -8,13 +8,13 @@ Each run creates a new local Unity Physics3D scene. The assembly contains 8, 32,
 
 Both cases disable gravity, drag, and sleeping and use six position iterations, one velocity iteration, and a fixed 0.02-second step. A unit upward force acts at the first box on each step. There are 50 warmup steps, followed by 200 measured steps. Timings include the force call and synchronous scene simulation, but exclude object creation, raycasts, JSON output, and cleanup. Six pairs alternate order for each size. Compare paired results and variability; do not publish only the fastest sample. The plugin can pause the menu briefly while a sample runs.
 
-Collider rays are checked before forcing. Spacing error is recorded after simulation. A separate three-box bench tests compound-body floor contact. Separation starts with a rotated three-box assembly and checks linear and angular momentum immediately after transferring each child's center-of-mass velocity. It does not yet test post-separation contact or a real KSP decoupler.
+Collider rays are checked before forcing. Spacing error is recorded after simulation. A separate three-box bench tests compound-body floor contact. Separation starts with a rotated three-box assembly, checks its child positions against the expected initial rotation, and checks linear and angular momentum immediately after transferring each child's center-of-mass velocity. It does not yet test post-separation contact or a real KSP decoupler.
 
 ## Acceptance sequence
 
 1. Compile against an owned KSP 1.12.5 copy and run analytic tests.
 2. Once exclusive test-instance ownership is available, use CKAN packaging to install in an independent disposable copy. Never alter the active playable copy or clone while KSP/CKAN is open.
-3. Launch to the main menu. Run the benchmark twice. Check both reports contain 36 samples, complete collider hits, finite positive timings, passing split/contact checks, and near-zero compound spacing error. Inspect the game log for exceptions and verify the temporary scenes are unloaded.
+3. Launch to the main menu. Run the benchmark twice. Check both reports contain 36 samples, complete collider hits, finite positive timings, passing initial-pose/split/contact checks, and near-zero compound spacing error. Inspect the game log for exceptions and verify the temporary scenes are unloaded.
 4. Compare per-size paired timing distributions across runs. A failure to improve rejects the compound-performance hypothesis for this workload. A win does not establish stock-vessel speedup.
 5. Load a disposable sandbox vessel. Capture the inventory and markers. Verify scene transitions and unload do not leave a profiler recorder enabled or a benchmark scene alive. Marker availability and scope vary in release players; absent markers require another profiling route.
 6. Profile a representative stock and modded vessel before deciding which production hot loop to replace. KSP Community Fixes should be a separately recorded comparison, not silently added between measurements.

@@ -9,16 +9,33 @@ namespace KspContinuum
     {
         string status = "Ready. Runs only when requested.";
         bool running;
+        bool automatedBench;
         Bench bench;
         Probe probe;
         protected abstract bool IsMenu { get; }
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
+        public void Start()
+        {
+            if (!IsMenu || Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-bench") < 0) return;
+            automatedBench = true;
+            if (!Supported) { Application.Quit(2); return; }
+            RunBench();
+        }
+        void RunBench()
+        {
+            bench = new Bench();
+            StartCoroutine(Guard(bench.Run(report =>
+            {
+                Write("bench", report);
+                if (automatedBench) Application.Quit(report.Passed() ? 0 : 1);
+            })));
+        }
         void Write(string kind, object report)
         {
             string directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData");
             Directory.CreateDirectory(directory);
             string filename = kind + "-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".json";
-            File.WriteAllText(Path.Combine(directory, filename), JsonUtility.ToJson(report, true));
+            File.WriteAllText(Path.Combine(directory, filename), ReportJson.Encode(report));
             status = "Report saved in GameData/KspContinuum/PluginData.";
         }
         IEnumerator Guard(IEnumerator work)
@@ -30,7 +47,12 @@ namespace KspContinuum
                 {
                     bool next;
                     try { next = work.MoveNext(); }
-                    catch (Exception ex) { status = "Experiment failed: " + ex.GetType().Name; Debug.LogException(ex); yield break; }
+                    catch (Exception ex)
+                    {
+                        status = "Experiment failed: " + ex.GetType().Name; Debug.LogException(ex);
+                        if (automatedBench) Application.Quit(1);
+                        yield break;
+                    }
                     if (!next) break;
                     yield return work.Current;
                 }
@@ -52,7 +74,7 @@ namespace KspContinuum
                 GUILayout.Label("Synthetic boxes in isolated physics scenes. No vessel changes.");
                 if (GUILayout.Button("Run jointed / compound benchmark"))
                 {
-                    bench = new Bench(); StartCoroutine(Guard(bench.Run(report => Write("bench", report))));
+                    RunBench();
                 }
             }
             else

@@ -7,30 +7,6 @@ using UnityEngine.SceneManagement;
 
 namespace KspContinuum
 {
-    [Serializable] public sealed class BenchReport
-    {
-        public string schema = "ksp-continuum-bench/v1";
-        public string status = "synthetic-engine-benchmark-only";
-        public string utc = DateTime.UtcNow.ToString("o");
-        public string unity = Application.unityVersion;
-        public string ksp = Versioning.GetVersionString();
-        public string plugin = typeof(Bench).Assembly.GetName().Version.ToString();
-        public string platform = Application.platform.ToString();
-        public float stepSeconds = 0.02f;
-        public int warmupSteps = 50, measuredSteps = 200, solverIterations = 6, solverVelocityIterations = 1;
-        public Sample[] samples;
-        public float splitLinearMomentumError, splitAngularMomentumError;
-        public bool splitPassed, collisionPassed;
-        public float collisionFinalY;
-    }
-    [Serializable] public sealed class Sample
-    {
-        public int boxes, bodies, joints, pair, colliderRayHits;
-        public bool compound;
-        public double millisecondsPerStep;
-        public float maxSpacingError;
-    }
-
     public sealed class Bench : IDisposable
     {
         Scene active;
@@ -68,15 +44,18 @@ namespace KspContinuum
             for (int i = 0; i < count; i++) boxes[i] = new Box(1 + i % 3, i * 1.1, 1, 1, 1);
             return boxes;
         }
-        Rigidbody Compound(Box[] boxes, out Transform[] shapes)
+        Rigidbody Compound(Box[] boxes, Quaternion rotation, out Transform[] shapes)
         {
             var props = AssemblyModel.Combine(boxes);
             var root = NewObject("compound", Vector3.zero);
+            root.transform.rotation = rotation;
             shapes = new Transform[boxes.Length];
             for (int i = 0; i < boxes.Length; i++)
             {
-                var obj = NewObject("box", new Vector3((float)boxes[i].CenterX, 0, 0));
-                obj.transform.SetParent(root.transform, true);
+                var obj = NewObject("box", Vector3.zero);
+                obj.transform.SetParent(root.transform, false);
+                obj.transform.localPosition = new Vector3((float)boxes[i].CenterX, 0, 0);
+                obj.transform.localRotation = Quaternion.identity;
                 obj.AddComponent<BoxCollider>().size = new Vector3((float)boxes[i].X, (float)boxes[i].Y, (float)boxes[i].Z);
                 shapes[i] = obj.transform;
             }
@@ -89,7 +68,7 @@ namespace KspContinuum
             var boxes = Boxes(count);
             Transform[] shapes;
             Rigidbody driven;
-            if (compound) driven = Compound(boxes, out shapes);
+            if (compound) driven = Compound(boxes, Quaternion.identity, out shapes);
             else
             {
                 shapes = new Transform[count];
@@ -140,8 +119,14 @@ namespace KspContinuum
         {
             var boxes = Boxes(3);
             Transform[] shapes;
-            var parent = Compound(boxes, out shapes);
-            parent.rotation = Quaternion.Euler(20, 30, 40);
+            var rotation = Quaternion.Euler(20, 30, 40);
+            var parent = Compound(boxes, rotation, out shapes);
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                var expected = rotation * new Vector3((float)boxes[i].CenterX, 0, 0);
+                report.splitInitialPoseError = Mathf.Max(report.splitInitialPoseError, Vector3.Distance(shapes[i].position, expected));
+            }
+            report.splitInitialPosePassed = report.splitInitialPoseError < 1e-5f;
             parent.velocity = new Vector3(2, 3, 4); parent.angularVelocity = new Vector3(0.2f, -0.3f, 0.4f);
             var center = parent.worldCenterOfMass;
             var momentum = parent.mass * parent.velocity;
@@ -160,12 +145,12 @@ namespace KspContinuum
             parent.gameObject.SetActive(false);
             report.splitLinearMomentumError = (sumP - momentum).magnitude / Mathf.Max(1, momentum.magnitude);
             report.splitAngularMomentumError = (sumL - angular).magnitude / Mathf.Max(1, angular.magnitude);
-            report.splitPassed = report.splitLinearMomentumError < 1e-5f && report.splitAngularMomentumError < 1e-5f;
+            report.splitPassed = report.splitInitialPosePassed && report.splitLinearMomentumError < 1e-5f && report.splitAngularMomentumError < 1e-5f;
         }
         void Collision(BenchReport report)
         {
             Transform[] shapes;
-            var body = Compound(Boxes(3), out shapes);
+            var body = Compound(Boxes(3), Quaternion.identity, out shapes);
             var floor = NewObject("floor", new Vector3(1.1f, -2, 0));
             floor.AddComponent<BoxCollider>().size = new Vector3(10, 1, 10);
             body.velocity = Vector3.down;
@@ -175,7 +160,8 @@ namespace KspContinuum
         }
         public IEnumerator Run(Action<BenchReport> complete)
         {
-            var report = new BenchReport();
+            var report = new BenchReport { unity = Application.unityVersion, ksp = Versioning.GetVersionString(),
+                plugin = typeof(Bench).Assembly.GetName().Version.ToString(), platform = Application.platform.ToString() };
             var samples = new List<Sample>();
             try
             {

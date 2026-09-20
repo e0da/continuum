@@ -12,6 +12,6 @@ output.parent.mkdir(exist_ok=True)
 with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
     archive.write(plugin, 'GameData/KspContinuum/Plugins/KspContinuum.dll')
     archive.write(root / 'README.md', 'GameData/KspContinuum/README.md')
-    for name in ('experiment.md', 'replacement.md', 'validation.md'):
+    for name in ('experiment.md', 'replacement.md', 'validation.md', 'compatibility.md'):
         archive.write(root / 'docs' / name, 'GameData/KspContinuum/docs/' + name)
 print(output.name)

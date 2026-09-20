@@ -5,19 +5,6 @@ using UnityEngine.Profiling;
 
 namespace KspContinuum
 {
-    [Serializable] public sealed class MarkerReport
-    {
-        public string name, status;
-        public long[] nanoseconds;
-        public int[] blocks;
-    }
-    [Serializable] public sealed class ProbeReport
-    {
-        public string schema = "ksp-continuum-markers/v1";
-        public string status = "marker-timings-not-whole-frame-attribution";
-        public string utc = DateTime.UtcNow.ToString("o");
-        public MarkerReport[] markers;
-    }
     public sealed class Probe : IDisposable
     {
         readonly List<Recorder> recorders = new List<Recorder>();
