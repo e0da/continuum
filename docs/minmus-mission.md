@@ -24,4 +24,4 @@ The intended staging limit preserves the Poodle-powered upper landing assembly. 
 
 The flight is stock physics controlled by MechJeb and orchestrated/instrumented by Continuum. It does not prove a replacement physics engine, complete mission replay, unattended mission planning for arbitrary craft, or multimedia reconstruction. See the validation receipt for actual trial outcomes.
 
-The first completed flight passed the declared intact-touchdown check, but the observer saw repeated flipping and the final dark image appears tipped. Upright attitude and angular settling are not current acceptance requirements. See [validation](validation.md) before interpreting a passed mission as a clean landing.
+The first completed flight passed the declared intact-touchdown check, but the observer saw repeated flipping and the final image and saved rotation show it finished approximately sideways. Upright attitude and angular settling are not current acceptance requirements. See [validation](validation.md) before interpreting a passed mission as a clean landing.
