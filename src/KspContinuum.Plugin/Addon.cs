@@ -1,0 +1,105 @@
+using System;
+using System.Collections;
+using System.IO;
+using UnityEngine;
+
+namespace KspContinuum
+{
+    public abstract class Panel : MonoBehaviour
+    {
+        string status = "Ready. Runs only when requested.";
+        bool running;
+        bool automatedBench;
+        Bench bench;
+        Probe probe;
+        protected abstract bool IsMenu { get; }
+        static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
+        public void Start()
+        {
+            if (!IsMenu || Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-bench") < 0) return;
+            automatedBench = true;
+            if (!Supported) { Application.Quit(2); return; }
+            RunBench();
+        }
+        void RunBench()
+        {
+            bench = new Bench();
+            StartCoroutine(Guard(bench.Run(report =>
+            {
+                Write("bench", report);
+                if (automatedBench) Application.Quit(report.Passed() ? 0 : 1);
+            })));
+        }
+        void Write(string kind, object report)
+        {
+            string directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData");
+            Directory.CreateDirectory(directory);
+            string filename = kind + "-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".json";
+            File.WriteAllText(Path.Combine(directory, filename), ReportJson.Encode(report));
+            status = "Report saved in GameData/KspContinuum/PluginData.";
+        }
+        IEnumerator Guard(IEnumerator work)
+        {
+            running = true; status = "Running; results are written when complete.";
+            try
+            {
+                while (true)
+                {
+                    bool next;
+                    try { next = work.MoveNext(); }
+                    catch (Exception ex)
+                    {
+                        status = "Experiment failed: " + ex.GetType().Name; Debug.LogException(ex);
+                        if (automatedBench) Application.Quit(1);
+                        yield break;
+                    }
+                    if (!next) break;
+                    yield return work.Current;
+                }
+            }
+            finally
+            {
+                var disposable = work as IDisposable;
+                if (disposable != null) disposable.Dispose();
+                running = false;
+            }
+        }
+        public void OnGUI()
+        {
+            GUILayout.BeginArea(new Rect(20, 80, 370, 195), "KSP Continuum — research prototype", GUI.skin.window);
+            GUILayout.Label(Supported ? status : "Unsupported KSP version; requires 1.12.5.");
+            bool old = GUI.enabled; GUI.enabled = old && Supported && !running;
+            if (IsMenu)
+            {
+                GUILayout.Label("Synthetic boxes in isolated physics scenes. No vessel changes.");
+                if (GUILayout.Button("Run jointed / compound benchmark"))
+                {
+                    RunBench();
+                }
+            }
+            else
+            {
+                if (GUILayout.Button("Inspect active vessel (read only)"))
+                {
+                    try { Write("vessel", Inspector.Capture(FlightGlobals.ActiveVessel)); }
+                    catch (Exception ex) { status = "Inspection failed: " + ex.GetType().Name; Debug.LogException(ex); }
+                }
+                if (GUILayout.Button("Capture 300 frames of available timing markers"))
+                {
+                    probe = new Probe(); StartCoroutine(Guard(probe.Run(report => Write("markers", report))));
+                }
+            }
+            GUI.enabled = old; GUILayout.EndArea();
+        }
+        public void OnDestroy()
+        {
+            StopAllCoroutines();
+            if (bench != null) bench.Dispose();
+            if (probe != null) probe.Dispose();
+        }
+    }
+    [KSPAddon(KSPAddon.Startup.MainMenu, false)]
+    public sealed class MenuPanel : Panel { protected override bool IsMenu { get { return true; } } }
+    [KSPAddon(KSPAddon.Startup.Flight, false)]
+    public sealed class FlightPanel : Panel { protected override bool IsMenu { get { return false; } } }
+}
