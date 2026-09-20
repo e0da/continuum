@@ -47,6 +47,76 @@ When `--inputs` is supplied, its directory basename must match the mission recei
 
 The `mission-v1` HTML template lives at `templates/chronicle/mission-v1.html`. Its placeholder set is a strict generator contract. Improve or add a versioned template in Git, then generate a new report directory so an earlier report remains immutable.
 
+## Build the connected program site
+
+`space_program.py` turns the immutable report archive and a maintained catalog into one browsable local website. It creates shared navigation and pages for missions, attempts, vehicles, sites, and experiments. Each attempt route uses the newest rendering for that stable attempt ID, lists earlier renderings as history, copies its confirmed report media, and adds links back to the immutable source report and its related catalog records. The source reports are never edited, and multiple renderings do not become multiple attempts.
+
+Keep the local catalog beside the reports under the ignored archive. This small example shows the complete schema; arrays may contain more records and facts or media may be empty.
+
+```json
+{
+  "schema": "ksp-continuum-space-program/v1",
+  "program": {
+    "name": "Continuum Space Program",
+    "tagline": "Flights, discoveries, experiments",
+    "summary": "A connected record of missions and engineering work."
+  },
+  "missions": [
+    {
+      "id": "CSP-0001",
+      "name": "Minmus Pathfinder",
+      "status": "completed",
+      "summary": "Establish a recorded launch-to-landing workload.",
+      "facts": [{"label": "Outcome", "value": "A003 completed its stated mission checks."}],
+      "media": []
+    }
+  ],
+  "vehicles": [
+    {
+      "id": "CV-0001-R01",
+      "name": "Kerbal X / stock",
+      "status": "flown",
+      "summary": "The stock qualification vehicle.",
+      "facts": [],
+      "media": []
+    }
+  ],
+  "sites": [],
+  "experiments": [
+    {
+      "id": "EXP-CSP-0001-LANDING",
+      "name": "Landing attitude",
+      "status": "observed",
+      "summary": "Relate terminal attitude measurements to the landed result.",
+      "attempt_ids": ["CSP-0001-A003"],
+      "facts": [],
+      "media": [
+        {
+          "path": "experiments/landing-attitude.png",
+          "caption": "Measured terminal attitude",
+          "alt": "Chart of terminal landing attitude"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Catalog media paths are relative to the archive. Every mission, vehicle, and non-null site referenced by a report manifest must have a catalog record, and every experiment attempt link must resolve to a report. Status and narrative come from the maintained catalog; the generator does not turn a `LANDED` observation or a report outcome into a broader mission claim.
+
+One command builds or safely refreshes the derived site:
+
+```sh
+python3 scripts/space_program.py \
+  --archive artifacts/space-program \
+  --catalog artifacts/space-program/catalog.json \
+  --output artifacts/space-program/site
+```
+
+Serve the archive root and open `/site/index.html`; attempt pages link back to immutable reports alongside `site/`. For example, `python3 -m http.server 18762 --bind 127.0.0.1 --directory artifacts/space-program` keeps both the connected routes and original-report links available on the local machine. Serving only the `site/` directory leaves those original-report links outside the server root.
+
+A rebuild replaces only a direct child of the archive that already carries the `ksp-continuum-space-program-site/v1` marker. It refuses unmarked destinations, unsafe media paths, missing relationships, symbolic sources, private absolute paths in catalog or report material, and output outside the archive. Generated pages and copied media use relative links; no machine-specific source directory is written into the site.
+
 ## Browse the archive
 
 Build a new local archive index after one or more reports exist:

@@ -2,7 +2,7 @@
 
 ## Input timeline and mission trials
 
-The combined analytic/report/timeline suite passes 123 portable assertions; optional mission policies pass 36 assertions. These do not establish whole-game determinism. The following mission attempts are retained, including failures before launch:
+The combined analytic/report/timeline suite passes 123 portable assertions; optional mission policies pass 62 assertions. These do not establish whole-game determinism. The following mission attempts are retained, including failures before launch:
 
 | Attempt | Mode | Observed result |
 | --- | --- | --- |
@@ -21,6 +21,28 @@ At UT 269974.00335770514 the mission reported Minmus LANDED, zero throttle, all 
 The observer reported repeated flipping during slow powered descent and little apparent fuel use. Sampled throttle was often 0.05 and surface speed fluctuated at low values. The dark final image shows a tipped lander. Decoding the saved vessel rotation in its inspected body-relative frame places the rocket axis 96.4 degrees from outward radial, confirming it is approximately sideways; this is not a terrain-normal-relative angle. Current telemetry does not contain attitude, angular velocity or thrust direction, and current acceptance does not require an upright pose or quantify rotational settling. Record this as an intact, settled touchdown under the stated checks, not a clean upright landing. Late recorded pitch/yaw commands reach both full-deflection limits and reverse several times. Installed MechJeb settings enable a 0.05 minimum throttle; its low-speed attitude target can also change. Those are diagnostic candidates, not causal proof. The final save retains about 60.6% of both liquid fuel and oxidizer, so fuel starvation is not supported. The cause of the flipping is unresolved; add orientation, target and angular-rate observations before attributing it to an autopilot, controls, or physics defect.
 
 Two screenshots requested in the same frame at Minmus capture did not both materialize: descent-start was confirmed and minmus-orbit was explicitly marked unconfirmed. Checkpoint saves for both milestones exist. There is no video or audio recording and no reconstructed replay of the descent.
+
+## Minmus Survey 1
+
+CSP-0002-A001 ran visibly at 1920×1080 using package `0.1.0-survey.6F27F6FA94B4`. All 15 installed package files matched their archive bytes before launch. The stock Kerbal X design remained unchanged. The sampled footprint had 529 zero-height observations and maximum triangle slope 0.00225°. Frozen sunlight prediction and native arrival geometry agreed within 7.55e-12 degrees. These checks cover the stated sampling/model boundaries, not arbitrary collider clearance or terrain shadows.
+
+The survey **failed** its upright-landing contract. After the 180-second settling timeout, the craft was LANDED on Minmus with all 17 descent-stage parts preserved, 71.006 m from target, Sun elevation 44.572°, surface speed 0.00148 m/s and throttle zero. Its terrain-relative tilt was 94.984°; none of 1,711 settling observations met the 10° limit. All six milestone PNGs were confirmed at 1920×1080, and the final image shows the sideways craft in sunlight.
+
+The targeted landing phase took about 467 wall seconds for 2,605 simulated seconds, including warp-aware deorbit/coast stages. Pathfinder's untargeted landing took about 1,080 wall seconds. Target geometry and trajectory also changed, so this is an observed pacing difference, not a controlled performance ratio. A001's final descent still lasted 296 seconds; 93.5% of its 2,823 observations recorded throttle at 0.05 while the craft repeatedly rotated.
+
+Pinned MechJeb source shows that a final-descent request for zero throttle can be raised to the enabled 5% minimum. The capture checkpoint's approximate mass implies hover thrust below that floor. This motivates the separate `--continuum-survey-disable-throttle-floor` trial; it does not establish the cause of tipping. A001's original `min_throttle_percent` column contains normalized fractions, despite its name. Later telemetry uses `min_throttle_fraction`; the original evidence remains unchanged.
+
+The raw receipts, saves, telemetry and screenshots remain local. The generated chronicle identifies native failure separately from editorial interpretation and retains hashes of its sources. Neither the report nor input recording establishes deterministic replay.
+
+### A002: upright touchdown with the throttle floor disabled
+
+CSP-0002-A002 used package `0.1.0-survey.0A24FE1F52A4`; all 15 installed files matched the archive, and the stock craft hash was unchanged. The explicit experiment disabled only MechJeb's minimum-throttle floor during owned landing control. Every Landing and Settling observation recorded the floor disabled; the terminal Done observation confirmed restoration to its previous enabled value after cleanup.
+
+The lander touched down upright in daylight with all 17 parts intact. At the terminal receipt, terrain-relative tilt was 0.868°, Sun elevation 43.757°, surface speed 0.000176 m/s and throttle zero. The final PNG visually confirms the upright craft. Nevertheless the survey **failed**: target distance was 116.167 m, and none of 1,711 settling observations met the unchanged 100 m limit. The 180-second settling timeout was preserved. The vessel center was inside the sampled square, approximately 4.76 m from its east edge; this does not establish coverage of every leg contact.
+
+FinalDescent took about 38 seconds versus A001's 296 seconds, with no recorded terrain-relative tilt above 90° versus 768 such observations in A001. The observer's brief rise before final descent also appears in the 1 Hz altitude trace: about 0.116 m over 16 seconds during horizontal-velocity correction, followed by decreasing sampled altitude to touchdown. This trial supports the throttle floor as a contributor to the behavior for this craft. The two fresh flights have different trajectories and entry states; repeatability and precise causal attribution remain open.
+
+Both survey attempts have six confirmed 1920×1080 screenshots. Their connected local website links attempts, missions, vehicle, site and experiment records, including a comparison chart. Its 14 pages and 245 local links/media references were checked after the A002 rebuild; browser navigation and actual image loading were verified. The maintained catalog and derived site can be rebuilt without modifying the original reports. The Python suite has 30 passing tests.
 
 ## Earlier isolated benchmark qualification
 

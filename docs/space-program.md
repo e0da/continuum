@@ -13,7 +13,7 @@ Develop the tools alongside those missions. A physics benchmark answers a narrow
 | Mission | Purpose | Evidence boundary |
 | --- | --- | --- |
 | CSP-0001 — Minmus Pathfinder | Establish a recorded launch-to-landing workload | Three attempts; A003 achieved intact, settled touchdown, approximately sideways. No upright-landing or deterministic replay claim. |
-| CSP-0002 — Minmus Survey 1 | Target a sunny Greater Flats candidate and measure the landing path | Qualification work; a candidate coordinate is not a certified landing field. |
+| CSP-0002 — Minmus Survey 1 | Target a sunny Greater Flats candidate and measure the landing path | A001 landed sideways; A002 landed upright with the throttle floor disabled, but missed the 100 m distance limit at 116 m. Qualification remains open. |
 
 The current vehicle is stock Kerbal X, catalog design `CV-0001-R01`. The next craft-design outcome is an uncrewed scout and carrier: deliver several identical probes, deploy and follow them sequentially, and preserve useful measurements from both successful and failed landings. Concurrent autonomous descents require additional control ownership and simulation qualification.
 
