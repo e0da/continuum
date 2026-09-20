@@ -12,6 +12,8 @@ namespace KspContinuum
         bool automatedBench;
         Bench bench;
         Probe probe;
+        FlightTimeline timeline;
+        string replayFile = "replay.csv";
         protected abstract bool IsMenu { get; }
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
         public void Start()
@@ -20,6 +22,12 @@ namespace KspContinuum
             automatedBench = true;
             if (!Supported) { Application.Quit(2); return; }
             RunBench();
+        }
+        public void Update()
+        {
+            if (timeline == null) return;
+            if (Input.GetKeyDown(KeyCode.Escape) && timeline.IsReplaying) timeline.Stop();
+            timeline.Tick();
         }
         void RunBench()
         {
@@ -66,7 +74,7 @@ namespace KspContinuum
         }
         public void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(20, 80, 370, 195), "KSP Continuum — research prototype", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(20, 80, 430, IsMenu ? 195 : 410), "KSP Continuum — research prototype", GUI.skin.window);
             GUILayout.Label(Supported ? status : "Unsupported KSP version; requires 1.12.5.");
             bool old = GUI.enabled; GUI.enabled = old && Supported && !running;
             if (IsMenu)
@@ -79,6 +87,29 @@ namespace KspContinuum
             }
             else
             {
+                if (timeline == null) timeline = new FlightTimeline();
+                GUILayout.Label(timeline.Status);
+                if (GUILayout.Button("Record flight inputs"))
+                {
+                    try { timeline.BeginRecording(FlightGlobals.ActiveVessel); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                GUI.enabled = old;
+                if (GUILayout.Button("Stop recording / abort replay")) timeline.Stop();
+                GUI.enabled = old && Supported && !running;
+                replayFile = GUILayout.TextField(replayFile);
+                GUILayout.Label("Replay starts from CURRENT state, with SAS off. Stops at discrete events.");
+                if (GUILayout.Button("Replay PluginData file"))
+                {
+                    try
+                    {
+                        if (Path.GetFileName(replayFile) != replayFile || !replayFile.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                            throw new ArgumentException("Use a CSV filename directly in PluginData.");
+                        timeline.LoadAndReplay(FlightGlobals.ActiveVessel, Path.Combine(KSPUtil.ApplicationRootPath,
+                            "GameData", "KspContinuum", "PluginData", replayFile));
+                    }
+                    catch (Exception ex) { status = ex.Message; }
+                }
                 if (GUILayout.Button("Inspect active vessel (read only)"))
                 {
                     try { Write("vessel", Inspector.Capture(FlightGlobals.ActiveVessel)); }
@@ -96,6 +127,7 @@ namespace KspContinuum
             StopAllCoroutines();
             if (bench != null) bench.Dispose();
             if (probe != null) probe.Dispose();
+            if (timeline != null) timeline.Dispose();
         }
     }
     [KSPAddon(KSPAddon.Startup.MainMenu, false)]

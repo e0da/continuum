@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../LandingAcceptance.cs" Link="LandingAcceptance.cs" />
+    <Compile Include="../MissionCompatibility.cs" Link="MissionCompatibility.cs" />
+    <Compile Include="../MissionCleanup.cs" Link="MissionCleanup.cs" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,6 @@
 # Community integration boundaries
 
-Continuum currently runs synthetic physics scenes and reads vessel state. It neither replaces the flight integrator nor changes vessel bodies. No mod compatibility has been qualified. Before a shadow solver or takeover, use established community hooks where their ownership and timing contracts fit.
+Continuum runs synthetic physics scenes, observes vessel state and offers guarded analog input replay. The optional mission addon drives MechJeb in a dedicated sandbox. It neither replaces the flight integrator nor changes vessel bodies. No general mod compatibility has been qualified. Before a shadow solver or takeover, use established community hooks where their ownership and timing contracts fit.
 
 ## Existing integration owners
 
@@ -28,3 +28,13 @@ Before controlling a vessel, define and verify:
 - Explicit supported mod versions/configurations and a refusal path for unsupported combinations. Background simulation providers also need an event/interval contract before long warp can advance them.
 
 Qualification should progress from stock, to each relevant mod individually, to declared combinations. Compare trajectories, momentum, contacts, lifecycle transitions and end-to-end cost. Record enabled patches and exact versions; do not add support libraries silently between benchmark runs. Inspect installed releases before relying on these source-snapshot observations. No new runtime dependency is required by the current harness.
+
+## Multiplayer planning boundary
+
+Multiplayer compatibility is a requirement, not a demonstrated feature. [DarkMultiPlayer v0.3.8.5](https://github.com/godarklight/DarkMultiPlayer/tree/v0.3.8.5) coordinates vessel updates through server-arbitrated locks and offers multiple shared/subspace warp modes. [LunaMultiplayer 0.29.2](https://github.com/LunaMultiplayer/LunaMultiplayer/releases/tag/0.29.2) also has control/update locks and subspaces; its release notes describe protections against network vessel snapshots racing topology changes. Read their [timewarp](https://github.com/LunaMultiplayer/LunaMultiplayer/wiki/Timewarp) and [lock](https://github.com/LunaMultiplayer/LunaMultiplayer/wiki/Lock-system) contracts before implementing an adapter.
+
+Future worker jobs and recordings need session, authority, vessel and subspace identities alongside universal time and topology generation. Lock loss, subspace movement, docking/undocking and vessel-ID replacement invalidate pending results. Local histories in different subspaces cannot be merged into one authoritative order just by sorting their relative timestamps.
+
+Initial shared-session policy is observational capture only, with no claim of a multiplayer-aware event history. Active replay requires an isolated single-player environment. Do not acquire locks, publish vessel state, rewind shared history or command multiplayer warp as part of a local replay. A future adapter must cooperate with the provider's authority and topology protocol rather than bypass it.
+
+Active control conservatively refuses loaded client assemblies named `DarkMultiPlayer` or `LmpClient`, matching the pinned [DMP client project](https://github.com/godarklight/DarkMultiPlayer/blob/v0.3.8.5/Client/Client.csproj) and [LMP client project](https://github.com/LunaMultiplayer/LunaMultiplayer/blob/0.29.2/LmpClient/LmpClient.csproj). Presence does not imply connection; absence does not establish safety for renamed forks or other providers. This guard is not a multiplayer integration or compatibility test.
