@@ -1,6 +1,6 @@
 # Validation receipt
 
-## Input timeline and mission trials (in progress)
+## Input timeline and mission trials
 
 The combined analytic/report/timeline suite passes 123 portable assertions; optional mission policies pass 36 assertions. These do not establish whole-game determinism. The following mission attempts are retained, including failures before launch:
 
@@ -8,11 +8,19 @@ The combined analytic/report/timeline suite passes 123 portable assertions; opti
 | --- | --- | --- |
 | 1 | Headless | Preflight abort before sandbox creation: the version check confused MechJeb assembly version 2.15.0.0 with package/file version 2.15.3.0. The paired version check was corrected. |
 | 2 | Rendered, 1280×720 | Stock Kerbal X reached the launchpad. Strict replay refused an existing control callback before launch. Installed MechJeb adds its core to command pods through ModuleManager; the mission had assumed it would attach that owner later. Failure telemetry, a unique sandbox save and a confirmed screenshot were preserved. |
-| 3 | Rendered, 1280×720 | Liftoff and gravity turn observed with the installed MechJeb owner. Neutral replay explicitly not run. The first completed input segment parsed and round-tripped through the portable core: 19.98 simulated seconds, 22 tracks, 2,701 keys and five events. This is exporter/schema evidence, not playback or world-state reproduction. Final outcome pending. |
+| 3 | Rendered, 1280×720 | Intact, settled Minmus touchdown passed the declared acceptance check after launch, Kerbin orbit, transfer, correction, capture and descent. Neutral replay explicitly not run. All 77 exported input segments parsed and round-tripped. This is recording/schema and mission execution evidence, not deterministic playback or world-state reproduction. |
 
-Attempt 2's screenshot was visually inspected and shows the craft and Continuum panel behind KSP's first-run announcement. The user dismissed that announcement; it was not the recorded replay-guard failure. No neutral replay completion or Minmus landing is claimed by these attempts.
+Attempt 2's screenshot was visually inspected and shows the craft and Continuum panel behind KSP's first-run announcement. The user dismissed that announcement; it was not the recorded replay-guard failure. Neutral replay completion remains unqualified.
 
 Attempt 3 uses package `0.1.0-inputs.8821BD7CC20D`. Its installed DLLs matched the built bytes before launch: plugin SHA-256 `e2f31b983de38f0d3220b6ac0b35d8abad51d38ad1b50dd8b35a7be623ff2b9a`, mission SHA-256 `8643466ed8ec6d89eea3f91ccd6400578e10b3d80aab4ada90f7438914a381b7`. A subsequently reviewed ownership-cleanup correction passes portable tests and compilation but is not the binary running this attempt.
+
+### Attempt 3 outcome and limitations
+
+At UT 269974.00335770514 the mission reported Minmus LANDED, zero throttle, all 17 lander parts surviving and surface speed 0.00687 m/s after qualifying observations spanning 30 simulated seconds. Elapsed runner time was 1,572 seconds (about 26 minutes), much of it a normal-rate descent. The mission produced 1,559 telemetry rows, 77 input segments (15,599,319 bytes), five checkpoint saves and five confirmed milestone/launchpad PNGs. Every completed input segment passed the portable parser and serialization round-trip check. The final save exists and the landed PNG was visually inspected. The rendered game remained open after releasing mission controls.
+
+The observer reported repeated flipping during slow powered descent and little apparent fuel use. Sampled throttle was often 0.05 and surface speed fluctuated at low values. The dark final image appears to show a tipped lander. Current telemetry does not contain attitude, angular velocity or thrust direction, and current acceptance does not require an upright pose or quantify rotational settling. Record this as an intact, settled touchdown under the stated checks, not a clean upright landing. The cause of the flipping is unresolved; add orientation and angular-rate observations before attributing it to an autopilot, controls, or physics defect.
+
+Two screenshots requested in the same frame at Minmus capture did not both materialize: descent-start was confirmed and minmus-orbit was explicitly marked unconfirmed. Checkpoint saves for both milestones exist. There is no video or audio recording and no reconstructed replay of the descent.
 
 ## Earlier isolated benchmark qualification
 
