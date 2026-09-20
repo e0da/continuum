@@ -80,6 +80,7 @@ static class Program
             Reject(() => ReportJson.Encode(new object()));
         }
         finally { CultureInfo.CurrentCulture = culture; }
+        count += TimelineTests.Run();
         Console.WriteLine("PASS: " + count + " analytic/report assertions (no Unity or KSP runtime exercised).");
     }
 }

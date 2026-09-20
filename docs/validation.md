@@ -1,5 +1,21 @@
 # Validation receipt
 
+## Input timeline and mission trials (in progress)
+
+The combined analytic/report/timeline suite passes 123 portable assertions; optional mission policies pass 36 assertions. These do not establish whole-game determinism. The following mission attempts are retained, including failures before launch:
+
+| Attempt | Mode | Observed result |
+| --- | --- | --- |
+| 1 | Headless | Preflight abort before sandbox creation: the version check confused MechJeb assembly version 2.15.0.0 with package/file version 2.15.3.0. The paired version check was corrected. |
+| 2 | Rendered, 1280×720 | Stock Kerbal X reached the launchpad. Strict replay refused an existing control callback before launch. Installed MechJeb adds its core to command pods through ModuleManager; the mission had assumed it would attach that owner later. Failure telemetry, a unique sandbox save and a confirmed screenshot were preserved. |
+| 3 | Rendered, 1280×720 | Liftoff and gravity turn observed with the installed MechJeb owner. Neutral replay explicitly not run. The first completed input segment parsed and round-tripped through the portable core: 19.98 simulated seconds, 22 tracks, 2,701 keys and five events. This is exporter/schema evidence, not playback or world-state reproduction. Final outcome pending. |
+
+Attempt 2's screenshot was visually inspected and shows the craft and Continuum panel behind KSP's first-run announcement. The user dismissed that announcement; it was not the recorded replay-guard failure. No neutral replay completion or Minmus landing is claimed by these attempts.
+
+Attempt 3 uses package `0.1.0-inputs.8821BD7CC20D`. Its installed DLLs matched the built bytes before launch: plugin SHA-256 `e2f31b983de38f0d3220b6ac0b35d8abad51d38ad1b50dd8b35a7be623ff2b9a`, mission SHA-256 `8643466ed8ec6d89eea3f91ccd6400578e10b3d80aab4ada90f7438914a381b7`. A subsequently reviewed ownership-cleanup correction passes portable tests and compilation but is not the binary running this attempt.
+
+## Earlier isolated benchmark qualification
+
 The isolated benchmark ran in an independent stock-derived KSP 1.12.5 Mac test copy on 2026-09-20, on Apple M4 Max (arm64 host, x86_64 game executable), using Unity 2019.4.18f1 and `-batchmode -nographics --continuum-bench`. Existing playable and mod-pack verification copies were preserved. The test copy was prepared only after KSP, CKAN and Steam were closed; installation used CKAN.
 
 ## Source and build checks
@@ -31,6 +47,6 @@ Local raw report SHA-256 values: `81b418b42762cd72aa2e50f7b6e193a46b76ec394b4fbe
 
 Visible panels, live-vessel inventory, profiler marker availability and recorder cleanup through scene transitions, real docking/decoupling, stock-vessel performance, and mod compatibility are not verified. There is no demonstrated in-engine failing-before/passing-after result for the rotation fix. The numerical regression is source-reviewed and the corrected state has run in Unity.
 
-C# tests do not exercise Unity. Synthetic bodies do not establish KSP vessel integration. Optional timing markers cannot fully attribute frame time and may be unavailable in release players. CI checks only portable analytic/report behavior because proprietary game references are not distributed.
+C# tests do not exercise Unity. Synthetic bodies do not establish KSP vessel integration. Optional timing markers cannot fully attribute frame time and may be unavailable in release players. CI checks portable analytic/report/timeline behavior and mission policies because proprietary game references are not distributed.
 
 Source integration of this research harness does not qualify a gameplay release. Continue the remaining experiment protocol before vessel takeover or claims of gameplay improvement.
