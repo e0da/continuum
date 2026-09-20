@@ -33,6 +33,9 @@ MAX_SCREENSHOTS = 64
 MAX_MEDIA_BYTES = 16 * 1024 * 1024
 SAFE_ID = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$")
 SAFE_PNG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}\.png$")
+SAFE_MISSION_SESSION = re.compile(r"^mission-[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
+SAFE_INPUT_SESSION = re.compile(r"^inputs-[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
+SAFE_CRAFT = re.compile(r"^Ships/(?:VAB|SPH)/[A-Za-z0-9][A-Za-z0-9 ._()+&'-]{0,190}\.craft$")
 SEGMENT_CSV = re.compile(r"^segment-[0-9]{5}\.csv$")
 EXPECTED_TELEMETRY_HEADER = [
     "wall_s", "ut_s", "phase", "body", "situation", "altitude_m", "apoapsis_m",
@@ -168,6 +171,13 @@ def validate_input_association(inputs, mission_values):
         raise ChronicleError("input directory does not match mission receipt inputDirectory")
 
 
+def validate_source_session_names(mission, inputs):
+    if not SAFE_MISSION_SESSION.fullmatch(mission.name):
+        raise ChronicleError("invalid mission session directory name")
+    if inputs is not None and not SAFE_INPUT_SESSION.fullmatch(inputs.name):
+        raise ChronicleError("invalid input session directory name")
+
+
 def receipt_display(value, fallback):
     if value is None or value == "":
         return fallback
@@ -182,6 +192,15 @@ def receipt_display(value, fallback):
 def receipt_status(mission_values):
     value = mission_values.get("status")
     return value if value in ("running", "passed", "failed") else "unknown"
+
+
+def craft_display(mission_values):
+    value = mission_values.get("craft")
+    if value is None:
+        return "Not recorded"
+    if not SAFE_CRAFT.fullmatch(value):
+        return "Unrecognized craft receipt value; consult the hashed mission receipt locally."
+    return value
 
 
 def parse_telemetry(path):
@@ -416,7 +435,7 @@ def render_page(metadata, mission_values, rows, events, captures, input_summary,
     config = [
         ("Mission ID", metadata["mission_id"]), ("Attempt", metadata["attempt_id"]),
         ("Vehicle design", metadata["vehicle_design_id"]),
-        ("Craft", receipt_display(mission_values.get("craft"), "Not recorded")),
+        ("Craft", craft_display(mission_values)),
         ("MechJeb assembly", receipt_display(mission_values.get("mechjebAssemblyVersion"), "Not recorded")),
         ("MechJeb file", receipt_display(mission_values.get("mechjebFileVersion"), "Not recorded")),
     ]
@@ -516,6 +535,7 @@ def generate(mission, inputs, output, metadata_path):
         raise ChronicleError("output may not be inside a source directory")
     if not output.parent.is_dir():
         raise ChronicleError("output parent directory does not exist")
+    validate_source_session_names(mission, inputs)
 
     metadata = parse_metadata(metadata_path)
     mission_values = parse_key_values(mission / "mission.txt")

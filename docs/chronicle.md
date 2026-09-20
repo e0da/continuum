@@ -61,7 +61,7 @@ The index shows the most recent rendering of each attempt and keeps links to ear
 
 ## Evidence and limits
 
-The generator accepts UTF-8 source text up to 16 MiB per file, metadata up to 32 KiB, 100,000 telemetry rows, 256 mission events, 512 input files totaling 256 MiB, 2,000 samples per input segment, and 64 screenshots up to 16 MiB each. It rejects nonfinite or backward telemetry time, malformed schemas, unsafe screenshot names, symbolic-link sources, output inside a source directory, and an existing destination.
+The generator accepts UTF-8 source text up to 16 MiB per file, metadata up to 32 KiB, 100,000 telemetry rows, 256 mission events, 512 input files totaling 256 MiB, 2,000 samples per input segment, and 64 screenshots up to 16 MiB each. It rejects nonfinite or backward telemetry time, malformed schemas, unsafe screenshot names, unsafe `mission-*` or `inputs-*` session names, symbolic-link sources, output inside a source directory, and an existing destination. It displays craft receipts only when they match the bounded relative `Ships/VAB/*.craft` or `Ships/SPH/*.craft` form.
 
 Phase spans use left-sample attribution: each telemetry interval belongs to the phase on its first row. The final phase has no displayed span unless a later row closes it. This makes boundaries approximate at the telemetry cadence. Screenshot dimensions come from each confirmed PNG header; the historical Pathfinder captures are 1280 × 720 observations, not a promise for later missions.
 
