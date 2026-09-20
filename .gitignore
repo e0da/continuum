@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+artifacts/
+*.user
+*.dll
+*.pdb
+*.zip
+.DS_Store
+*.local.*
