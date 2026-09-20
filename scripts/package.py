@@ -21,7 +21,8 @@ with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
     if args.mission:
         archive.write(mission, 'GameData/KspContinuum/Plugins/KspContinuum.Mission.dll')
     archive.write(root / 'README.md', 'GameData/KspContinuum/README.md')
-    for name in ('experiment.md', 'replacement.md', 'validation.md', 'compatibility.md', 'input-timeline.md', 'integration-map.md', 'minmus-mission.md'):
+    for name in ('experiment.md', 'replacement.md', 'validation.md', 'compatibility.md', 'input-timeline.md', 'integration-map.md', 'minmus-mission.md',
+                 'space-program.md', 'naming.md', 'wiki-templates.md', 'chronicle.md'):
         archive.write(root / 'docs' / name, 'GameData/KspContinuum/docs/' + name)
     archive.write(root / 'examples/neutral-inputs.csv', 'GameData/KspContinuum/examples/neutral-inputs.csv')
 print(output.name)

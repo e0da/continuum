@@ -41,3 +41,9 @@ For automated engine qualification in an owned test copy, launch its KSP executa
 The next consequential experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, and GPU compute remain candidates rather than assumed winners.
 
 See [integration map](docs/integration-map.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
+
+## Continuum Space Program
+
+The [space program](docs/space-program.md) develops the toolkit through actual missions and preserves the results as a local multimedia chronicle. Its [naming conventions](docs/naming.md) distinguish missions, attempts, vehicle revisions and survey sites. Maintained [wiki templates](docs/wiki-templates.md) keep vehicle, site and experiment records consistent without rewriting old evidence.
+
+Generate a [mission chronicle](docs/chronicle.md) from an attempt's telemetry and confirmed screenshots. Reports and game saves remain local; this public repository contains their tooling and templates.

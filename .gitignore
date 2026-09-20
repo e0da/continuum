@@ -6,4 +6,5 @@ artifacts/
 *.pdb
 *.zip
 .DS_Store
+__pycache__/
 *.local.*

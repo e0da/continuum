@@ -13,7 +13,7 @@ namespace KspContinuum.Mission
     [KSPAddon(KSPAddon.Startup.MainMenu, true)]
     public sealed class MissionAddon : MonoBehaviour
     {
-        enum Phase { Dormant, SpaceCenter, Flight, Replay, Attach, Armed, Ascent, Transfer, Correction, Coast, Capture, Landing, Settling, Done }
+        enum Phase { Dormant, SpaceCenter, Flight, Replay, Attach, Armed, Ascent, Transfer, Correction, Coast, Capture, WaitForSite, Landing, Settling, Done }
         Phase phase;
         readonly LandingAcceptance acceptance = new LandingAcceptance();
         readonly MissionCleanup cleanup = new MissionCleanup();
@@ -25,15 +25,22 @@ namespace KspContinuum.Mission
         CelestialBody minmus;
         StreamWriter telemetry;
         string directory, saveName;
-        double phaseWall, startedWall, phaseUT, lastTelemetry = -1, nextAction;
+        double phaseWall, startedWall, phaseUT, lastTelemetry = -1, lastSurveyTelemetry = -1, nextAction;
         uint commandId;
-        bool active;
+        bool active, survey, siteWaitStarted;
+        string attemptId;
+        SurveyFootprint footprint;
+        double daylightWindowEnd;
+        double[] arrivalForecast;
+        StreamWriter surveyTelemetry;
         const double OrbitAltitude = 100000;
         const double EncounterPeriapsis = 25000;
 
         public void Start()
         {
-            if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-minmus") < 0) return;
+            string[] arguments = Environment.GetCommandLineArgs();
+            survey = Array.IndexOf(arguments, "--continuum-survey") >= 0;
+            if (!survey && Array.IndexOf(arguments, "--continuum-minmus") < 0) return;
             active = true;
             DontDestroyOnLoad(gameObject);
             startedWall = Time.realtimeSinceStartup;
@@ -48,13 +55,32 @@ namespace KspContinuum.Mission
                 if (!MissionCompatibility.IsSupported(assemblyVersion, fileVersion))
                     throw new InvalidOperationException("Mission requires MechJeb 2.15.3.0.");
                 string id = DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N");
-                saveName = "Continuum-Minmus-" + id;
+                string outputRoot = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData");
+                if (survey)
+                {
+                    int index = Array.IndexOf(arguments, "--continuum-attempt-id");
+                    attemptId = index >= 0 && index + 1 < arguments.Length ? arguments[index + 1] : null;
+                    if (!SurveyPolicy.ValidAttemptId(attemptId)) throw new InvalidOperationException("Survey requires --continuum-attempt-id CSP-0002-A001 (3 to 6 ordinal digits).");
+                    if ((Directory.Exists(outputRoot) && Directory.GetDirectories(outputRoot, "mission-*").Any(path =>
+                        File.Exists(Path.Combine(path, "mission.txt")) && File.ReadAllLines(Path.Combine(path, "mission.txt")).Contains("attemptId=" + attemptId))) ||
+                        Directory.GetDirectories(Path.Combine(KSPUtil.ApplicationRootPath, "saves"), attemptId + "-*").Length != 0)
+                        throw new InvalidOperationException("Attempt identity already exists: " + attemptId);
+                    if (Application.isBatchMode) throw new InvalidOperationException("Survey requires a rendered run for 1080p evidence.");
+                    Screen.SetResolution(1920, 1080, false);
+                }
+                saveName = (survey ? attemptId + "-" : "Continuum-Minmus-") + id;
                 directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData", "mission-" + id);
                 Directory.CreateDirectory(directory);
                 telemetry = new StreamWriter(Path.Combine(directory, "mission.csv"));
                 telemetry.AutoFlush = true;
                 telemetry.WriteLine("wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,surface_speed_mps,throttle,stage,parts,packed,autopilot");
                 File.WriteAllText(Path.Combine(directory, "mission.txt"), "status=running\nsave=" + saveName + "\ncraft=Ships/VAB/Kerbal X.craft\nmechjebAssemblyVersion=" + assemblyVersion + "\nmechjebFileVersion=" + fileVersion + "\n");
+                if (survey)
+                {
+                    File.AppendAllText(Path.Combine(directory, "mission.txt"), SurveyReceipt());
+                    surveyTelemetry = new StreamWriter(Path.Combine(directory, "survey.csv")) { AutoFlush = true };
+                    surveyTelemetry.WriteLine("wall_s,ut_s,phase,phase_wall_s,phase_ut_s,latitude_deg,longitude_deg,distance_m,sun_elevation_deg,eclipsed,radial_tilt_deg,terrain_tilt_deg,angular_speed_rad_s,attitude_error_deg,landing_step,warp_rate,packed,node_autowarp,min_throttle_enabled,min_throttle_percent,throttle,root_rotation_x,root_rotation_y,root_rotation_z,root_rotation_w,reference_part,terrain_normal_world_x,terrain_normal_world_y,terrain_normal_world_z,terrain_hit_distance_m,screen_width,screen_height");
+                }
                 if (Directory.Exists(Path.Combine(KSPUtil.ApplicationRootPath, "saves", saveName)))
                     throw new InvalidOperationException("Refusing existing save directory.");
                 var parameters = GameParameters.GetDefaultParameters(Game.Modes.SANDBOX, GameParameters.Preset.Normal);
@@ -85,6 +111,7 @@ namespace KspContinuum.Mission
                     if (vessel.currentStage < 2) throw new InvalidOperationException("Staging crossed the protected lander boundary.");
                 }
                 if (Time.realtimeSinceStartup - lastTelemetry >= 1) { WriteTelemetry(); lastTelemetry = Time.realtimeSinceStartup; }
+                if (survey && Time.realtimeSinceStartup - lastSurveyTelemetry >= 0.1) { WriteSurveyTelemetry(); lastSurveyTelemetry = Time.realtimeSinceStartup; }
                 if (phase >= Phase.Replay && phase < Phase.Done)
                 {
                     if (!HighLogic.LoadedSceneIsFlight) throw new InvalidOperationException("Unexpected scene departure.");
@@ -108,6 +135,7 @@ namespace KspContinuum.Mission
                                 (part.inverseStage == 2 && part.FindModuleImplementing<ModuleEngines>() != null)) landerParts.Add(part.flightID);
                         if (landerParts.Count < 2) throw new InvalidOperationException("Stock lander engine/gear fingerprint missing.");
                         if (Time.realtimeSinceStartup - phaseWall < 15 || vessel.HoldPhysics || !vessel.IsControllable) return;
+                        if (survey && (Screen.width < 1920 || Screen.height < 1080)) throw new InvalidOperationException("Rendered survey resolution is below 1920x1080.");
                         timeline = new FlightTimeline();
                         cleanup.Track("timeline", () => timeline.Dispose());
                         core = vessel.GetMasterMechJeb();
@@ -199,19 +227,18 @@ namespace KspContinuum.Mission
                         TrackController("node", core.Node);
                         core.Node.ExecuteAllNodes(this); Move(Phase.Capture); break;
                     case Phase.Capture:
-                        if (!NodesFinished()) return;
+                        if (!NodesFinished() || vessel.HoldPhysics || vessel.ctrlState.mainThrottle != 0) return;
                         if (vessel.mainBody != minmus || vessel.orbit.eccentricity >= 1 || vessel.orbit.PeA < 5000)
                             throw new InvalidOperationException("Capture burn did not leave safe Minmus orbit.");
                         SaveMilestone("minmus-orbit");
                         core.Warp.MinimumWarp(true);
-                        core.Landing.TouchdownSpeed.Val = 0.5;
-                        core.Landing.DeployGears = true;
-                        core.Landing.DeployChutes = false;
-                        core.Landing.RCSAdjustment = false;
-                        TrackController("landing", core.Landing);
-                        core.Landing.LandUntargeted(this); Move(Phase.Landing);
-                        SaveMilestone("descent-start"); break;
+                        if (survey) { PrepareSite(); Move(Phase.WaitForSite); }
+                        else StartLanding();
+                        break;
+                    case Phase.WaitForSite:
+                        WaitForSite(); break;
                     case Phase.Landing:
+                        if (survey && Planetarium.GetUniversalTime() > daylightWindowEnd) throw new TimeoutException("Landing exceeded the sampled daylight interval.");
                         if (vessel.situation == Vessel.Situations.LANDED)
                         {
                             Release("landing"); core.Warp.MinimumWarp(true);
@@ -225,11 +252,105 @@ namespace KspContinuum.Mission
                         bool valid = LandingAcceptance.Qualifies(vessel.mainBody.bodyName, vessel.situation == Vessel.Situations.LANDED,
                             survivors && vessel.rootPart.flightID == commandId, vessel.ctrlState.mainThrottle, vessel.srfSpeed,
                             TimeWarp.CurrentRate == 1 && !vessel.packed && !FlightDriver.Pause);
-                        if (acceptance.Observe(Planetarium.GetUniversalTime(), valid)) Finish(true, "Landed on Minmus; command, engine and gear survive; settled 30 simulation seconds.");
+                        if (survey) valid = valid && SurveyObservation.Read(vessel).Qualifies && Planetarium.GetUniversalTime() <= daylightWindowEnd && Screen.width >= 1920 && Screen.height >= 1080;
+                        if (acceptance.Observe(Planetarium.GetUniversalTime(), valid)) Finish(true, survey ?
+                            "Survey target reached in daylight, upright and stable for 30 simulation seconds; command, engine and gear survive." :
+                            "Landed on Minmus; command, engine and gear survive; settled 30 simulation seconds.");
                         break;
                 }
             }
             catch (Exception ex) { Fail(ex); }
+        }
+
+        void StartLanding()
+        {
+            if (vessel.packed || vessel.HoldPhysics || TimeWarp.CurrentRate != 1 || vessel.ctrlState.mainThrottle != 0 ||
+                core.Node.Enabled || core.Ascent.Enabled || core.Landing.Enabled || vessel.patchedConicSolver.maneuverNodes.Count != 0)
+                throw new InvalidOperationException("Landing acquisition requires normal unpacked physics, idle controllers and no maneuver nodes.");
+            core.Landing.TouchdownSpeed.Val = 0.5;
+            core.Landing.DeployGears = true;
+            core.Landing.DeployChutes = false;
+            core.Landing.RCSAdjustment = false;
+            if (survey) core.Target.SetPositionTarget(minmus, SurveyPolicy.Latitude, SurveyPolicy.Longitude);
+            TrackController("landing", core.Landing);
+            if (survey) core.Landing.LandAtPositionTarget(this); else core.Landing.LandUntargeted(this);
+            Move(Phase.Landing);
+            SaveMilestone("descent-start");
+        }
+
+        void PrepareSite()
+        {
+            if (minmus.pqsController == null) throw new InvalidOperationException("Minmus PQS terrain unavailable.");
+            if (Math.Abs(minmus.pqsController.radius - minmus.Radius) > 0.01)
+                throw new InvalidOperationException("Survey requires matching native PQS and body reference radii.");
+            footprint = SurveyGeometry.Sample(minmus.Radius, (lat, lon) => minmus.TerrainAltitude(lat, lon, true));
+            using (var samples = new StreamWriter(Path.Combine(directory, "terrain.csv")))
+            {
+                samples.WriteLine("latitude_deg,longitude_deg,height_m");
+                foreach (SurveySample sample in footprint.Samples) samples.WriteLine(F(sample.Latitude) + "," + F(sample.Longitude) + "," + F(sample.Height));
+            }
+            File.AppendAllText(Path.Combine(directory, "mission.txt"), "sampledMaximumSlopeDeg=" + F(footprint.MaximumSlope) + "\nsampledMinimumHeightM=" + F(footprint.MinimumHeight) + "\nsampledMaximumHeightM=" + F(footprint.MaximumHeight) + "\n");
+            if (!SurveyPolicy.Finite(footprint.MaximumSlope) || footprint.MaximumSlope > SurveyPolicy.MaximumSlope)
+                throw new InvalidOperationException("Site rejected: sampled footprint exceeds slope limit.");
+            double duration = 2 * vessel.orbit.period + 1800;
+            var model = new SurveySunModel(minmus);
+            nextAction = SurveyPolicy.FindWindow(Planetarium.GetUniversalTime(), Math.Abs(minmus.rotationPeriod), duration, ut =>
+            {
+                double elevation; bool eclipsed;
+                model.Evaluate(ut, SurveyPolicy.Latitude, SurveyPolicy.Longitude, footprint.CenterHeight, out elevation, out eclipsed);
+                return elevation >= SurveyPolicy.MinimumSun && !eclipsed;
+            });
+            if (!SurveyPolicy.Finite(nextAction)) throw new InvalidOperationException("Site rejected: no sampled daylight window within one Minmus rotation.");
+            daylightWindowEnd = nextAction + duration;
+            // Freeze scalar predictions before warp; a cached world basis cannot be mixed with later floating frames.
+            arrivalForecast = new double[(int)SurveyPolicy.SunSampleSeconds + 1];
+            for (int second = 0; second < arrivalForecast.Length; second++)
+            {
+                bool predictedEclipse;
+                model.Evaluate(nextAction + second, SurveyPolicy.Latitude, SurveyPolicy.Longitude, footprint.CenterHeight, out arrivalForecast[second], out predictedEclipse);
+            }
+            File.AppendAllText(Path.Combine(directory, "mission.txt"), "sampledDaylightStartUT=" + F(nextAction) + "\nsampledDaylightEndUT=" + F(daylightWindowEnd) + "\n");
+        }
+
+        void WaitForSite()
+        {
+            if (vessel.mainBody != minmus || vessel.orbit.eccentricity >= 1 || vessel.orbit.PeA < 5000 ||
+                !SurveyPolicy.Finite(vessel.orbit.PeA) || !SurveyPolicy.Finite(vessel.orbit.period) ||
+                core.Node.Enabled || core.Ascent.Enabled || core.Landing.Enabled || vessel.ctrlState.mainThrottle != 0 ||
+                vessel.patchedConicSolver.maneuverNodes.Count != 0)
+                throw new InvalidOperationException("Daylight wait lost safe orbit or idle controller boundary.");
+            double now = Planetarium.GetUniversalTime();
+            if (now < nextAction)
+            {
+                if (!siteWaitStarted) { core.Warp.WarpToUT(nextAction); siteWaitStarted = true; }
+                return;
+            }
+            core.Warp.MinimumWarp(true);
+            if (vessel.packed || vessel.HoldPhysics || TimeWarp.CurrentRate != 1) return;
+            double sun; bool eclipsed;
+            new SurveySunModel(minmus).Evaluate(now, SurveyPolicy.Latitude, SurveyPolicy.Longitude, footprint.CenterHeight, out sun, out eclipsed);
+            double nativeSun = SurveyGeometry.Elevation(SurveySunModel.Vector(minmus.GetSurfaceNVector(SurveyPolicy.Latitude, SurveyPolicy.Longitude)),
+                SurveySunModel.Vector(Planetarium.fetch.Sun.position - minmus.GetWorldSurfacePosition(SurveyPolicy.Latitude, SurveyPolicy.Longitude, footprint.CenterHeight)));
+            double predictedArrivalSun = SurveyPolicy.ArrivalForecast(arrivalForecast, now - nextAction);
+            double residual = Math.Abs(nativeSun - predictedArrivalSun);
+            double currentModelResidual = Math.Abs(nativeSun - sun);
+            File.AppendAllText(Path.Combine(directory, "mission.txt"), "arrivalPredictedSunElevationDeg=" + F(predictedArrivalSun) +
+                "\narrivalObservedSunElevationDeg=" + F(nativeSun) + "\narrivalCurrentModelResidualDeg=" + F(currentModelResidual) + "\narrivalSunResidualDeg=" + F(residual) + "\narrivalDelayS=" + F(now - nextAction) + "\n");
+            if (!SurveyPolicy.Finite(residual) || residual > 0.1 || !SurveyPolicy.Finite(currentModelResidual) || currentModelResidual > 0.01) throw new InvalidOperationException("Frozen daylight forecast disagrees with current native geometry by more than 0.1 degree.");
+            if (now > nextAction + SurveyPolicy.SunSampleSeconds || sun < SurveyPolicy.MinimumSun || eclipsed)
+                throw new InvalidOperationException("Daylight window missed or failed current-epoch recheck.");
+            StartLanding();
+        }
+
+        string SurveyReceipt()
+        {
+            return "program=Continuum Space Program\nmissionId=CSP-0002\nmissionName=Minmus Survey 1\nattemptId=" + attemptId +
+                "\nvehicleDesignId=CV-0001-R01\nvehicleName=Kerbal X / stock\nsiteId=SITE-MIN-001\ntargetLatitudeDeg=" + F(SurveyPolicy.Latitude) +
+                "\ntargetLongitudeDeg=" + F(SurveyPolicy.Longitude) + "\nmaximumDistanceM=100\nminimumSunElevationDeg=20\nmaximumSampledSlopeDeg=2\nmaximumTerrainTiltDeg=10\nmaximumAngularSpeedRadS=0.01\nsettledDurationS=30\nfootprint=23x23 samples at 10m spacing; sampled radial PQS triangles, not collider clearance or terrain horizon\n" +
+                "daylight=60s sampled central-ray spherical eclipse model; interval allowance 2 captured orbit periods + 1800s, not guaranteed touchdown\n" +
+                "frames=current-epoch body normal basis plus signed rotationPeriod; recursive getTruePositionAtUT ephemerides\n" +
+                "arrivalWitness=pre-warp 1s scalar forecast samples interpolated at actual arrival; maximum residual 0.1deg; current model/native residual 0.01deg\n" +
+                "coastAcceleration=MechJeb targeted landing guarded autowarp; no manual descent warp\nrequestedResolution=1920x1080\n";
         }
 
         void Launch()
@@ -327,6 +448,25 @@ namespace KspContinuum.Mission
                 current == null ? "" : current.packed.ToString(), "\"" + status.Replace("\"", "\"\"") + "\""));
         }
 
+        void WriteSurveyTelemetry()
+        {
+            Vessel current = vessel;
+            if (surveyTelemetry == null || current == null || core == null) return;
+            SurveyObservation observation = current.mainBody == minmus ? SurveyObservation.Read(current) : null;
+            Quaternion rotation = current.rootPart.transform.rotation;
+            Vector3 terrain = current.vesselTransform.TransformDirection(current.terrainNormal);
+            double now = Planetarium.GetUniversalTime();
+            surveyTelemetry.WriteLine(string.Join(",", F(Time.realtimeSinceStartup - startedWall), F(now), phase.ToString(),
+                F(Time.realtimeSinceStartup - phaseWall), F(now - phaseUT), F(current.latitude), F(current.longitude),
+                observation == null ? "" : F(observation.Distance), observation == null ? "" : F(observation.SunElevation),
+                observation == null ? "" : observation.Eclipsed.ToString(), observation == null ? "" : F(observation.RadialTilt),
+                observation == null ? "" : F(observation.TerrainTilt), F(current.angularVelocity.magnitude), F(core.Attitude.attitudeAngleFromTarget()),
+                core.Landing.CurrentStep == null ? "" : core.Landing.CurrentStep.GetType().Name, F(TimeWarp.CurrentRate), current.packed.ToString(),
+                core.Node.Autowarp.ToString(), core.Thrust.LimiterMinThrottle.ToString(), F(core.Thrust.MinThrottle), F(current.ctrlState.mainThrottle),
+                F(rotation.x), F(rotation.y), F(rotation.z), F(rotation.w), current.GetReferenceTransformPart() == null ? "" : current.GetReferenceTransformPart().flightID.ToString(CultureInfo.InvariantCulture),
+                F(terrain.x), F(terrain.y), F(terrain.z), F(current.heightFromTerrain), Screen.width.ToString(CultureInfo.InvariantCulture), Screen.height.ToString(CultureInfo.InvariantCulture)));
+        }
+
         static string F(double value) { return value.ToString("R", CultureInfo.InvariantCulture); }
 
         void SaveMilestone(string milestone)
@@ -366,14 +506,17 @@ namespace KspContinuum.Mission
                 {
                     string path = Path.Combine(directory, item.Key);
                     bool complete = false;
+                    int width = 0, height = 0;
                     if (File.Exists(path))
                     {
                         using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                         {
-                            if (file.Length >= 20)
+                            if (file.Length >= 33)
                             {
                                 byte[] signature = { 137, 80, 78, 71, 13, 10, 26, 10 };
                                 complete = signature.All(value => file.ReadByte() == value);
+                                file.Seek(16, SeekOrigin.Begin);
+                                width = ReadPngInt(file); height = ReadPngInt(file);
                                 file.Seek(-12, SeekOrigin.End);
                                 byte[] ending = { 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130 };
                                 complete = complete && ending.All(value => file.ReadByte() == value);
@@ -383,7 +526,7 @@ namespace KspContinuum.Mission
                     if (complete || Time.realtimeSinceStartup - item.Value > 30)
                     {
                         File.AppendAllText(Path.Combine(directory, "screenshots.csv"), F(Planetarium.GetUniversalTime()) + "," +
-                            (complete ? "png-written" : "unconfirmed") + "," + item.Key + "\n");
+                            (complete ? (survey && (width < 1920 || height < 1080) ? "png-below-required-resolution" : "png-written") : "unconfirmed") + "," + item.Key + "," + width + "," + height + "\n");
                         screenshots.Remove(item.Key);
                     }
                 }
@@ -394,6 +537,11 @@ namespace KspContinuum.Mission
                     screenshots.Remove(item.Key);
                 }
             }
+        }
+
+        static int ReadPngInt(Stream stream)
+        {
+            return (stream.ReadByte() << 24) | (stream.ReadByte() << 16) | (stream.ReadByte() << 8) | stream.ReadByte();
         }
 
         void Fail(Exception error)
@@ -425,6 +573,9 @@ namespace KspContinuum.Mission
 
         void CloseTelemetry(List<Exception> errors)
         {
+            StreamWriter surveyWriter = surveyTelemetry;
+            surveyTelemetry = null;
+            if (surveyWriter != null) try { surveyWriter.Dispose(); } catch (Exception error) { errors.Add(error); }
             StreamWriter writer = telemetry;
             telemetry = null;
             if (writer == null) return;
@@ -443,6 +594,7 @@ namespace KspContinuum.Mission
                 if (HighLogic.CurrentGame != null && HighLogic.SaveFolder == saveName)
                     SaveMilestone(passed ? "minmus-landed" : "mission-failed");
                 WriteTelemetry();
+                WriteSurveyTelemetry();
             }
             catch (Exception error)
             {
