@@ -12,6 +12,7 @@ An experimental KSP 1 toolkit for measuring simulation cost, recording flight in
 - An optional 300-frame timing capture records available Unity markers. Unsupported markers are reported as unavailable, never as evidence of zero cost.
 - A flight input recorder exports step-keyed recordings plus event/trajectory observations; the format supports manual linear and cubic-Bezier edits. An opt-in analog player enforces a conservative control-ownership boundary; see [input timeline](docs/input-timeline.md).
 - An optional MechJeb mission addon creates a separate sandbox and attempts a recorded stock Kerbal X flight to Minmus. See [mission operation and qualification](docs/minmus-mission.md). One rendered attempt achieved an intact, settled Minmus touchdown; it finished approximately sideways, and repeated rotation during descent remains unexplained.
+- An opt-in survey mode targets a sampled flat Minmus site in daylight, records descent attitude and warp, and requires an upright landing. The first survey reached the field but failed the upright check; see the [flight evidence](docs/validation.md).
 - A pure C# model verifies aligned-box aggregation and impulse-free separation without proprietary assemblies.
 
 Experiments run only through explicit panel actions or command-line flags. Analog replay changes flight controls. The optional mission runner creates its own save and uses MechJeb on its mission vessel; normal launches do not start a mission. Local reports/recordings go to `GameData/KspContinuum/PluginData/` and can include vessel identifiers, mod identities and mission save paths. They are runtime artifacts and are not committed to this public repo.
@@ -41,3 +42,9 @@ For automated engine qualification in an owned test copy, launch its KSP executa
 The next consequential experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, and GPU compute remain candidates rather than assumed winners.
 
 See [integration map](docs/integration-map.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
+
+## Continuum Space Program
+
+The [space program](docs/space-program.md) develops the toolkit through actual missions and preserves the results as a local multimedia chronicle. Its [naming conventions](docs/naming.md) distinguish missions, attempts, vehicle revisions and survey sites. Maintained [wiki templates](docs/wiki-templates.md) keep vehicle, site and experiment records consistent without rewriting old evidence.
+
+Generate a [mission chronicle and connected website](docs/chronicle.md) from attempt telemetry, confirmed screenshots and a maintained program catalog. The site connects missions, attempts, vehicles, landing sites and experiments while preserving the original reports. Reports and game saves remain local; this public repository contains their tooling and templates.

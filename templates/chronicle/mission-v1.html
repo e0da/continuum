@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="generator" content="KSP Continuum chronicle $template_version">
+  <title>$page_title</title>
+  <style>
+    :root { color-scheme: dark; --ink: #f2f0e6; --muted: #aeb7bd; --panel: #172329; --line: #31454d; --accent: #f0c35a; --ok: #72d6a0; --warn: #ef9b63; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0c1418; color: var(--ink); font: 16px/1.55 system-ui, sans-serif; }
+    main { width: min(1100px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 80px; }
+    header { border-bottom: 1px solid var(--line); padding-bottom: 28px; }
+    .kicker, .label { color: var(--accent); font-size: .76rem; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 8px 0 4px; font-size: clamp(2.2rem, 7vw, 5.4rem); line-height: .98; }
+    h2 { margin-top: 0; font-size: 1.55rem; }
+    .alias { color: var(--muted); font: 1rem ui-monospace, monospace; }
+    nav { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 20px 0; }
+    a { color: #a9ddff; }
+    section { margin: 18px 0; padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+    .editorial { border-left: 3px solid var(--accent); padding-left: 16px; }
+    .measured { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+    .card { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #101b20; }
+    .value { margin-top: 4px; font-size: 1.35rem; font-weight: 700; overflow-wrap: anywhere; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; }
+    .media { margin: 0; }
+    .media-grid { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+    .media img { display: block; width: 100%; height: auto; border-radius: 7px; background: #091014; }
+    .media figcaption { padding-top: 10px; overflow-wrap: anywhere; }
+    .ok { color: var(--ok); } .warn { color: var(--warn); }
+    code { overflow-wrap: anywhere; }
+    footer { margin-top: 28px; color: var(--muted); font-size: .88rem; }
+    @media (max-width: 650px) { main { width: min(100% - 20px, 1100px); padding-top: 24px; } section { padding: 17px; overflow-x: auto; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="kicker">Continuum Space Program · mission chronicle</div>
+    <h1>$mission_name</h1>
+    <div class="alias">$attempt_alias · template $template_version</div>
+  </header>
+  <nav aria-label="Report sections">
+    <a href="#objective">Objective</a><a href="#configuration">Configuration</a><a href="#timeline">Timeline</a>
+    <a href="#media">Media</a><a href="#measurements">Measurements</a><a href="#outcome">Outcome</a>
+    <a href="#anomalies">Anomalies</a><a href="#next-experiment">Next experiment</a>
+  </nav>
+  <section id="objective"><h2>Objective</h2><div class="editorial"><div class="label">Editorial context</div><p>$objective</p></div></section>
+  <section id="configuration"><h2>Configuration</h2><div class="editorial"><div class="label">Editorial context</div><p>$configuration_context</p></div><div class="measured"><p>Recorded configuration</p></div><div class="grid">$configuration_rows</div></section>
+  <section id="timeline"><h2>Timeline</h2><p class="measured">Observed phase boundaries and spans from mission telemetry. Telemetry cadence limits wall-span precision.</p><table><thead><tr><th>Phase</th><th>Start UT</th><th>Wall span</th><th>UT span</th></tr></thead><tbody>$timeline_rows</tbody></table></section>
+  <section id="media"><h2>Media</h2><p class="measured">Captures with completed PNG receipts and valid source files are copied. Resolution-qualified and below-requirement evidence are labeled separately. Open an image to view its source resolution.</p><div class="grid media-grid">$media_cards</div></section>
+  <section id="measurements"><h2>Measurements</h2><p class="measured">Derived from the bounded source artifacts; these are observations, not deterministic replay claims.</p><div class="grid">$measurement_cards</div></section>
+  <section id="outcome"><h2>Outcome</h2><div class="measured">$outcome</div></section>
+  <section id="anomalies"><h2>Anomalies</h2><div class="editorial"><div class="label">Editorial observations</div>$anomalies</div></section>
+  <section id="next-experiment"><h2>Next experiment</h2><div class="editorial"><div class="label">Editorial plan</div><p>$next_experiment</p></div></section>
+  <section id="provenance"><h2>Provenance</h2><p class="measured">$provenance_summary</p><p><a href="manifest.json">Open the local hash manifest</a></p></section>
+  <footer>Generated $generated_utc. Relocatable local output; immutable source artifacts were read but not copied except for completed screenshots.</footer>
+</main>
+</body>
+</html>

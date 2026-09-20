@@ -4,5 +4,7 @@
     <Compile Include="../LandingAcceptance.cs" Link="LandingAcceptance.cs" />
     <Compile Include="../MissionCompatibility.cs" Link="MissionCompatibility.cs" />
     <Compile Include="../MissionCleanup.cs" Link="MissionCleanup.cs" />
+    <Compile Include="../SurveyPolicy.cs" Link="SurveyPolicy.cs" />
+    <Compile Include="../SurveyGeometry.cs" Link="SurveyGeometry.cs" />
   </ItemGroup>
 </Project>

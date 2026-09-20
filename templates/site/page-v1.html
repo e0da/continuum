@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="generator" content="KSP Continuum connected space program v1">
+  <title>$page_title</title>
+  <style>
+    :root { color-scheme: dark; --ink:#f4f0e5; --muted:#aeb9bf; --bg:#091216; --panel:#142329; --line:#30464f; --accent:#f0c35a; --link:#a9ddff; --ok:#72d6a0; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 system-ui,sans-serif; }
+    a { color:var(--link); }
+    .site-nav { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px 20px; padding:14px max(20px,calc((100% - 1100px)/2)); border-bottom:1px solid var(--line); background:rgba(9,18,22,.96); backdrop-filter:blur(10px); }
+    .site-nav a:first-child { color:var(--accent); font-weight:800; }
+    main { width:min(1100px,calc(100% - 32px)); margin:auto; padding:48px 0 80px; }
+    header { margin-bottom:32px; }
+    .kicker,.identity,.label { color:var(--accent); font:.78rem ui-monospace,monospace; letter-spacing:.1em; text-transform:uppercase; }
+    h1 { margin:8px 0 10px; font-size:clamp(2.4rem,7vw,5rem); line-height:1; }
+    h2 { margin-top:0; }
+    .lede { max-width:760px; color:var(--muted); font-size:1.12rem; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr)); gap:16px; }
+    .card,section { padding:22px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .card h2,.card h3 { margin:5px 0 8px; }
+    .status { display:inline-block; padding:3px 9px; border:1px solid var(--line); border-radius:999px; color:var(--ok); font-size:.8rem; }
+    section { margin:18px 0; }
+    dl { display:grid; grid-template-columns:minmax(120px,1fr) 2fr; gap:8px 18px; }
+    dt { color:var(--muted); } dd { margin:0; }
+    .gallery { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr)); gap:16px; }
+    figure { margin:0; } figure img { display:block; width:100%; height:auto; border-radius:9px; } figcaption { padding-top:8px; color:var(--muted); }
+    .empty { color:var(--muted); }
+    footer { margin-top:42px; color:var(--muted); font-size:.88rem; }
+    @media(max-width:620px){ main{width:min(100% - 20px,1100px);padding-top:28px} dl{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+$nav
+<main>
+  <header><div class="kicker">$kicker</div><h1>$heading</h1><p class="lede">$summary</p></header>
+  $content
+  <footer>$program_name · connected site template v1 · generated from maintained catalog records and immutable report manifests.</footer>
+</main>
+</body>
+</html>

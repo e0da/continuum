@@ -24,4 +24,31 @@ The intended staging limit preserves the Poodle-powered upper landing assembly. 
 
 The flight is stock physics controlled by MechJeb and orchestrated/instrumented by Continuum. It does not prove a replacement physics engine, complete mission replay, unattended mission planning for arbitrary craft, or multimedia reconstruction. See the validation receipt for actual trial outcomes.
 
-The first completed flight passed the declared intact-touchdown check, but the observer saw repeated flipping and the final image and saved rotation show it finished approximately sideways. Upright attitude and angular settling are not current acceptance requirements. See [validation](validation.md) before interpreting a passed mission as a clean landing.
+The first completed flight passed the declared intact-touchdown check, but the observer saw repeated flipping and the final image and saved rotation show it finished approximately sideways. Upright attitude and angular settling are not Pathfinder acceptance requirements. See [validation](validation.md) before interpreting a passed mission as a clean landing.
+
+## Minmus Survey 1
+
+The experimental `--continuum-survey` mode starts another fresh Kerbal X sandbox flight. It preserves the legacy Pathfinder mode and requires an explicit unused attempt ID, for example `--continuum-attempt-id CSP-0002-A001`. An existing attempt receipt or matching save folder rejects ID reuse. See the [program naming conventions](naming.md).
+
+From an exclusively owned, closed macOS test instance, after installing the candidate through CKAN:
+
+```sh
+./KSP.app/Contents/MacOS/KSP \
+  -screen-fullscreen 0 -screen-width 1920 -screen-height 1080 \
+  --continuum-survey --continuum-attempt-id CSP-0002-A001 \
+  -logFile /tmp/ksp-continuum-survey-A001.log
+```
+
+Choose the next unused ID for a later attempt. Survey mode requires rendering, requests 1920×1080, and verifies the observed screen dimensions. It targets Greater Flats Candidate 1 (`SITE-MIN-001`), latitude -4.794139°, longitude -11.575088°. It samples a 220 m square at 10 m spacing, rejects a sampled triangle slope above 2°, then searches one Minmus rotation for a daylight interval covering two captured-orbit periods plus 1,800 seconds. That allowance is not a promised landing duration. The search samples every 60 seconds and models central-ray spherical eclipses; it does not establish a terrain horizon, leg clearance, or continuous eclipse-free illumination.
+
+Waiting occurs in a checked safe orbit with idle controllers and no maneuver nodes. The runner explicitly returns to normal physics before starting targeted landing. Before handoff, it compares frozen pre-warp sunlight predictions against current native geometry; a mismatch fails the attempt. MechJeb retains authority over descent warp and braking. Its untargeted path went directly to final descent, which had no warp call; its targeted path includes warp-aware stages. Any time saving must be measured in the actual flight.
+
+In addition to the Pathfinder intact-touchdown conditions, survey acceptance requires distance to target ≤100 m, Sun elevation ≥20°, no modeled eclipse, the craft axis within 10° of a valid terrain-hit normal, angular speed <0.01 rad/s, and a screen at least 1920×1080 throughout the qualifying observed hold. This is a stricter new contract; it does not change the original flight's result.
+
+`mission.csv` retains 1 Hz wall-time observations. `survey.csv` adds 10 Hz Update observations of position, sunlight, attitude, angular motion, controller step, warp, throttle settings and screen dimensions. These are not physics-tick-complete recordings. `terrain.csv` preserves the sampled footprint. Screenshot completion receipts add actual PNG width/height and distinguish below-required-resolution captures; screenshot confirmation remains asynchronous and separate from the flight predicate.
+
+### Throttle-floor experiment
+
+Add `--continuum-survey-disable-throttle-floor` to test the same craft and target with MechJeb's minimum-throttle limiter disabled during owned landing control. The option requires survey mode; it does not change the engine's thrust limiter. The runner records the previous/applied setting, releases landing ownership before restoring it, and preserves a setting changed externally. This is an explicit experiment rather than a global MechJeb configuration patch.
+
+MechJeb's minimum throttle is a fraction: `0.05` means 5%. Survey A001's original telemetry named this column `min_throttle_percent` incorrectly; interpret its raw values as fractions. Later output corrects the header to `min_throttle_fraction`. Preserve the original A001 file and its hash.

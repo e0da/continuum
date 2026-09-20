@@ -7,6 +7,36 @@ static class Program
     static void Check(bool value) { assertions++; if (!value) throw new Exception("Mission acceptance assertion " + assertions); }
     static void Main()
     {
+        Check(Math.Abs(SurveyPolicy.Distance(60000, 0, 179.5, 0, -179.5) - Math.PI * 60000 / 180) < 1e-6);
+        Check(Math.Abs(SurveyPolicy.FutureLongitude(-10, 100, 400) - 80) < 1e-9);
+        Check(SurveyPolicy.FindWindow(0, 300, 120, t => t >= 120 && t <= 300) == 120);
+        Check(double.IsNaN(SurveyPolicy.FindWindow(0, 300, 120, t => t < 90)));
+        Check(SurveyPolicy.ArrivalForecast(new[] { 20.0, 22.0, 24.0 }, 0.5) == 21);
+        Check(SurveyPolicy.ArrivalForecast(new[] { 20.0, 22.0, 24.0 }, 2) == 24);
+        Check(double.IsNaN(SurveyPolicy.ArrivalForecast(new[] { 20.0, 22.0 }, 2)));
+        Check(double.IsNaN(SurveyPolicy.ArrivalForecast(new[] { 20.0, 22.0 }, double.NaN)));
+        Check(SurveyPolicy.Accept(100, 20, 10, 0.009, false));
+        Check(!SurveyPolicy.Accept(100.01, 20, 10, 0.009, false));
+        Check(!SurveyPolicy.Accept(100, 19.99, 10, 0.009, false));
+        Check(!SurveyPolicy.Accept(100, 20, 10.01, 0.009, false));
+        Check(!SurveyPolicy.Accept(100, 20, 10, 0.01, false));
+        Check(!SurveyPolicy.Accept(100, 20, 10, 0.009, true));
+        Check(!SurveyPolicy.Accept(double.NaN, 20, 10, 0, false));
+        Check(SurveyPolicy.ValidAttemptId("CSP-0002-A001"));
+        Check(!SurveyPolicy.ValidAttemptId("../CSP-0002-A001"));
+        Check(!SurveyPolicy.ValidAttemptId("CSP-0001-A001"));
+        Check(!SurveyPolicy.ValidAttemptId(null));
+        var flat = SurveyGeometry.Sample(60000, (lat, lon) => 0);
+        Check(flat.Samples.Count == 529 && flat.MaximumSlope < 0.02);
+        var slope = SurveyGeometry.Sample(60000, (lat, lon) => Math.Tan(3 * SurveyPolicy.Radians) * 60000 * (lat - SurveyPolicy.Latitude) * SurveyPolicy.Radians);
+        Check(slope.MaximumSlope > 2.9 && slope.MaximumSlope < 3.1);
+        bool nonfiniteRejected = false;
+        try { SurveyGeometry.Sample(60000, (lat, lon) => double.NaN); } catch (ArgumentException) { nonfiniteRejected = true; }
+        Check(nonfiniteRejected);
+        Check(Math.Abs(SurveyGeometry.Elevation(new SurveyVector(0, 1, 0), new SurveyVector(1, 0, 0))) < 1e-9);
+        Check(SurveyGeometry.Occludes(new SurveyVector(0, 5, 0), 1, new SurveyVector(0, 10, 0)));
+        Check(!SurveyGeometry.Occludes(new SurveyVector(0, -5, 0), 1, new SurveyVector(0, 10, 0)));
+        Check(!SurveyGeometry.Occludes(new SurveyVector(2, 5, 0), 1, new SurveyVector(0, 10, 0)));
         var cleanup = new MissionCleanup();
         int controllerReleased = 0, recorderReleased = 0, requestReleased = 0;
         Check(cleanup.Release("foreign-controller") == null);
