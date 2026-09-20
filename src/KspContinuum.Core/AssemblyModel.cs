@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace KspRigid
+namespace KspContinuum
 {
     public struct Vec
     {

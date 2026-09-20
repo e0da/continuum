@@ -3,7 +3,7 @@ using System.Collections;
 using System.IO;
 using UnityEngine;
 
-namespace KspRigid
+namespace KspContinuum
 {
     public abstract class Panel : MonoBehaviour
     {
@@ -15,11 +15,11 @@ namespace KspRigid
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
         void Write(string kind, object report)
         {
-            string directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspRigid", "PluginData");
+            string directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData");
             Directory.CreateDirectory(directory);
             string filename = kind + "-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".json";
             File.WriteAllText(Path.Combine(directory, filename), JsonUtility.ToJson(report, true));
-            status = "Report saved in GameData/KspRigid/PluginData.";
+            status = "Report saved in GameData/KspContinuum/PluginData.";
         }
         IEnumerator Guard(IEnumerator work)
         {
@@ -44,7 +44,7 @@ namespace KspRigid
         }
         public void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(20, 80, 370, 195), "KSP Rigid — research prototype", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(20, 80, 370, 195), "KSP Continuum — research prototype", GUI.skin.window);
             GUILayout.Label(Supported ? status : "Unsupported KSP version; requires 1.12.5.");
             bool old = GUI.enabled; GUI.enabled = old && Supported && !running;
             if (IsMenu)

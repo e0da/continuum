@@ -6,7 +6,7 @@ The initial prototype is compiled and analytically checked. **Live validation is
 
 - The analytic runner passed 29 assertions covering unequal masses, center of mass, box inertia, the parallel-axis contribution, translation invariance, split linear/angular momentum, and invalid inputs.
 - The addon compiled in Release against owned KSP 1.12.5 Mac reference assemblies, targeting .NET Framework 4.7.2, with zero warnings and zero errors.
-- Build output contains only `KspRigid.dll`; no game or Unity assemblies are copied.
+- Build output contains only `KspContinuum.dll`; no game or Unity assemblies are copied.
 - The packaging script creates a local ZIP containing the project DLL and documentation only. It does not install or publish a release.
 
 The analytic runner first failed because the model was absent, then passed after implementation. A missing Unity JSON module reference was found by the real-reference build and corrected.

@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.Profiling;
 
-namespace KspRigid
+namespace KspContinuum
 {
     [Serializable] public sealed class MarkerReport
     {
@@ -13,7 +13,7 @@ namespace KspRigid
     }
     [Serializable] public sealed class ProbeReport
     {
-        public string schema = "ksp-rigid-markers/v1";
+        public string schema = "ksp-continuum-markers/v1";
         public string status = "marker-timings-not-whole-frame-attribution";
         public string utc = DateTime.UtcNow.ToString("o");
         public MarkerReport[] markers;

@@ -1,5 +1,5 @@
 using System;
-using KspRigid;
+using KspContinuum;
 
 static class Program
 {

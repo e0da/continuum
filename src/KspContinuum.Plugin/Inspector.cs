@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace KspRigid
+namespace KspContinuum
 {
     [Serializable] public sealed class VesselReport
     {
-        public string schema = "ksp-rigid-vessel/v1";
+        public string schema = "ksp-continuum-vessel/v1";
         public string status = "read-only-candidate-inventory-not-merge-approval";
         public string utc = DateTime.UtcNow.ToString("o");
         public int parts, rigidbodies, joints, colliders, candidateParts;

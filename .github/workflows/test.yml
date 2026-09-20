@@ -10,4 +10,4 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - run: dotnet run --project tests/KspRigid.Tests -c Release
+      - run: dotnet run --project tests/KspContinuum.Tests -c Release

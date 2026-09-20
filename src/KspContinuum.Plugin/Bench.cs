@@ -5,11 +5,11 @@ using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace KspRigid
+namespace KspContinuum
 {
     [Serializable] public sealed class BenchReport
     {
-        public string schema = "ksp-rigid-bench/v1";
+        public string schema = "ksp-continuum-bench/v1";
         public string status = "synthetic-engine-benchmark-only";
         public string utc = DateTime.UtcNow.ToString("o");
         public string unity = Application.unityVersion;
@@ -42,7 +42,7 @@ namespace KspRigid
         }
         void NewScene()
         {
-            active = SceneManager.CreateScene("KspRigid-" + Guid.NewGuid().ToString("N"), new CreateSceneParameters(LocalPhysicsMode.Physics3D));
+            active = SceneManager.CreateScene("KspContinuum-" + Guid.NewGuid().ToString("N"), new CreateSceneParameters(LocalPhysicsMode.Physics3D));
             if (active.GetPhysicsScene() == Physics.defaultPhysicsScene) throw new InvalidOperationException("Physics scene was not isolated");
         }
         GameObject NewObject(string name, Vector3 position)

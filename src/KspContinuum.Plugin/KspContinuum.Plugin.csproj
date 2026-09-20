@@ -2,14 +2,14 @@
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <LangVersion>7.3</LangVersion>
-    <AssemblyName>KspRigid</AssemblyName>
+    <AssemblyName>KspContinuum</AssemblyName>
     <Version>0.1.0</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <DebugType>none</DebugType>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../KspRigid.Core/AssemblyModel.cs" Link="AssemblyModel.cs" />
+    <Compile Include="../KspContinuum.Core/AssemblyModel.cs" Link="AssemblyModel.cs" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <Reference Include="Assembly-CSharp"><HintPath>$(KSP_MANAGED)/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(KSP_MANAGED)/UnityEngine.dll</HintPath><Private>false</Private></Reference>

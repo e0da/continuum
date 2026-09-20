@@ -1,4 +1,4 @@
-# KSP Rigid
+# KSP Continuum
 
 An experimental KSP 1 plugin for measuring the cost of jointed structures and testing alternatives. The goal is faster, believable structural physics, including flex and breakage. Rigid grouping is one experiment, not a commitment to making every ship rigid.
 
@@ -12,21 +12,21 @@ An experimental KSP 1 plugin for measuring the cost of jointed structures and te
 - An optional 300-frame timing capture records available Unity markers. Unsupported markers are reported as unavailable, never as evidence of zero cost.
 - A pure C# model verifies aligned-box aggregation and impulse-free separation without proprietary assemblies.
 
-The plugin never automatically runs a benchmark, demotes a part, modifies a vessel, or edits a save. Reports are generated only when a panel button is pressed and go to `GameData/KspRigid/PluginData/`. Reports omit player names, vessel names, save names, and local paths. Part type and module names can identify installed mods.
+The plugin never automatically runs a benchmark, demotes a part, modifies a vessel, or edits a save. Reports are generated only when a panel button is pressed and go to `GameData/KspContinuum/PluginData/`. Reports omit player names, vessel names, save names, and local paths. Part type and module names can identify installed mods.
 
 ## Build
 
 Use a .NET 8 or newer SDK. Run the analytic tests without installing KSP:
 
 ```sh
-dotnet run --project tests/KspRigid.Tests -c Release
+dotnet run --project tests/KspContinuum.Tests -c Release
 ```
 
 To compile the addon, point `KSP_MANAGED` at the `Managed` directory in your own KSP 1.12.5 installation. On macOS this is inside `KSP.app/Contents/Resources/Data`; on Windows/Linux it is typically under `KSP_x64_Data`.
 
 ```sh
 export KSP_MANAGED="/path/to/your/KSP/Managed"
-dotnet build src/KspRigid.Plugin -c Release
+dotnet build src/KspContinuum.Plugin -c Release
 python3 scripts/package.py
 ```
 
