@@ -27,7 +27,7 @@ namespace KspContinuum.Mission
         string directory, saveName;
         double phaseWall, startedWall, phaseUT, lastTelemetry = -1, lastSurveyTelemetry = -1, nextAction;
         uint commandId;
-        bool active, survey, siteWaitStarted;
+        bool active, survey, siteWaitStarted, disableThrottleFloor;
         string attemptId;
         SurveyFootprint footprint;
         double daylightWindowEnd;
@@ -40,13 +40,15 @@ namespace KspContinuum.Mission
         {
             string[] arguments = Environment.GetCommandLineArgs();
             survey = Array.IndexOf(arguments, "--continuum-survey") >= 0;
-            if (!survey && Array.IndexOf(arguments, "--continuum-minmus") < 0) return;
+            disableThrottleFloor = Array.IndexOf(arguments, "--continuum-survey-disable-throttle-floor") >= 0;
+            if (!survey && !disableThrottleFloor && Array.IndexOf(arguments, "--continuum-minmus") < 0) return;
             active = true;
             DontDestroyOnLoad(gameObject);
             startedWall = Time.realtimeSinceStartup;
             try
             {
                 FlightTimeline.RequireOfflineControl();
+                if (disableThrottleFloor && !survey) throw new InvalidOperationException("The throttle-floor experiment requires --continuum-survey.");
                 if (Versioning.version_major != 1 || Versioning.version_minor != 12 || Versioning.Revision != 5)
                     throw new InvalidOperationException("Mission requires KSP 1.12.5.");
                 string assemblyVersion = typeof(MechJebCore).Assembly.GetName().Version.ToString();
@@ -79,7 +81,7 @@ namespace KspContinuum.Mission
                 {
                     File.AppendAllText(Path.Combine(directory, "mission.txt"), SurveyReceipt());
                     surveyTelemetry = new StreamWriter(Path.Combine(directory, "survey.csv")) { AutoFlush = true };
-                    surveyTelemetry.WriteLine("wall_s,ut_s,phase,phase_wall_s,phase_ut_s,latitude_deg,longitude_deg,distance_m,sun_elevation_deg,eclipsed,radial_tilt_deg,terrain_tilt_deg,angular_speed_rad_s,attitude_error_deg,landing_step,warp_rate,packed,node_autowarp,min_throttle_enabled,min_throttle_percent,throttle,root_rotation_x,root_rotation_y,root_rotation_z,root_rotation_w,reference_part,terrain_normal_world_x,terrain_normal_world_y,terrain_normal_world_z,terrain_hit_distance_m,screen_width,screen_height");
+                    surveyTelemetry.WriteLine("wall_s,ut_s,phase,phase_wall_s,phase_ut_s,latitude_deg,longitude_deg,distance_m,sun_elevation_deg,eclipsed,radial_tilt_deg,terrain_tilt_deg,angular_speed_rad_s,attitude_error_deg,landing_step,warp_rate,packed,node_autowarp,min_throttle_enabled,min_throttle_fraction,throttle,root_rotation_x,root_rotation_y,root_rotation_z,root_rotation_w,reference_part,terrain_normal_world_x,terrain_normal_world_y,terrain_normal_world_z,terrain_hit_distance_m,screen_width,screen_height");
                 }
                 if (Directory.Exists(Path.Combine(KSPUtil.ApplicationRootPath, "saves", saveName)))
                     throw new InvalidOperationException("Refusing existing save directory.");
@@ -267,6 +269,19 @@ namespace KspContinuum.Mission
             if (vessel.packed || vessel.HoldPhysics || TimeWarp.CurrentRate != 1 || vessel.ctrlState.mainThrottle != 0 ||
                 core.Node.Enabled || core.Ascent.Enabled || core.Landing.Enabled || vessel.patchedConicSolver.maneuverNodes.Count != 0)
                 throw new InvalidOperationException("Landing acquisition requires normal unpacked physics, idle controllers and no maneuver nodes.");
+            if (disableThrottleFloor)
+            {
+                var thrust = core.Thrust;
+                bool previousFloor = thrust.LimiterMinThrottle;
+                // Register first so reverse cleanup releases the landing controller before restoring its setting.
+                cleanup.Track("landing-throttle-floor", () =>
+                {
+                    if (!thrust.LimiterMinThrottle) thrust.LimiterMinThrottle = previousFloor;
+                });
+                thrust.LimiterMinThrottle = false;
+                File.AppendAllText(Path.Combine(directory, "mission.txt"), "landingThrottleFloorPrevious=" + previousFloor +
+                    "\nlandingThrottleFloorApplied=False\nlandingThrottleFloorFraction=" + F(thrust.MinThrottle) + "\n");
+            }
             core.Landing.TouchdownSpeed.Val = 0.5;
             core.Landing.DeployGears = true;
             core.Landing.DeployChutes = false;
@@ -350,7 +365,9 @@ namespace KspContinuum.Mission
                 "daylight=60s sampled central-ray spherical eclipse model; interval allowance 2 captured orbit periods + 1800s, not guaranteed touchdown\n" +
                 "frames=current-epoch body normal basis plus signed rotationPeriod; recursive getTruePositionAtUT ephemerides\n" +
                 "arrivalWitness=pre-warp 1s scalar forecast samples interpolated at actual arrival; maximum residual 0.1deg; current model/native residual 0.01deg\n" +
-                "coastAcceleration=MechJeb targeted landing guarded autowarp; no manual descent warp\nrequestedResolution=1920x1080\n";
+                "coastAcceleration=MechJeb targeted landing guarded autowarp; no manual descent warp\nrequestedResolution=1920x1080\n" +
+                "experimentVariant=" + (disableThrottleFloor ? "landing-minimum-throttle-floor-disabled" : "donor-default-throttle-floor") +
+                "\nlandingThrottleFloorPolicy=" + (disableThrottleFloor ? "disable at owned landing acquisition; restore prior value after releasing landing, unless changed externally" : "preserve donor setting") + "\n";
         }
 
         void Launch()

@@ -46,3 +46,9 @@ Waiting occurs in a checked safe orbit with idle controllers and no maneuver nod
 In addition to the Pathfinder intact-touchdown conditions, survey acceptance requires distance to target ≤100 m, Sun elevation ≥20°, no modeled eclipse, the craft axis within 10° of a valid terrain-hit normal, angular speed <0.01 rad/s, and a screen at least 1920×1080 throughout the qualifying observed hold. This is a stricter new contract; it does not change the original flight's result.
 
 `mission.csv` retains 1 Hz wall-time observations. `survey.csv` adds 10 Hz Update observations of position, sunlight, attitude, angular motion, controller step, warp, throttle settings and screen dimensions. These are not physics-tick-complete recordings. `terrain.csv` preserves the sampled footprint. Screenshot completion receipts add actual PNG width/height and distinguish below-required-resolution captures; screenshot confirmation remains asynchronous and separate from the flight predicate.
+
+### Throttle-floor experiment
+
+Add `--continuum-survey-disable-throttle-floor` to test the same craft and target with MechJeb's minimum-throttle limiter disabled during owned landing control. The option requires survey mode; it does not change the engine's thrust limiter. The runner records the previous/applied setting, releases landing ownership before restoring it, and preserves a setting changed externally. This is an explicit experiment rather than a global MechJeb configuration patch.
+
+MechJeb's minimum throttle is a fraction: `0.05` means 5%. Survey A001's original telemetry named this column `min_throttle_percent` incorrectly; interpret its raw values as fractions. Later output corrects the header to `min_throttle_fraction`. Preserve the original A001 file and its hash.
