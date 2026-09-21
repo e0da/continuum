@@ -3,14 +3,14 @@ namespace KspContinuum
 {
     [Serializable] public sealed class LoopTimingReport
     {
-        public string schema = "ksp-continuum-playerloop/v1", status, integrityStatus, cleanupStatus, detail;
-        public string measurementScope = "Elapsed wall time between inserted siblings around each unchanged native subtree; includes waits and callback overhead, not exclusive CPU or all physics work.";
+        public string schema = "ksp-continuum-playerloop/v2", status, integrityStatus, cleanupStatus, detail;
+        public string measurementScope = "Elapsed wall time around unchanged PlayerLoop subtrees. FixedUpdate parent and child scopes overlap and must not be summed.";
         public long clockFrequency, timerReadFloorTicks;
         public LoopTimingScope[] scopes;
     }
     [Serializable] public sealed class LoopTimingScope
     {
-        public string name, status;
+        public string name, status, timeDomain, overlap;
         public int droppedSamples, sequenceErrors;
         public LoopTimingSample[] samples;
         public ProfileDistribution milliseconds;

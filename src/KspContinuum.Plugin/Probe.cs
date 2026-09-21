@@ -27,6 +27,7 @@ namespace KspContinuum
         int completed;
         Vessel lastVessel;
         string lastVesselId;
+        int structuralRigidbodies = -1, structuralJoints = -1, structuralColliders = -1;
         const int FrameCount = 300;
 
         public IEnumerator Run(Action<ProbeReport> complete)
@@ -130,6 +131,7 @@ namespace KspContinuum
                 contextFrame = Time.frameCount, renderedFrame = Time.renderedFrameCount, boundaryWallSeconds = clock.Elapsed.TotalSeconds,
                 fixedDeltaSeconds = Time.fixedDeltaTime, timeScale = Time.timeScale, scene = HighLogic.LoadedScene.ToString(),
                 screenWidth = Screen.width, screenHeight = Screen.height, parts = -1,
+                rigidbodies = -1, joints = -1, colliders = -1, loadedVessels = -1,
                 managedBytes = GC.GetTotalMemory(false), gcGeneration0 = GC.CollectionCount(0), gcGeneration1 = GC.CollectionCount(1), gcGeneration2 = GC.CollectionCount(2),
                 vesselStatus = "unavailable-no-active-vessel"
             };
@@ -138,12 +140,22 @@ namespace KspContinuum
             if (HighLogic.LoadedSceneIsFlight) frame.paused = FlightDriver.Pause;
             Vessel vessel = HighLogic.LoadedSceneIsFlight && FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
             if (vessel == null) return frame;
-            if (lastVessel != vessel) { lastVessel = vessel; lastVesselId = vessel.id.ToString("D"); }
+            if (lastVessel != vessel) { lastVessel = vessel; lastVesselId = vessel.id.ToString("D"); structuralRigidbodies = -1; }
             frame.vesselId = lastVesselId;
             frame.vesselStatus = vessel.loaded ? "loaded" : "unloaded";
             frame.loaded = vessel.loaded; frame.packed = vessel.packed;
             frame.throttleCommand = vessel.ctrlState == null ? (double?)null : vessel.ctrlState.mainThrottle;
             frame.parts = vessel.parts == null ? -1 : vessel.parts.Count;
+            if (FlightGlobals.VesselsLoaded != null) frame.loadedVessels = FlightGlobals.VesselsLoaded.Count;
+            // Census the whole vessel only at capture boundaries. Per-frame hierarchy walks would
+            // perturb the same part-count scaling this probe is intended to measure.
+            if (structuralRigidbodies < 0 || completed == 0 || completed == FrameCount - 1)
+            {
+                structuralRigidbodies = vessel.GetComponentsInChildren<Rigidbody>(true).Length;
+                structuralJoints = vessel.GetComponentsInChildren<Joint>(true).Length;
+                structuralColliders = vessel.GetComponentsInChildren<Collider>(true).Length;
+            }
+            frame.rigidbodies = structuralRigidbodies; frame.joints = structuralJoints; frame.colliders = structuralColliders;
             frame.body = vessel.mainBody == null ? null : vessel.mainBody.bodyName;
             frame.situation = vessel.situation.ToString();
             return frame;

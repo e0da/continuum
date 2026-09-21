@@ -1,11 +1,13 @@
 using System;
 namespace UnityEngine
 {
-    public static class Time { public static int frameCount; public static float fixedTime, fixedDeltaTime = .02f; }
+    public static class Time { public static int frameCount; public static float fixedTime, fixedDeltaTime = .02f, time, deltaTime = .016f; }
 }
 namespace UnityEngine.PlayerLoop
 {
     public struct FixedUpdate { public struct PhysicsFixedUpdate {} public struct ScriptRunBehaviourFixedUpdate {} }
+    public struct Update { public struct ScriptRunBehaviourUpdate {} }
+    public struct PreLateUpdate { public struct ScriptRunBehaviourLateUpdate {} }
 }
 namespace UnityEngine.LowLevel
 {
