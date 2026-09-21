@@ -119,6 +119,48 @@ class SpaceProgramTests(unittest.TestCase):
             "--catalog", str(self.catalog), "--output", str(output or self.archive / "site"),
         ], cwd=ROOT, text=True, capture_output=True)
 
+    def write_qualification(self, folder="qualification-reports/CSP-0002-A007"):
+        destination = self.archive / folder
+        destination.mkdir(parents=True)
+        (destination / "scope.txt").write_text(
+            "Start-context windows; private raw source /private/runtime.\n", encoding="utf-8")
+        (destination / "status.txt").write_text("timeout\ncompletedWindows=1\n", encoding="utf-8")
+        (destination / "coast-start.txt").write_text(
+            "vessel=00000000-0000-0000-0000-000000000007\n"
+            "situation=ORBITING\nparts=17\nut=268882.4\nthrottleCommand=0\n", encoding="utf-8")
+        marker = {
+            "schema": "ksp-continuum-markers/v2", "status": "cleanup-error",
+            "requestedFrames": 2, "completedFrames": 2, "contextMisalignedFrames": 0,
+            "frames": [
+                {"contextAligned": True, "wallMilliseconds": 4.0, "throttleCommand": 0.0,
+                 "packed": False, "body": "Minmus", "situation": "ORBITING"},
+                {"contextAligned": True, "wallMilliseconds": 6.0, "throttleCommand": 0.0,
+                 "packed": False, "body": "Minmus", "situation": "ORBITING"},
+            ],
+            "wallIntervals": {"count": 2, "minimum": 4.0, "maximum": 6.0, "mean": 5.0,
+                              "p50": 5.0, "p95": 5.9, "p99": 5.98},
+            "markers": [{
+                "name": "Physics.Simulate", "status": "available-no-samples",
+                "recorderAvailableAtStart": True, "availabilityDetail": "valid",
+                "summary": {"availableFrames": 2, "unavailableFrames": 0,
+                            "observedFrames": 0, "zeroBlockFrames": 2, "totalBlocks": 0,
+                            "observedMilliseconds": None},
+            }],
+        }
+        shadow = {
+            "schema": "ksp-continuum-flight-shadow/v1", "status": "complete",
+            "submitted": 1, "accepted": 1, "stale": 0, "wallSeconds": 0.25,
+            "samples": [{"status": "accepted", "bodies": 10, "captureMilliseconds": 0.2,
+                         "submitMilliseconds": 0.03, "collectMilliseconds": 0.04,
+                         "collectAuditMilliseconds": 0.1, "handoffWallMilliseconds": 4.0}],
+            "firstAcceptedBatch": [{"id": index, "mass": 1.0} for index in range(10)],
+            "firstAcceptedTick": 1,
+        }
+        marker_path = destination / "coast-markers.json"
+        marker_path.write_text(json.dumps(marker), encoding="utf-8")
+        (destination / "coast-shadow.json").write_text(json.dumps(shadow), encoding="utf-8")
+        return folder, destination, marker_path
+
     def test_builds_connected_site_and_enhanced_latest_attempt(self):
         old_hash = hashlib.sha256((self.archive / "render-latest" / "index.html").read_bytes()).hexdigest()
         old_player_hash = hashlib.sha256((self.archive / "render-latest" / "telemetry.html").read_bytes()).hexdigest()
@@ -209,6 +251,76 @@ class SpaceProgramTests(unittest.TestCase):
         attempt = self.archive / "site" / "attempts" / "CSP-0002-A001"
         self.assertFalse((attempt / "telemetry.html").exists())
         self.assertNotIn('href="telemetry.html"', (attempt / "index.html").read_text())
+
+    def test_links_validated_qualification_summary_from_experiment_both_ways(self):
+        folder, source_directory, _marker_path = self.write_qualification()
+        self.write_catalog(lambda data: data["experiments"][0].update(
+            qualification_report=folder, name="Final descent \\1 profile"))
+
+        result = self.run_generator()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        site = self.archive / "site"
+        experiment = (site / "experiments" / "EXP-CSP-0002-DESCENT.html").read_text()
+        self.assertIn('href="EXP-CSP-0002-DESCENT-qualification.html"', experiment)
+        qualification = (site / "experiments" / "EXP-CSP-0002-DESCENT-qualification.html").read_text()
+        self.assertIn('class="site-nav"', qualification)
+        self.assertIn('href="EXP-CSP-0002-DESCENT.html"', qualification)
+        self.assertIn("Final descent \\1 profile", qualification)
+        self.assertIn("Physics.Simulate", qualification)
+        self.assertIn("Available No Samples", qualification)
+        self.assertIn("1 / 1 / 0 / 0", qualification)
+        self.assertIn("First accepted body count", qualification)
+        self.assertIn("Profiler status</dt><dd>Cleanup Error", qualification)
+        self.assertNotIn("/private/runtime", qualification)
+
+        source_items = []
+        for path in sorted(source_directory.iterdir()):
+            source_items.append({"path": path.name, "bytes": len(path.read_bytes()),
+                                 "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+        source_manifest_sha = hashlib.sha256(json.dumps(
+            source_items, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+        marker = json.loads((site / "site-manifest.json").read_text())
+        self.assertEqual([{
+            "experimentId": "EXP-CSP-0002-DESCENT",
+            "report": "experiments/EXP-CSP-0002-DESCENT-qualification.html",
+            "source": folder,
+            "sourceManifestSha256": source_manifest_sha,
+            "generatedSha256": hashlib.sha256(
+                (site / "experiments" / "EXP-CSP-0002-DESCENT-qualification.html").read_bytes()
+            ).hexdigest(),
+        }], marker["qualificationReports"])
+
+    def test_rejects_unsafe_or_untrusted_qualification_report(self):
+        folder, _source_directory, marker_path = self.write_qualification()
+        cases = (
+            ("../private", None, "unsafe qualification report path"),
+            (folder, lambda data: data.update(schema="wrong"), "unsupported marker schema"),
+        )
+        original = json.loads(marker_path.read_text())
+        for index, (reference, mutate, message) in enumerate(cases):
+            with self.subTest(message=message):
+                marker_path.write_text(json.dumps(original))
+                if mutate:
+                    data = json.loads(marker_path.read_text())
+                    mutate(data)
+                    marker_path.write_text(json.dumps(data))
+                self.write_catalog(lambda data, value=reference:
+                                   data["experiments"][0].update(qualification_report=value))
+                result = self.run_generator(self.archive / ("site-q-%d" % index))
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(message, result.stderr)
+                self.assertFalse((self.archive / ("site-q-%d" % index)).exists())
+
+        marker_path.write_text(json.dumps(original))
+        linked = self.archive / "qualification-link"
+        linked.symlink_to(self.archive / "qualification-reports", target_is_directory=True)
+        self.write_catalog(lambda data: data["experiments"][0].update(
+            qualification_report="qualification-link/CSP-0002-A007"))
+        result = self.run_generator(self.archive / "site-q-link")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("symbolic", result.stderr)
 
     def test_rebuild_updates_only_marked_derived_site(self):
         self.assertEqual(0, self.run_generator().returncode)

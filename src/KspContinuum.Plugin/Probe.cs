@@ -126,6 +126,7 @@ namespace KspContinuum
             frame.vesselId = lastVesselId;
             frame.vesselStatus = vessel.loaded ? "loaded" : "unloaded";
             frame.loaded = vessel.loaded; frame.packed = vessel.packed;
+            frame.throttleCommand = vessel.ctrlState == null ? (double?)null : vessel.ctrlState.mainThrottle;
             frame.parts = vessel.parts == null ? -1 : vessel.parts.Count;
             frame.body = vessel.mainBody == null ? null : vessel.mainBody.bodyName;
             frame.situation = vessel.situation.ToString();

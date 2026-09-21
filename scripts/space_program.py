@@ -16,6 +16,8 @@ import sys
 import tempfile
 from urllib.parse import quote
 
+import qualification_report
+
 from chronicle import (bounded_bytes, bounded_text, ChronicleError, MANIFEST_SCHEMA, MAX_PLAYBACK_BYTES,
                        parse_telemetry_playback, safe_text, sha256)
 
@@ -37,6 +39,7 @@ MAX_TOTAL_MEDIA_BYTES = 256 * 1024 * 1024
 MAX_ENTITIES = 256
 MAX_MEDIA = 128
 MAX_TOTAL_MEDIA_FILES = 1024
+MAX_QUALIFICATION_BYTES = 4 * 1024 * 1024
 
 
 def esc(value):
@@ -86,6 +89,17 @@ def safe_media_path(value):
     return path
 
 
+def safe_qualification_path(value):
+    if not isinstance(value, str) or not value or len(value) > 240 or "\\" in value:
+        raise ChronicleError("unsafe qualification report path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
+        raise ChronicleError("unsafe qualification report path")
+    if not all(SAFE_FOLDER.fullmatch(part) for part in path.parts):
+        raise ChronicleError("unsafe qualification report path")
+    return path
+
+
 def parse_facts(values, label):
     if not isinstance(values, list) or len(values) > 32:
         raise ChronicleError(label + " facts must be a bounded array")
@@ -128,7 +142,7 @@ def parse_entities(data, key):
         allowed = {"id", "name", "status", "summary", "facts", "media"}
         required = set(allowed)
         if key == "experiments":
-            allowed.add("attempt_ids")
+            allowed.update(("attempt_ids", "qualification_report"))
             required.add("attempt_ids")
         require_keys(item, allowed, required, key + " entry")
         identifier = id_field(item, "id", key + " entry")
@@ -153,6 +167,10 @@ def parse_entities(data, key):
                 if attempt_id in entity["attempt_ids"]:
                     raise ChronicleError(identifier + " has duplicate attempt id")
                 entity["attempt_ids"].append(attempt_id)
+            reference = item.get("qualification_report")
+            entity["qualification_report"] = (safe_qualification_path(reference)
+                                                   if reference is not None else None)
+            entity["qualification"] = None
         result[identifier] = entity
     return result
 
@@ -204,6 +222,34 @@ def data_has_absolute_path(value):
     if isinstance(value, list):
         return any(data_has_absolute_path(item) for item in value)
     return False
+
+
+def load_qualifications(archive, output, catalog):
+    for experiment in catalog["experiments"].values():
+        reference = experiment["qualification_report"]
+        if reference is None:
+            continue
+        directory = archive.joinpath(*reference.parts)
+        current = archive
+        for part in reference.parts:
+            current = current / part
+            if current.is_symlink():
+                raise ChronicleError("qualification report path may not be symbolic")
+        resolved = directory.resolve()
+        if not directory.is_dir() or archive not in resolved.parents:
+            raise ChronicleError("qualification report directory is missing or escapes archive")
+        if resolved == output or output in resolved.parents:
+            raise ChronicleError("qualification report may not be inside generated output")
+        try:
+            summary = qualification_report.collect(directory)
+        except qualification_report.ReportError as error:
+            raise ChronicleError("qualification report is invalid: " + str(error)) from error
+        source_manifest = json.dumps(summary["sources"], sort_keys=True, separators=(",", ":")).encode("utf-8")
+        experiment["qualification"] = {
+            "summary": summary,
+            "reference": reference.as_posix(),
+            "sourceManifestSha256": hashlib.sha256(source_manifest).hexdigest(),
+        }
 
 
 class HtmlStrings(HTMLParser):
@@ -430,6 +476,22 @@ def media_html(entity):
     return '<section><h2>Media</h2><div class="gallery">{}</div></section>'.format(figures)
 
 
+def qualification_page(program, experiment):
+    page = qualification_report.render(experiment["qualification"]["summary"])
+    if not re.search(r"</head\s*>", page, re.IGNORECASE) or not re.search(r"<body(?:\s[^>]*)?>", page, re.IGNORECASE):
+        raise ChronicleError("generated qualification page cannot accept shared navigation")
+    shell_css = ('<style id="space-program-qualification-shell">.site-nav{display:flex;flex-wrap:wrap;gap:8px 18px;'
+                 'padding:14px;border-bottom:1px solid #50636b;background:#091216}.site-nav a{color:#a9ddff}'
+                 '.site-nav a:first-child{color:#f0c35a;font-weight:800}.qualification-back{max-width:1180px;margin:18px auto;'
+                 'padding:0 28px}</style>')
+    page = re.sub(r"</head\s*>", shell_css + "</head>", page, count=1, flags=re.IGNORECASE)
+    backlink = '<p class="qualification-back"><a href="{}.html">Back to experiment: {}</a></p>'.format(
+        quote(experiment["id"], safe=""), esc(experiment["name"]))
+    shell = nav("../", program["name"]) + backlink
+    return re.sub(r"(<body(?:\s[^>]*)?>)", lambda match: match.group(1) + shell,
+                  page, count=1, flags=re.IGNORECASE)
+
+
 def attempt_view(attempt_id, versions, catalog, attempts, descendants):
     latest = versions[0]
     experiments = [item for item in catalog["experiments"].values() if attempt_id in item["attempt_ids"]]
@@ -632,6 +694,10 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
             related_sites = {attempts[item][0]["site_id"] for item in related_ids if attempts[item][0]["site_id"]}
             related_experiments = {item["id"] for attempt_id in related_ids for item in experiment_by_attempt.get(attempt_id, [])}
             content = facts_html(entity) + media_html(entity)
+            if group == "experiments" and entity["qualification"] is not None:
+                content += ('<section><h2>Qualification evidence</h2><p><a href="{}-qualification.html">'
+                            'Open the bounded profiler and shadow report</a>.</p></section>').format(
+                                quote(entity["id"], safe=""))
             content += relation_cards("Attempts", related_attempts, "attempts")
             if group != "missions":
                 content += relation_cards("Missions", [catalog["missions"][item] for item in sorted(related_missions)], "missions")
@@ -643,6 +709,9 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
                 content += relation_cards("Experiments", [catalog["experiments"][item] for item in sorted(related_experiments)], "experiments")
             (staging / group / (entity["id"] + ".html")).write_text(render_page(
                 program, entity["name"], heading, entity["name"], entity["summary"], content, "../"), encoding="utf-8")
+            if group == "experiments" and entity["qualification"] is not None:
+                (staging / group / (entity["id"] + "-qualification.html")).write_text(
+                    qualification_page(program, entity), encoding="utf-8")
 
     reports = []
     for attempt_id, versions in sorted(attempts.items()):
@@ -657,6 +726,16 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
                 "generatedSha256": sha256(staging / "attempts" / attempt_id / "telemetry.html"),
             }
         reports.append(report)
+    qualification_reports = []
+    for experiment in catalog["experiments"].values():
+        if experiment["qualification"] is None:
+            continue
+        relative = "experiments/" + experiment["id"] + "-qualification.html"
+        qualification_reports.append({
+            "experimentId": experiment["id"], "source": experiment["qualification"]["reference"],
+            "sourceManifestSha256": experiment["qualification"]["sourceManifestSha256"],
+            "report": relative, "generatedSha256": sha256(staging / relative),
+        })
     marker = {
         "schema": SITE_SCHEMA,
         "generatedUtc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -665,6 +744,8 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
         "catalogSha256": catalog_sha256,
         "attempts": len(attempts), "reports": reports,
     }
+    if qualification_reports:
+        marker["qualificationReports"] = qualification_reports
     (staging / "site-manifest.json").write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -706,6 +787,7 @@ def generate(archive, catalog_path, output):
     catalog_sha256 = hashlib.sha256(catalog_path.read_bytes()).hexdigest()
     attempts = load_reports(archive, output)
     validate_links(catalog, attempts)
+    load_qualifications(archive, output, catalog)
     staging = Path(tempfile.mkdtemp(prefix=".space-program-site-", dir=str(archive)))
     try:
         build_site(staging, archive, catalog, attempts, catalog_sha256)

@@ -13,11 +13,16 @@ namespace KspContinuum
         Bench bench;
         Probe probe;
         FlightTimeline timeline;
+        ShadowCapture shadow;
+        public bool ShadowRunning { get { return shadow != null && shadow.IsRunning; } }
+        public string ShadowStatus { get { return shadow == null ? "Shadow not started." : shadow.Status; } }
+        public string ShadowReportPath { get; private set; }
         string replayFile = "replay.csv";
         protected abstract bool IsMenu { get; }
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
         public void Start()
         {
+            if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-shadow") >= 0) BeginShadowCapture();
             if (!IsMenu || Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-bench") < 0) return;
             automatedBench = true;
             if (!Supported) { Application.Quit(2); return; }
@@ -25,10 +30,21 @@ namespace KspContinuum
         }
         public void Update()
         {
+            if (shadow != null) shadow.Tick(true);
             if (timeline == null) return;
             if (Input.GetKeyDown(KeyCode.Escape) && timeline.IsReplaying) timeline.Stop();
             timeline.Tick();
         }
+        public void FixedUpdate() { if (shadow != null) shadow.FixedBoundary(); }
+        public void LateUpdate() { if (shadow != null) shadow.Tick(false); }
+        public void BeginShadowCapture()
+        {
+            if (IsMenu || !Supported) throw new InvalidOperationException("Flight shadow requires KSP 1.12.5 flight.");
+            if (ShadowRunning) throw new InvalidOperationException("Shadow capture is already active.");
+            ShadowReportPath = null;
+            shadow = new ShadowCapture(report => ShadowReportPath = Write("shadow", report));
+        }
+        public void StopShadowCapture() { if (shadow != null) shadow.Dispose(); }
         void RunBench()
         {
             bench = new Bench();
@@ -38,13 +54,24 @@ namespace KspContinuum
                 if (automatedBench) Application.Quit(report.Passed() ? 0 : 1);
             })));
         }
-        void Write(string kind, object report)
+        string Write(string kind, object report)
         {
             string directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData");
             Directory.CreateDirectory(directory);
             string filename = kind + "-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".json";
-            File.WriteAllText(Path.Combine(directory, filename), ReportJson.Encode(report));
+            string path = Path.Combine(directory, filename);
+            string temporary = path + ".tmp";
+            try
+            {
+                string encoded = ReportJson.Encode(report);
+                if (kind == "shadow" && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
+                    throw new InvalidOperationException("Shadow receipt exceeds its 4 MiB export bound.");
+                File.WriteAllText(temporary, encoded);
+                File.Move(temporary, path);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
             status = "Report saved in GameData/KspContinuum/PluginData.";
+            return path;
         }
         IEnumerator Guard(IEnumerator work)
         {
@@ -74,7 +101,7 @@ namespace KspContinuum
         }
         public void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(20, 80, 430, IsMenu ? 195 : 410), "KSP Continuum — research prototype", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(20, 80, 430, IsMenu ? 195 : 500), "KSP Continuum — research prototype", GUI.skin.window);
             GUILayout.Label(Supported ? status : "Unsupported KSP version; requires 1.12.5.");
             bool old = GUI.enabled; GUI.enabled = old && Supported && !running;
             if (IsMenu)
@@ -87,6 +114,13 @@ namespace KspContinuum
             }
             else
             {
+                GUILayout.Label(ShadowStatus);
+                if (GUILayout.Button("Start read-only worker shadow capture"))
+                {
+                    try { BeginShadowCapture(); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                if (GUILayout.Button("Stop shadow capture")) StopShadowCapture();
                 if (timeline == null) timeline = new FlightTimeline();
                 GUILayout.Label(timeline.Status);
                 if (GUILayout.Button("Record flight inputs"))
@@ -124,6 +158,7 @@ namespace KspContinuum
         }
         public void OnDestroy()
         {
+            StopShadowCapture();
             StopAllCoroutines();
             if (bench != null) bench.Dispose();
             if (probe != null) probe.Dispose();

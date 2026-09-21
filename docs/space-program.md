@@ -40,6 +40,27 @@ Use the completed pair to bound normal run-to-run variation before testing a gui
 
 The checkpoint runner also gives simulation development a repeatable starting workload. Profile the landing phases and capture force, contact and frame-transition inputs before selecting a replacement compute backend. Landing-control tuning alone is not evidence that the physics solver is faster or more accurate.
 
+## Qualification evidence in the connected site
+
+An experiment may link one terminal native qualification directory with the optional `qualification_report` field. The value is a safe path relative to the local archive root:
+
+```json
+{
+  "id": "EXP-CSP-0002-TRANSPORT",
+  "name": "Flight transport qualification",
+  "status": "observed",
+  "summary": "Profile three flight contexts and exercise read-only worker transport.",
+  "attempt_ids": ["CSP-0002-A007"],
+  "facts": [],
+  "media": [],
+  "qualification_report": "qualification-reports/CSP-0002-A007"
+}
+```
+
+The referenced directory contains `scope.txt`, `status.txt`, and the native `PHASE-start.txt`, `PHASE-markers.json`, and `PHASE-shadow.json` triplets described in [the qualification report contract](qualification-report.md). The site generator calls that report’s bounded parser and renderer directly, then adds shared navigation and a backlink to the experiment. It does not copy or trust an `index.html` from the artifact directory. Existing experiment entries may omit the field.
+
+The generated experiment page links to `EXPERIMENT-ID-qualification.html`. The derived site manifest records the raw directory reference, a digest over its portable source-file manifest, and the generated page digest. Raw receipts stay in ignored local artifacts. The page retains unavailable marker states, partial and cleanup statuses, start-only phase labels, frame-context counts and the zero-force transport boundary; it does not turn the capture into a stock-physics comparison or speedup claim.
+
 ## Simulation development
 
 Use recorded mission states and inputs to test candidate models alongside stock behavior before giving them authority. Compare conservation, contact, trajectory error and measured computational cost at the actual integration boundary. Add fidelity where a stated experiment needs it; more computation or agreement with stock alone does not establish physical accuracy.

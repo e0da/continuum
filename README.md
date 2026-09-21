@@ -9,12 +9,13 @@ An experimental KSP 1 toolkit for measuring simulation cost, recording flight in
 - A main-menu benchmark compares 8, 32, and 128 aligned boxes as a chain of Unity fixed joints and as one compound rigid body. Both retain the same collider geometry. It uses separate physics scenes and does not change global simulation settings.
 - The benchmark checks collider ray hits, spacing error, a compound body's contact with a floor, and momentum at separation. It reports raw repeated timings. These are synthetic bodies, not stock parts or KSP joints.
 - A flight panel inventories the active vessel without modifying it. A small structural allowlist identifies inspection candidates; it does not approve them for merging.
-- An optional 300-frame timing capture records available Unity markers, frame context, and timing distributions. Unsupported markers are reported as unavailable, never as evidence of zero cost. See [profiling](docs/profiling.md).
+- An optional 300-frame timing capture records available Unity markers, frame context, and timing distributions. Unsupported markers are reported as unavailable, never as evidence of zero cost. An opt-in coast/powered/contact run exports a [qualification report](docs/qualification-report.md). See [profiling](docs/profiling.md).
 - A flight input recorder exports step-keyed recordings plus event/trajectory observations; the format supports manual linear and cubic-Bezier edits. An opt-in analog player enforces a conservative control-ownership boundary; see [input timeline](docs/input-timeline.md).
 - An optional MechJeb mission addon creates a separate sandbox and attempts a recorded stock Kerbal X flight to Minmus. See [mission operation and qualification](docs/minmus-mission.md). Checkpoint trials now provide repeatable setup and preserved evidence; they do not establish deterministic replay.
 - An opt-in survey mode targets a sampled flat Minmus site in daylight. Two checkpoint trials landed upright with all 17 parts, approximately 120 m from the target, missing the unchanged 100 m criterion. This is a systems test fixture; see the [flight evidence](docs/validation.md).
 - A pure C# model verifies aligned-box aggregation and impulse-free separation without proprietary assemblies.
 - A [bounded background worker](docs/simulation-worker.md) accepts immutable batches with tick, topology, and frame identities. A reference constant-force backend and runnable serial/parallel comparison exercise the boundary without controlling KSP bodies.
+- An opt-in [flight shadow probe](docs/shadow-worker.md) captures real rigid-body arrays into the worker and rejects stale results. It uses zero-force transport checks, not a stock-physics replacement.
 - An [input comparison tool](docs/input-comparison.md) measures sampled differences between recorded control tracks without claiming equivalent physics outcomes.
 
 Experiments run only through explicit panel actions or command-line flags. Analog replay changes flight controls. The optional mission runner creates its own save and uses MechJeb on its mission vessel; normal launches do not start a mission. Local reports/recordings go to `GameData/KspContinuum/PluginData/` and can include vessel identifiers, mod identities and mission save paths. They are runtime artifacts and are not committed to this public repo.
@@ -48,6 +49,7 @@ The experiments are independent of the running game:
 | [Native structural fixture](docs/structural-benchmark.md) | Pinned Jolt spring motion against an analytic reference, substep cost/error, and a floor-contact check |
 | [Orbital/event fixture](docs/orbital-fixture.md) | An external local Gimbal coast implementation against independent orbital states, plus bounded encounter-event adversaries |
 | [Data-layout comparison](docs/layout-benchmark.md) | Object, SoA, and AoSoA captures under the same free-body and neighbor-reading kernels |
+| [3D field gravity](docs/field-gravity.md) | Isolated softened forces via padded FFT/CIC against direct forces, with retained accuracy failures |
 | [Telemetry playback](docs/telemetry-playback.md) | Scrubbing and phase navigation over recorded mission observations, without rerunning KSP |
 
 Native structural dependencies are fetched by pinned digest into ignored build artifacts. The orbital donor is supplied explicitly from a separate checkout; its implementation is not distributed here. Neither tool installs a backend into KSP.
