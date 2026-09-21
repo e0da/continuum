@@ -143,6 +143,8 @@ def gravity_summary(data, samples):
             require(gravity_predicted == (predicted_status == 'compared'),
                     'predicted status contradicts availability')
             require(not zero_predicted or gravity_predicted, 'predicted zero lacks paired gravity')
+            require(not (gravity_predicted or zero_predicted) or available,
+                    'predicted frame metric lacks raw comparison')
             predictive_metrics = (
                 ('gravityPredictedFrameVelocityMaxMetersPerSecond',
                  'gravityPredictedFrameVelocityRmsMetersPerSecond', gravity_predicted),

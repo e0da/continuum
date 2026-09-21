@@ -147,6 +147,27 @@ class ShadowReportTests(unittest.TestCase):
         del data['gravityStrategy']
         self.assertEqual(self.invoke(data), (1, None))
 
+    def test_predicted_frame_requires_raw_comparison(self):
+        data = copy.deepcopy(self.gravity_fixture)
+        sample = data['samples'][0]
+        sample.update(gravityComparisonAvailable=False, gravityComparedBodies=0,
+                      gravityComparisonStatus='skipped-missed-boundary',
+                      gravityPositionMaxMeters=0, gravityPositionRmsMeters=0,
+                      gravityVelocityMaxMetersPerSecond=0,
+                      gravityVelocityRmsMetersPerSecond=0,
+                      gravityVelocityRmsDeltaFromZero=0,
+                      gravityVelocityRmsRatioToZero=None,
+                      gravityFrameAdjustedStatus='skipped-missed-boundary',
+                      gravityFrameAdjustedVelocityAvailable=False,
+                      zeroFrameAdjustedVelocityAvailable=False,
+                      gravityFrameAdjustedVelocityMaxMetersPerSecond=0,
+                      gravityFrameAdjustedVelocityRmsMetersPerSecond=0,
+                      zeroFrameAdjustedVelocityMaxMetersPerSecond=0,
+                      zeroFrameAdjustedVelocityRmsMetersPerSecond=0,
+                      gravityFrameAdjustedVelocityRmsDeltaFromZero=0,
+                      gravityEndpointFrameVelocityDelta=[])
+        self.assertEqual(self.invoke(data), (1, None))
+
     def invoke(self, data=None, raw=None):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / 'receipt.json'
