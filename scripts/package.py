@@ -23,7 +23,8 @@ with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
     archive.write(root / 'README.md', 'GameData/KspContinuum/README.md')
     for name in ('experiment.md', 'replacement.md', 'validation.md', 'compatibility.md', 'input-timeline.md', 'integration-map.md', 'minmus-mission.md',
                  'space-program.md', 'naming.md', 'wiki-templates.md', 'chronicle.md',
-                 'simulation-worker.md', 'profiling.md', 'input-comparison.md', 'worker-benchmark.md'):
+                 'simulation-worker.md', 'profiling.md', 'input-comparison.md', 'worker-benchmark.md', 'structural-benchmark.md',
+                 'orbital-fixture.md', 'layout-benchmark.md', 'telemetry-playback.md'):
         archive.write(root / 'docs' / name, 'GameData/KspContinuum/docs/' + name)
     archive.write(root / 'examples/neutral-inputs.csv', 'GameData/KspContinuum/examples/neutral-inputs.csv')
 print(output.name)

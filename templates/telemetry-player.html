@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title><!--TITLE--> · Mission playback</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101921;color:#e8f0f3}body{max-width:1100px;margin:0 auto;padding:32px}a{color:#9edbd8}h1{margin:8px 0;font-size:2.1rem}p{line-height:1.6;color:#b8c8d2}.eyebrow{color:#66cec4;letter-spacing:.15em;text-transform:uppercase;font-size:.8rem}.panel{background:#192733;border:1px solid #344b5b;border-radius:12px;padding:22px;margin:20px 0}.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}button,select{font:inherit;color:inherit;background:#203948;border:1px solid #52768a;border-radius:6px;padding:9px 14px}button{cursor:pointer}button:disabled{opacity:.4;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #f2c376;outline-offset:3px}input[type=range]{width:100%;margin:20px 0;accent-color:#66cec4}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}dt{font-size:.8rem;color:#a6beca;margin-bottom:7px}dd{margin:0;font-size:1.3rem;font-variant-numeric:tabular-nums}.detail{font-size:.85rem;overflow-wrap:anywhere}svg{width:100%;height:auto;display:block}.chart-label{fill:#a6beca;font-size:13px}.curve{fill:none;stroke:#66cec4;stroke-width:2}.cursor{stroke:#f2c376;stroke-width:2}.status{color:#f2c376}.clock{font-variant-numeric:tabular-nums}@media(max-width:650px){body{padding:18px}.metrics{grid-template-columns:repeat(2,1fr)}h1{font-size:1.6rem}}
+</style></head><body>
+<p class="eyebrow">Continuum Space Program · History lab</p>
+<h1><!--TITLE--></h1>
+<p>Recorded observations. Scrub the flight log or play it at a chosen rate. Values hold at the last observation; this page does not simulate physics, reconstruct a vessel, or interpolate missing state.</p>
+<section class="panel" aria-label="Playback controls">
+<div class="controls"><button id="play" type="button">Play</button><button id="previous" type="button">Previous observation</button><button id="next" type="button">Next observation</button>
+<label>Playback rate <select id="rate"><option value="1">1× wall time</option><option value="10" selected>10× wall time</option><option value="100">100× wall time</option></select></label>
+<label>Jump to phase <select id="phase"></select></label></div>
+<label for="seek">Recorded observation</label><input id="seek" type="range" min="0" step="1" value="0">
+<div class="controls"><span id="status" class="status" role="status">Paused</span><span id="position" class="clock"></span></div>
+</section>
+<section class="panel" aria-label="Observation details"><dl class="metrics">
+<div><dt>Phase</dt><dd id="phaseValue"></dd></div><div><dt>Body / situation</dt><dd id="location"></dd></div>
+<div><dt>Altitude above reference body</dt><dd id="altitude"></dd></div><div><dt>Surface speed</dt><dd id="speed"></dd></div>
+<div><dt>Throttle</dt><dd id="throttle"></dd></div><div><dt>Parts / stage</dt><dd id="parts"></dd></div>
+<div><dt>Universal time</dt><dd id="ut"></dd></div><div><dt>Packed</dt><dd id="packed"></dd></div>
+</dl><p id="autopilot" class="detail"></p></section>
+<section class="panel"><h2>Altitude through the recorded flight</h2><p class="detail">Horizontal axis: elapsed wall time since the first observation. Line segments connect observations for orientation, not reconstructed motion; body changes and missing altitude break the line.</p>
+<div class="controls"><label>Altitude scale <select id="altitudeScale"><option value="linear">Linear</option><option value="log">Logarithmic (zero-safe)</option></select></label></div><p id="scaleNote" class="detail"></p>
+<svg id="altitudeChart" viewBox="0 0 1000 280" role="img" aria-label="Altitude versus elapsed recorded wall time"><g id="grid"></g><path id="curve" class="curve"></path><line id="cursor" class="cursor" y1="25" y2="245"></line><text id="topLabel" class="chart-label" x="5" y="16"></text><text id="bottomLabel" class="chart-label" x="5" y="272"></text><text id="durationLabel" class="chart-label" text-anchor="end" x="990" y="272"></text></svg></section>
+<p class="detail">Source SHA-256: <span id="digest"></span>. This portable page embeds the selected telemetry only. It contains no game save or live game connection.</p>
+<script id="recording" type="application/json"><!--DATA--></script>
+<script>
+'use strict';
+const recording=JSON.parse(document.getElementById('recording').textContent), rows=recording.rows;
+const el=id=>document.getElementById(id), seek=el('seek'), play=el('play'), phase=el('phase');
+const start=rows[0].wall, end=rows[rows.length-1].wall, span=end-start;
+let index=0, playing=false, frame=null, lastTime=null, clock=start;
+const display=(n,unit)=>n===null?'Unavailable':n.toLocaleString(undefined,{maximumFractionDigits:3})+(unit||'');
+const boundaries=[];
+rows.forEach((r,i)=>{if(i===0||r.phase!==rows[i-1].phase){boundaries.push(i);const option=document.createElement('option');option.value=String(i);option.textContent=r.phase+' · '+display(r.wall-start,' s');phase.appendChild(option);}});
+seek.max=String(rows.length-1);el('digest').textContent=recording.sourceSha256;
+const values=rows.filter(r=>r.altitude!==null).map(r=>r.altitude);
+let min=0,max=1;for(const value of values){min=Math.min(min,value);max=Math.max(max,value);}
+const x=r=>45+(span===0?0:(r.wall-start)/span)*945;
+function drawChart(){
+  const logarithmic=el('altitudeScale').value==='log';
+  const transform=value=>logarithmic?Math.sign(value)*Math.log1p(Math.abs(value)):value;
+  const inverse=value=>logarithmic?Math.sign(value)*Math.expm1(Math.abs(value)):value;
+  const low=transform(min), high=transform(max);
+  const y=value=>245-(transform(value)-low)/(high-low)*220;
+  let path='',connected=false,body=null;
+  for(const r of rows){
+    if(r.altitude===null){connected=false;continue;}
+    path+=(connected&&r.body===body?'L':'M')+x(r).toFixed(3)+' '+y(r.altitude).toFixed(3)+' ';
+    connected=true;body=r.body;
+  }
+  el('curve').setAttribute('d',path);
+  el('grid').replaceChildren();
+  for(let i=1;i<4;i++){
+    const height=245-i*55, value=inverse(low+(high-low)*i/4);
+    const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+    for(const [key,val] of Object.entries({x1:45,x2:990,y1:height,y2:height,stroke:'#344b5b'}))line.setAttribute(key,val);
+    const label=document.createElementNS('http://www.w3.org/2000/svg','text');
+    label.setAttribute('x','45');label.setAttribute('y',height-5);label.setAttribute('class','chart-label');label.textContent=display(value,' m');
+    el('grid').append(line,label);
+  }
+  el('scaleNote').textContent=logarithmic?'Zero-safe log scale: sign(h) × log(1 + |h| / 1 m). Zero and negative altitudes remain visible; labels and readouts stay in meters.':'Linear altitude scale. Labels and readouts are in meters.';
+  el('altitudeChart').setAttribute('aria-label','Altitude versus elapsed recorded wall time, '+(logarithmic?'zero-safe logarithmic':'linear')+' altitude scale');
+  el('topLabel').textContent=display(max,' m');el('bottomLabel').textContent=display(min,' m');el('durationLabel').textContent=display(span,' elapsed wall seconds');
+}
+el('altitudeScale').addEventListener('change',drawChart);drawChart();
+function render(){const r=rows[index];seek.value=String(index);seek.setAttribute('aria-valuetext','Observation '+(index+1)+' of '+rows.length+', '+r.phase+', '+display(r.wall-start,' seconds'));
+el('position').textContent='Observation '+(index+1)+' / '+rows.length+' · '+display(r.wall-start,' s elapsed wall');
+el('phaseValue').textContent=r.phase;el('location').textContent=(r.body||'Unavailable')+' / '+(r.situation||'Unavailable');
+el('altitude').textContent=display(r.altitude,' m');el('speed').textContent=display(r.speed,' m/s');el('throttle').textContent=r.throttle===null?'Unavailable':display(r.throttle*100,'%');
+el('parts').textContent=display(r.parts)+' / '+display(r.stage);el('ut').textContent=display(r.ut,' s');el('packed').textContent=r.packed===null?'Unavailable':r.packed?'Yes':'No';el('autopilot').textContent='Autopilot: '+(r.autopilot||'No status recorded');
+el('cursor').setAttribute('x1',x(r));el('cursor').setAttribute('x2',x(r));let selected=0;for(const b of boundaries){if(b<=index)selected=b;else break;}phase.value=String(selected);
+el('previous').disabled=index===0;el('next').disabled=index===rows.length-1;}
+function pause(message){playing=false;if(frame!==null)cancelAnimationFrame(frame);frame=null;lastTime=null;play.textContent='Play';el('status').textContent=message||'Paused';}
+function jump(i){pause();index=Math.max(0,Math.min(rows.length-1,i));clock=rows[index].wall;render();}
+function advance(now){if(!playing)return;if(lastTime!==null)clock=Math.min(end,clock+(now-lastTime)/1000*Number(el('rate').value));lastTime=now;let next=index;while(next+1<rows.length&&rows[next+1].wall<=clock)next++;if(next!==index){index=next;render();}if(clock>=end){pause('End of recording');return;}frame=requestAnimationFrame(advance);}
+play.addEventListener('click',()=>{if(playing){pause();return;}if(index===rows.length-1)jump(0);playing=true;lastTime=null;play.textContent='Pause';el('status').textContent='Playing';frame=requestAnimationFrame(advance);});
+seek.addEventListener('input',()=>jump(Number(seek.value)));phase.addEventListener('change',()=>jump(Number(phase.value)));el('previous').addEventListener('click',()=>jump(index-1));el('next').addEventListener('click',()=>jump(index+1));
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&playing)pause('Paused while page is hidden');});render();
+</script></body></html>

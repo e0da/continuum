@@ -39,6 +39,19 @@ The build reads game references but never copies them or installs anything. The 
 
 For automated engine qualification in an owned test copy, launch its KSP executable with `-batchmode -nographics --continuum-bench`. At the main menu, the addon runs the isolated benchmark, writes its report, and exits with code 0 when all report checks pass or 1 on failure. An unsupported KSP version exits with code 2. Normal launches do not auto-run or exit. Headless execution does not verify the visible panels or live-vessel inspector.
 
+## Run the experiments
+
+The experiments are independent of the running game:
+
+| Tool | What it measures |
+| --- | --- |
+| [Native structural fixture](docs/structural-benchmark.md) | Pinned Jolt spring motion against an analytic reference, substep cost/error, and a floor-contact check |
+| [Orbital/event fixture](docs/orbital-fixture.md) | An external local Gimbal coast implementation against independent orbital states, plus bounded encounter-event adversaries |
+| [Data-layout comparison](docs/layout-benchmark.md) | Object, SoA, and AoSoA captures under the same free-body and neighbor-reading kernels |
+| [Telemetry playback](docs/telemetry-playback.md) | Scrubbing and phase navigation over recorded mission observations, without rerunning KSP |
+
+Native structural dependencies are fetched by pinned digest into ignored build artifacts. The orbital donor is supplied explicitly from a separate checkout; its implementation is not distributed here. Neither tool installs a backend into KSP.
+
 ## Research direction
 
 The longer-term experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, and GPU compute remain candidates rather than assumed winners.
