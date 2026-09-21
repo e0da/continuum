@@ -15,7 +15,7 @@ class CheckpointTests(unittest.TestCase):
 
     def test_active_checkpoint_and_scope(self):
         r = self.r
-        self.assertEqual(r['schema'], 'ksp-continuum-checkpoint/v1')
+        self.assertEqual(r['schema'], 'ksp-continuum-checkpoint/v2')
         self.assertTrue(r['qualified'])
         self.assertTrue(r['savedExact'])
         self.assertTrue(r['restoredBytesEqual'])
@@ -31,12 +31,29 @@ class CheckpointTests(unittest.TestCase):
         self.assertFalse(r['crossPlatformReplayQualified'])
         self.assertFalse(r['gameIntegrated'])
 
+    def test_fresh_restore_and_incompatible_targets(self):
+        r = self.r
+        self.assertIn('freshRestore', r)
+        self.assertTrue(r['freshRestore']['bytesEqual'])
+        self.assertTrue(r['freshRestore']['trajectoryExact'])
+        self.assertEqual(r['freshRestore']['nativeRestoreCalls'], 1)
+        self.assertEqual(r['freshRestore']['bodyIds'], r['originalBodyIds'])
+        self.assertEqual(len(r['incompatible']), 4)
+        self.assertEqual({x['case'] for x in r['incompatible']},
+                         {'material', 'engine', 'step', 'topology'})
+        for case in r['incompatible']:
+            self.assertTrue(case['rejected'])
+            self.assertTrue(case['stateUnchanged'])
+            self.assertEqual(case['nativeRestoreCalls'], 0)
+
     def test_actual_saved_replay_and_cold_measurement(self):
         r = self.r
-        self.assertEqual(len(r['runs']), 3)
-        original, saved, cold = [row['samples'] for row in r['runs']]
+        self.assertEqual(len(r['runs']), 4)
+        self.assertEqual([row['name'] for row in r['runs']],
+                         ['uninterrupted', 'saved', 'cold', 'fresh-restored'])
+        original, saved, cold, fresh = [row['samples'] for row in r['runs']]
         self.assertEqual(len(original), 121)
-        for run in (original, saved, cold):
+        for run in (original, saved, cold, fresh):
             self.assertEqual(len(run), 121)
             for i, sample in enumerate(run):
                 self.assertEqual(sample['step'], i)
@@ -51,6 +68,7 @@ class CheckpointTests(unittest.TestCase):
                 self.assertAlmostEqual(sample['centerXDisplacementM'], displacement, places=12)
                 self.assertAlmostEqual(sample['constraintErrorM'], abs(math.dist(p, q) - 1.2), places=12)
         self.assertEqual([s['state'] for s in original], [s['state'] for s in saved])
+        self.assertEqual([s['state'] for s in original], [s['state'] for s in fresh])
         self.assertEqual(original[0]['state'], cold[0]['state'])
         delta = max(abs(x - y) for a, b in zip(original, cold)
                     for x, y in zip(a['state'], b['state']))

@@ -16,6 +16,8 @@
 #include <iostream>
 #include <locale>
 #include <stdexcept>
+#include <sstream>
+#include <string>
 #include <vector>
 using namespace JPH;
 namespace {
@@ -185,6 +187,74 @@ std::vector<Sample> Continue(World &w) {
     return result;
 }
 
+// Only worlds made by Fixture are admitted. The recipe owns unqueried shape/joint settings;
+// these live checks detect selected drift, not arbitrary external world modification.
+struct Envelope {
+    std::string engine, recipe, settings;
+    float step;
+    std::vector<uint32> bodies;
+    size_t constraints;
+};
+Envelope Describe(World &world) {
+    Envelope result;
+    result.engine = std::string("e77f175595e64cb44218cc9d9d56fc365ad0e36a/")
+        + CONTINUUM_COMPILER + "/" + Architecture + "/double/deterministic/single-thread/release";
+    result.recipe = "continuum-contact-fixture/v1";
+    result.step = static_cast<float>(Step);
+    result.constraints = world.physics.GetConstraints().size();
+    const auto &settings = world.physics.GetPhysicsSettings();
+    auto &api = world.physics.GetBodyInterface();
+    Vec3 gravity = world.physics.GetGravity();
+    std::ostringstream live;
+    live.imbue(std::locale::classic());
+    live << std::setprecision(17) << settings.mNumVelocitySteps << ',' << settings.mNumPositionSteps
+         << ',' << settings.mAllowSleeping << ',' << gravity.GetX() << ',' << gravity.GetY() << ',' << gravity.GetZ();
+    for (BodyID id : world.bodies) {
+        result.bodies.push_back(id.GetIndexAndSequenceNumber());
+        live << ';' << api.GetFriction(id) << ',' << api.GetRestitution(id)
+             << ',' << static_cast<int>(api.GetMotionType(id)) << ',' << api.GetObjectLayer(id);
+    }
+    result.settings = live.str();
+    return result;
+}
+bool Compatible(const Envelope &source, const Envelope &target) {
+    return source.engine == target.engine && source.recipe == target.recipe
+        && source.step == target.step && source.bodies == target.bodies
+        && source.constraints == target.constraints && source.settings == target.settings;
+}
+bool RestoreChecked(World &target, const Envelope &source, StateRecorderImpl &checkpoint, int &calls) {
+    if (!Compatible(source, Describe(target))) return false;
+    checkpoint.Rewind();
+    ++calls;
+    if (!target.physics.RestoreState(checkpoint) || checkpoint.IsFailed()) {
+        throw std::runtime_error("Native restore failed; provisional world must be discarded");
+    }
+    return true;
+}
+struct Rejection {
+    const char *name;
+    bool rejected, unchanged;
+    int calls;
+};
+Rejection RejectIncompatible(const char *name, const Envelope &source, StateRecorderImpl &checkpoint) {
+    World target;
+    Fixture(target);
+    Envelope incoming = source;
+    std::string which(name);
+    if (which == "material") target.physics.GetBodyInterface().SetFriction(target.bodies[1], .2f);
+    if (which == "engine") incoming.engine = "deliberately-incompatible-engine";
+    if (which == "step") incoming.step = std::nextafter(incoming.step, 1.0f);
+    if (which == "topology") incoming.bodies.pop_back();
+    StateRecorderImpl before, after;
+    target.physics.SaveState(before);
+    State initial = Values(target);
+    Envelope initialEnvelope = Describe(target);
+    int calls = 0;
+    bool accepted = RestoreChecked(target, incoming, checkpoint, calls);
+    target.physics.SaveState(after);
+    return {name, !accepted, initial == Values(target) && before.GetData() == after.GetData()
+        && Compatible(initialEnvelope, Describe(target)), calls};
+}
 void Write(const char *name, const std::vector<Sample> &samples) {
     std::cout << "{\"name\":\"" << name << "\",\"samples\":[";
     for (size_t i = 0; i < samples.size(); i++) {
@@ -219,6 +289,7 @@ int main() {
         StateRecorderImpl checkpoint;
         world.physics.SaveState(checkpoint);
         if (checkpoint.IsFailed()) throw std::runtime_error("Save failed");
+        Envelope envelope = Describe(world);
         auto original = Continue(world);
         checkpoint.Rewind();
         if (!world.physics.RestoreState(checkpoint) || checkpoint.IsFailed()) throw std::runtime_error("Restore failed; world abandoned");
@@ -229,6 +300,27 @@ int main() {
         World cold;
         Fixture(cold, &poses);
         auto reconstructed = Continue(cold);
+        World fresh;
+        Fixture(fresh);
+        int freshCalls = 0;
+        if (!RestoreChecked(fresh, envelope, checkpoint, freshCalls)) {
+            throw std::runtime_error("Matching fresh fixture rejected");
+        }
+        StateRecorderImpl freshState;
+        fresh.physics.SaveState(freshState);
+        bool freshBytes = freshState.GetData() == checkpoint.GetData();
+        auto freshRun = Continue(fresh);
+        bool freshExact = true;
+        for (size_t i = 0; i < original.size(); i++) {
+            freshExact = freshExact && original[i].state == freshRun[i].state;
+        }
+        std::vector<Rejection> rejections;
+        bool allRejected = true;
+        for (const char *name : {"material", "engine", "step", "topology"}) {
+            auto rejection = RejectIncompatible(name, envelope, checkpoint);
+            allRejected = allRejected && rejection.rejected && rejection.unchanged && rejection.calls == 0;
+            rejections.push_back(rejection);
+        }
         bool exact = true;
         double difference = 0;
         double maxPosition = 0, maxVelocity = 0, maxAngular = 0, maxQuaternion = 0;
@@ -258,10 +350,16 @@ int main() {
                 }
             }
         }
-        bool qualified = contact && speed > 1e-5 && exact && bytesEqual && original[0].state == reconstructed[0].state;
+        bool qualified = freshBytes && freshExact && allRejected && contact && speed > 1e-5 && exact && bytesEqual && original[0].state == reconstructed[0].state;
         std::cout.imbue(std::locale::classic());
         std::cout << std::boolalpha << std::setprecision(17)
-            << "{\"schema\":\"ksp-continuum-checkpoint/v1\",\"qualified\":" << qualified
+            << "{\"schema\":\"ksp-continuum-checkpoint/v2\",\"qualified\":" << qualified
+            << ",\"freshRestore\":{\"bytesEqual\":" << freshBytes << ",\"trajectoryExact\":" << freshExact
+            << ",\"nativeRestoreCalls\":" << freshCalls << ",\"bodyIds\":[" << fresh.bodies[1].GetIndexAndSequenceNumber()
+            << ',' << fresh.bodies[2].GetIndexAndSequenceNumber() << "]}"
+            << ",\"compatibilityEnvelope\":{\"recipe\":\"" << envelope.recipe << "\",\"engine\":\"" << envelope.engine
+            << "\",\"settings\":\"" << envelope.settings << "\",\"stepSeconds\":" << envelope.step
+            << ",\"constraintCount\":" << envelope.constraints << ",\"bodyIds\":[" << envelope.bodies[0] << ',' << envelope.bodies[1] << ',' << envelope.bodies[2] << "]}"
             << ",\"compiler\":\"" CONTINUUM_COMPILER "\",\"actualStepSeconds\":" << static_cast<float>(Step)
             << ",\"originalBodyIds\":[" << world.bodies[1].GetIndexAndSequenceNumber() << ',' << world.bodies[2].GetIndexAndSequenceNumber() << "],\"coldBodyIds\":[" << cold.bodies[1].GetIndexAndSequenceNumber() << ',' << cold.bodies[2].GetIndexAndSequenceNumber() << ']'
             << ",\"coldMaxPositionDifferenceM\":" << maxPosition << ",\"coldMaxVelocityDifferenceMps\":" << maxVelocity << ",\"coldMaxAngularVelocityDifferenceRadps\":" << maxAngular << ",\"coldMaxQuaternionComponentDifference\":" << maxQuaternion
@@ -273,13 +371,22 @@ int main() {
             << ",\"workerThreads\":0,\"sleeping\":false,\"velocityIterations\":10,\"positionIterations\":2,\"collisionSteps\":1,"
             << "\"fixture\":{\"gravity\":[0,-9.81,0],\"massKg\":1,\"halfExtentsM\":[0.4,0.25,0.4],\"jointLengthM\":1.2,\"friction\":0.6,\"restitution\":0,\"damping\":0,\"preCheckpointImpulseStep\":23,\"impulseStep\":30,\"impulseKgMps\":[0.15,0,0.05]},"
             << "\"stateLayout\":\"two bodies: xyz position, xyzw quaternion, xyz linear velocity, xyz angular velocity\","
-            << "\"measurement\":\"steady_clock around synchronous Update only; fixed order original,saved,cold; no performance comparison qualified\","
+            << "\"measurement\":\"steady_clock around synchronous Update only; fixed order original,saved,cold,fresh; no performance comparison qualified\","
             << "\"coldScope\":\"fresh world with same definitions/settings/ID creation order, copied exposed pose and velocities, active bodies, recreated local COM anchors; caches and previous timestep are not restored\",\"runs\":[";
         Write("uninterrupted", original);
         std::cout << ',';
         Write("saved", saved);
         std::cout << ',';
         Write("cold", reconstructed);
+        std::cout << ',';
+        Write("fresh-restored", freshRun);
+        std::cout << "],\"incompatible\":[";
+        for (size_t i = 0; i < rejections.size(); i++) {
+            if (i) std::cout << ',';
+            const auto &r = rejections[i];
+            std::cout << "{\"case\":\"" << r.name << "\",\"rejected\":" << r.rejected
+                << ",\"stateUnchanged\":" << r.unchanged << ",\"nativeRestoreCalls\":" << r.calls << '}';
+        }
         std::cout << "]}\n";
         code = qualified ? 0 : 2;
     } catch (const std::exception &e) {
