@@ -73,3 +73,5 @@ See [interaction regimes and scheduling](docs/interaction-regimes.md), [integrat
 The [space program](docs/space-program.md) develops the toolkit through actual missions and preserves the results as a local multimedia chronicle. Its [naming conventions](docs/naming.md) distinguish missions, attempts, vehicle revisions and survey sites. Maintained [wiki templates](docs/wiki-templates.md) keep vehicle, site and experiment records consistent without rewriting old evidence.
 
 Generate a [mission chronicle and connected website](docs/chronicle.md) from attempt telemetry, confirmed screenshots and a maintained program catalog. The site connects missions, attempts, vehicles, landing sites and experiments while preserving the original reports. Reports and game saves remain local; this public repository contains their tooling and templates.
+
+The [local handoff fixture](docs/local-handoff.md) connects encounter planning, a local sphere solver, and atomic in-memory publication. It remains separate from live KSP ownership.
