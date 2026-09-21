@@ -14,15 +14,20 @@ namespace KspContinuum
         Probe probe;
         FlightTimeline timeline;
         ShadowCapture shadow;
+        LifecycleTraceCapture lifecycleTrace;
+        Coroutine lifecycleContinuation;
+        bool lifecycleExportAttempted;
         public bool ShadowRunning { get { return shadow != null && shadow.IsRunning; } }
         public string ShadowStatus { get { return shadow == null ? "Shadow not started." : shadow.Status; } }
         public string ShadowReportPath { get; private set; }
+        public string LifecycleTraceReportPath { get; private set; }
         string replayFile = "replay.csv";
         protected abstract bool IsMenu { get; }
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
         public void Start()
         {
             if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-shadow") >= 0) BeginShadowCapture();
+            if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-lifecycle-trace") >= 0) BeginLifecycleTrace();
             if (!IsMenu || Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-bench") < 0) return;
             automatedBench = true;
             if (!Supported) { Application.Quit(2); return; }
@@ -30,12 +35,21 @@ namespace KspContinuum
         }
         public void Update()
         {
+            if (lifecycleTrace != null)
+            {
+                lifecycleTrace.ObserveUpdate();
+                FinishLifecycleTrace();
+            }
             if (shadow != null) shadow.Tick(true);
             if (timeline == null) return;
             if (Input.GetKeyDown(KeyCode.Escape) && timeline.IsReplaying) timeline.Stop();
             timeline.Tick();
         }
-        public void FixedUpdate() { if (shadow != null) shadow.FixedBoundary(); }
+        public void FixedUpdate()
+        {
+            if (shadow != null) shadow.FixedBoundary();
+            if (lifecycleTrace != null) lifecycleTrace.ObserveFixedUpdate();
+        }
         public void LateUpdate() { if (shadow != null) shadow.Tick(false); }
         public void BeginShadowCapture()
         {
@@ -45,6 +59,57 @@ namespace KspContinuum
             shadow = new ShadowCapture(report => ShadowReportPath = Write("shadow", report));
         }
         public void StopShadowCapture() { if (shadow != null) shadow.Dispose(); }
+        public void BeginLifecycleTrace()
+        {
+            if (IsMenu || !Supported) throw new InvalidOperationException("Lifecycle trace requires KSP 1.12.5 flight.");
+            if (lifecycleTrace != null && lifecycleTrace.IsRunning) throw new InvalidOperationException("Lifecycle trace is already active.");
+            FinishLifecycleTrace();
+            LifecycleTraceReportPath = null;
+            lifecycleExportAttempted = false;
+            lifecycleTrace = new LifecycleTraceCapture();
+            try
+            {
+                lifecycleTrace.Start();
+                if (lifecycleTrace.IsRunning) lifecycleContinuation = StartCoroutine(TraceAfterFixedUpdate(lifecycleTrace));
+                FinishLifecycleTrace();
+            }
+            catch
+            {
+                lifecycleTrace.Dispose();
+                FinishLifecycleTrace();
+                throw;
+            }
+        }
+        IEnumerator TraceAfterFixedUpdate(LifecycleTraceCapture capture)
+        {
+            while (capture.IsRunning)
+            {
+                yield return new WaitForFixedUpdate();
+                if (capture.IsRunning) capture.ObserveAfterFixedUpdate();
+            }
+        }
+        public void StopLifecycleTrace()
+        {
+            if (lifecycleTrace != null) lifecycleTrace.Dispose();
+            FinishLifecycleTrace();
+        }
+        void FinishLifecycleTrace()
+        {
+            if (lifecycleTrace == null || lifecycleTrace.IsRunning) return;
+            if (lifecycleContinuation != null)
+            {
+                StopCoroutine(lifecycleContinuation);
+                lifecycleContinuation = null;
+            }
+            if (lifecycleExportAttempted) return;
+            lifecycleExportAttempted = true;
+            try { LifecycleTraceReportPath = Write("lifecycle", lifecycleTrace.Report); }
+            catch (Exception error)
+            {
+                status = "Lifecycle trace export failed: " + error.GetType().Name;
+                Debug.LogException(error);
+            }
+        }
         void RunBench()
         {
             bench = new Bench();
@@ -64,8 +129,8 @@ namespace KspContinuum
             try
             {
                 string encoded = ReportJson.Encode(report);
-                if (kind == "shadow" && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
-                    throw new InvalidOperationException("Shadow receipt exceeds its 4 MiB export bound.");
+                if ((kind == "shadow" || kind == "lifecycle") && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
+                    throw new InvalidOperationException("Observation receipt exceeds its 4 MiB export bound.");
                 File.WriteAllText(temporary, encoded);
                 File.Move(temporary, path);
             }
@@ -101,7 +166,7 @@ namespace KspContinuum
         }
         public void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(20, 80, 430, IsMenu ? 195 : 500), "KSP Continuum — research prototype", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(20, 80, 430, IsMenu ? 195 : 600), "KSP Continuum — research prototype", GUI.skin.window);
             GUILayout.Label(Supported ? status : "Unsupported KSP version; requires 1.12.5.");
             bool old = GUI.enabled; GUI.enabled = old && Supported && !running;
             if (IsMenu)
@@ -114,6 +179,13 @@ namespace KspContinuum
             }
             else
             {
+                GUILayout.Label(lifecycleTrace == null ? "Lifecycle trace not started." : "Lifecycle trace: " + lifecycleTrace.Report.status);
+                if (GUILayout.Button("Start read-only lifecycle trace"))
+                {
+                    try { BeginLifecycleTrace(); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                if (GUILayout.Button("Stop lifecycle trace")) StopLifecycleTrace();
                 GUILayout.Label(ShadowStatus);
                 if (GUILayout.Button("Start read-only worker shadow capture"))
                 {
@@ -156,8 +228,10 @@ namespace KspContinuum
             }
             GUI.enabled = old; GUILayout.EndArea();
         }
+        public void OnDisable() { StopLifecycleTrace(); }
         public void OnDestroy()
         {
+            StopLifecycleTrace();
             StopShadowCapture();
             StopAllCoroutines();
             if (bench != null) bench.Dispose();
