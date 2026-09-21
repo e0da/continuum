@@ -610,6 +610,8 @@ namespace KspContinuum.Mission
             if (!HasSimulationClock()) return;
             Vessel current = vessel != null ? vessel : FlightGlobals.ActiveVessel;
             string status = core == null ? "" : phase == Phase.Ascent ? core.Ascent.Status : phase == Phase.Landing ? core.Landing.Status : core.Node.State.ToString();
+            // A newly selected MechJeb step can have no status until its first Drive call.
+            if (status == null) status = "(status unavailable)";
             telemetry.WriteLine(string.Join(",", F(Time.realtimeSinceStartup - startedWall), F(Planetarium.GetUniversalTime()), phase.ToString(),
                 current == null ? "" : current.mainBody.bodyName, current == null ? "" : current.situation.ToString(),
                 current == null ? "" : F(current.altitude), current == null ? "" : F(current.orbit.ApA), current == null ? "" : F(current.orbit.PeA),
