@@ -1,44 +1,50 @@
 name: Analytic tests
-on: [push, pull_request]
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
 permissions:
   contents: read
+
+concurrency:
+  group: ksp-continuum-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  model:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - run: dotnet run --project tests/KspContinuum.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.Worker.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.Handoff.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.Contact.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.Encounter.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.Encounter.Oracle.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.Profiling.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.PlayerLoop.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.ForceObservation.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.AeroCapture.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.LifecycleTrace.Tests -c Release
-      - run: dotnet run --project tests/KspContinuum.Shadow.Tests -c Release
-      - run: dotnet run --project src/KspContinuum.Mission/Tests/Mission.Tests.csproj -c Release
-      - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
-      - run: python3 tools/curve-bounds/experiment.py --output "$RUNNER_TEMP/curve-bounds.json"
-      - run: python3 -m unittest discover -s tools/orbit-fixture -p 'test_*.py' -v
-  field-gravity:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: python -m pip install -r tools/field-gravity/requirements.txt
-      - run: python -m unittest discover -s tests -p 'test_field*.py' -v
+  baseline:
+    uses: e0da/actions/.github/workflows/ci-baseline.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    with:
+      runner: ksp-continuum-linux-arm64
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+
+  portable:
+    uses: e0da/actions/.github/workflows/ci-command.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    with:
+      runner: ksp-continuum-linux-arm64
+      dotnet-version: "8.0.x"
+      python-version: "3.11"
+      command: scripts/check portable
+
+  field:
+    uses: e0da/actions/.github/workflows/ci-command.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    with:
+      runner: ksp-continuum-linux-arm64
+      python-version: "3.11"
+      command: scripts/check field
+
   structural:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cmake -S tools/structural-bench -B artifacts/structural-ci -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build artifacts/structural-ci --parallel 2
-      - run: ctest --test-dir artifacts/structural-ci --output-on-failure
+    uses: e0da/actions/.github/workflows/ci-command.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    with:
+      runner: ksp-continuum-linux-arm64
+      command: scripts/check structural
+
+  hosted-drift:
+    uses: e0da/actions/.github/workflows/hosted-drift-report.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    with:
+      runner: ksp-continuum-linux-arm64
+      mode: enforce
