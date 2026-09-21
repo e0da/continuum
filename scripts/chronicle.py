@@ -307,6 +307,45 @@ def parse_events(path):
     return events
 
 
+def checkpoint_clock_view(mission_values, lineage, rows):
+    default = {
+        "summary_rows": rows, "source_ut": None, "excluded_samples": 0,
+        "leading_wall_seconds": 0,
+    }
+    if lineage["parentAttemptId"] is None or "checkpointSourceUT" not in mission_values:
+        return default
+    source_ut = finite_number(mission_values["checkpointSourceUT"], "checkpointSourceUT")
+    previous_wall = previous_ut = None
+    for row in rows:
+        if previous_wall is not None and (row["wall"] < previous_wall or row["ut"] < previous_ut):
+            raise ChronicleError("mission.csv time moved backward")
+        previous_wall, previous_ut = row["wall"], row["ut"]
+    excluded = []
+    summary_rows = []
+    vessel_fields = (
+        "body", "situation", "altitude", "speed", "throttle", "stage", "parts",
+        "packed", "autopilot",
+    )
+    for row in rows:
+        if row["ut"] < source_ut:
+            if (summary_rows or row["phase"] != "CheckpointFlight"
+                    or any(row[field] != "" for field in vessel_fields)):
+                raise ChronicleError("mission.csv contains meaningful telemetry before checkpoint source UT")
+            excluded.append(row)
+        else:
+            summary_rows.append(row)
+    if not summary_rows:
+        raise ChronicleError("mission.csv contains no telemetry at or after checkpoint source UT")
+    if excluded and summary_rows[0]["phase"] != "CheckpointFlight":
+        raise ChronicleError("mission.csv first retained phase must be CheckpointFlight")
+    return {
+        "summary_rows": summary_rows,
+        "source_ut": source_ut,
+        "excluded_samples": len(excluded),
+        "leading_wall_seconds": summary_rows[0]["wall"] - rows[0]["wall"],
+    }
+
+
 def safe_screenshot_name(name):
     if Path(name).name != name or not SAFE_PNG.fullmatch(name):
         raise ChronicleError("unsafe screenshot filename: " + name)
@@ -469,7 +508,7 @@ def card(label, value):
     return '<div class="card"><div class="label">{}</div><div class="value">{}</div></div>'.format(esc(label), esc(value))
 
 
-def render_page(metadata, mission_values, lineage, rows, events, captures, input_summary, source_sessions, generated_utc):
+def render_page(metadata, mission_values, lineage, rows, events, clock_view, captures, input_summary, source_sessions, generated_utc):
     config = [
         ("Mission ID", metadata["mission_id"]), ("Attempt", metadata["attempt_id"]),
         ("Vehicle design", metadata["vehicle_design_id"]),
@@ -490,12 +529,22 @@ def render_page(metadata, mission_values, lineage, rows, events, captures, input
         config.append(("Parent checkpoint", lineage["parentCheckpoint"]))
     config_html = "".join(card(label, value) for label, value in config)
 
-    event_start = {phase: ut for ut, phase in events}
+    event_start = {}
+    for ut, phase in events:
+        if (clock_view["source_ut"] is not None and phase == "CheckpointFlight"
+                and ut < clock_view["source_ut"]):
+            event_start[phase] = "{:,.3f} (source epoch; loading event UT was not observed)".format(
+                clock_view["source_ut"])
+        else:
+            event_start[phase] = "{:,.3f}".format(ut)
+    timeline_summaries = phase_summaries(clock_view["summary_rows"])
+    if timeline_summaries:
+        timeline_summaries[0]["wall_duration"] += clock_view["leading_wall_seconds"]
     timeline_html = "".join(
         "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
-            esc(item["phase"]), esc("{:,.3f}".format(event_start.get(item["phase"], item["start_ut"]))),
+            esc(item["phase"]), esc(event_start.get(item["phase"], "{:,.3f}".format(item["start_ut"]))),
             esc(duration(item["wall_duration"])), esc(duration(item["ut_duration"])),
-        ) for item in phase_summaries(rows)
+        ) for item in timeline_summaries
     )
 
     media_html = []
@@ -522,8 +571,14 @@ def render_page(metadata, mission_values, lineage, rows, events, captures, input
     final = rows[-1]
     measurement_values = [
         ("Telemetry rows", len(rows)), ("Observed wall span", duration(final["wall"] - rows[0]["wall"])),
-        ("Observed UT span", duration(final["ut"] - rows[0]["ut"])),
+        ("Observed UT span", duration(final["ut"] - clock_view["summary_rows"][0]["ut"])),
     ]
+    if clock_view["excluded_samples"]:
+        measurement_values.extend([
+            ("Excluded initialization clock samples", clock_view["excluded_samples"]),
+            ("Timing correction",
+             "Excluded leading empty-body CheckpointFlight samples recorded before checkpoint source UT; raw telemetry remains hashed."),
+        ])
     if input_summary["included"]:
         measurement_values.extend([
             ("Input segments", input_summary["segments"]), ("Control samples", input_summary["samples"]),
@@ -589,6 +644,7 @@ def generate(mission, inputs, output, metadata_path):
     validate_input_association(inputs, mission_values)
     rows = parse_telemetry(mission / "mission.csv")
     events = parse_events(mission / "events.txt")
+    clock_view = checkpoint_clock_view(mission_values, lineage, rows)
     captures = parse_screenshots(mission)
     sources = []
     for name in (
@@ -609,7 +665,9 @@ def generate(mission, inputs, output, metadata_path):
         source_sessions["inputs"] = inputs.name
     input_summary = collect_input_summary(inputs, sources)
     generated_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    page = render_page(metadata, mission_values, lineage, rows, events, captures, input_summary, source_sessions, generated_utc)
+    page = render_page(
+        metadata, mission_values, lineage, rows, events, clock_view, captures,
+        input_summary, source_sessions, generated_utc)
     manifest = {
         "schema": MANIFEST_SCHEMA, "templateVersion": TEMPLATE_VERSION,
         "generatedUtc": generated_utc, "missionId": metadata["mission_id"],

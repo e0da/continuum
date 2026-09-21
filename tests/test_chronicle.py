@@ -488,6 +488,95 @@ class ChronicleTests(unittest.TestCase):
         self.assertIsNone(manifest["parentAttemptId"])
         self.assertIsNone(manifest["parentCheckpointSha256"])
 
+    def test_excludes_native_checkpoint_clock_initialization_from_derived_timing(self):
+        source_ut = "268881.4188647733"
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit-e05676be2e38432caf5eac0b1baf79b3\n"
+                "parentCheckpointSha256=%s\n"
+                "checkpointSourceUT=%s\n" % ("6" * 64, source_ut)
+            )
+        telemetry = (
+            "wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,"
+            "surface_speed_mps,throttle,stage,parts,packed,autopilot\n"
+            "0.191802978515625,0,CheckpointFlight,,,,,,,,,,,\"\"\n"
+            "1.9796257019042969,268881.4188647733,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,0,0,2,17,True,\"\"\n"
+            "11.979625701904297,268891.4188647733,CheckpointReady,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n"
+            "21.979625701904297,268901.4188647733,WaitForSite,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n"
+        )
+        (self.mission / "mission.csv").write_text(telemetry, encoding="utf-8")
+        (self.mission / "events.txt").write_text(
+            "0 CheckpointFlight\n268891.4188647733 CheckpointReady\n"
+            "268901.4188647733 WaitForSite\n", encoding="utf-8"
+        )
+
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertEqual(0, result.returncode, result.stderr)
+        page = (output / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Excluded initialization clock samples", page)
+        self.assertIn('<div class="value">1</div>', page)
+        self.assertIn("leading empty-body CheckpointFlight sample", page)
+        self.assertIn("268,881.419 (source epoch; loading event UT was not observed)", page)
+        self.assertIn(
+            "CheckpointFlight</td><td>268,881.419 (source epoch; loading event UT was not observed)"
+            "</td><td>11.79 s</td><td>10.00 s</td>",
+            page,
+        )
+        self.assertIn("20.00 s", page)
+        self.assertNotIn("268,881.42 s", page)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        source = next(item for item in manifest["sources"] if item["path"] == "mission/mission.csv")
+        self.assertEqual(hashlib.sha256(telemetry.encode("utf-8")).hexdigest(), source["sha256"])
+
+    def test_rejects_meaningful_vessel_telemetry_before_checkpoint_source_epoch(self):
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n"
+                "checkpointSourceUT=268881.4188647733\n" % ("7" * 64)
+            )
+        header = (
+            "wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,"
+            "surface_speed_mps,throttle,stage,parts,packed,autopilot\n"
+        )
+        cases = (
+            "0.2,0,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,128,0,2,17,True,\"\"\n",
+            "0.2,0,CheckpointFlight,,ORBITING,,,,,,,,,\"\"\n",
+        )
+        retained = "2,268881.4188647733,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n"
+        for index, initial in enumerate(cases):
+            with self.subTest(index=index):
+                (self.mission / "mission.csv").write_text(header + initial + retained, encoding="utf-8")
+                output = self.root / ("meaningful-pre-source-%d" % index)
+                result = self.run_generator(output)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("meaningful telemetry before checkpoint source UT", result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_rejects_clock_initialization_handoff_to_another_phase(self):
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n"
+                "checkpointSourceUT=268881.4188647733\n" % ("8" * 64)
+            )
+        (self.mission / "mission.csv").write_text(
+            "wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,"
+            "surface_speed_mps,throttle,stage,parts,packed,autopilot\n"
+            "0.2,0,CheckpointFlight,,,,,,,,,,,\"\"\n"
+            "2,268881.4188647733,Landing,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n",
+            encoding="utf-8",
+        )
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("first retained phase must be CheckpointFlight", result.stderr)
+        self.assertFalse(output.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
