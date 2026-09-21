@@ -20,6 +20,7 @@ jobs:
       - run: dotnet run --project tests/KspContinuum.Shadow.Tests -c Release
       - run: dotnet run --project src/KspContinuum.Mission/Tests/Mission.Tests.csproj -c Release
       - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - run: python3 tools/curve-bounds/experiment.py --output "$RUNNER_TEMP/curve-bounds.json"
       - run: python3 -m unittest discover -s tools/orbit-fixture -p 'test_*.py' -v
   field-gravity:
     runs-on: ubuntu-latest

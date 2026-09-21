@@ -105,27 +105,36 @@ namespace KspContinuum
             var quadratic=EncounterInterval.Multiply(EncounterInterval.Multiply(EncounterInterval.Point(.5),EncounterInterval.Point(motion.AccelerationBound.Value)),EncounterInterval.Square(time));
             return EncounterInterval.Add(radius,quadratic);
         }
-        static EncounterInterval Axis(double p,double v,double horizon,double inflation)
+        static EncounterInterval Axis(double p,double v,double acceleration,double horizon,double inflation)
         {
             var center=EncounterInterval.Add(EncounterInterval.Point(p),EncounterInterval.Multiply(EncounterInterval.Point(v),new EncounterInterval(0,horizon)));
+            if(acceleration!=0)
+                center=EncounterInterval.Add(center,EncounterInterval.Multiply(
+                    EncounterInterval.Multiply(EncounterInterval.Point(.5),EncounterInterval.Point(acceleration)),
+                    EncounterInterval.Square(new EncounterInterval(0,horizon))));
             return new EncounterInterval(EncounterInterval.Down(center.Lo-inflation),EncounterInterval.Up(center.Hi+inflation));
         }
         static Envelope Sweep(EncounterMotion motion,double horizon)
         {
             double radius=Radius(motion,horizon).Hi;
-            return new Envelope {Motion=motion,X=Axis(motion.Position.X,motion.Velocity.X,horizon,radius),
-                Y=Axis(motion.Position.Y,motion.Velocity.Y,horizon,radius),Z=Axis(motion.Position.Z,motion.Velocity.Z,horizon,radius)};
+            return new Envelope {Motion=motion,X=Axis(motion.Position.X,motion.Velocity.X,motion.NominalAcceleration.X,horizon,radius),
+                Y=Axis(motion.Position.Y,motion.Velocity.Y,motion.NominalAcceleration.Y,horizon,radius),Z=Axis(motion.Position.Z,motion.Velocity.Z,motion.NominalAcceleration.Z,horizon,radius)};
         }
-        static EncounterInterval RelativeAxis(double pa,double pb,double va,double vb,Window window)
+        static EncounterInterval RelativeAxis(double pa,double pb,double va,double vb,double aa,double ab,Window window)
         {
-            return EncounterInterval.Add(EncounterInterval.Subtract(EncounterInterval.Point(pa),EncounterInterval.Point(pb)),
+            var relative=EncounterInterval.Add(EncounterInterval.Subtract(EncounterInterval.Point(pa),EncounterInterval.Point(pb)),
                 EncounterInterval.Multiply(EncounterInterval.Subtract(EncounterInterval.Point(va),EncounterInterval.Point(vb)),new EncounterInterval(window.Lo,window.Hi)));
+            if(aa==ab) return relative;
+            var acceleration=EncounterInterval.Subtract(EncounterInterval.Point(aa),EncounterInterval.Point(ab));
+            return EncounterInterval.Add(relative,EncounterInterval.Multiply(
+                EncounterInterval.Multiply(EncounterInterval.Point(.5),acceleration),
+                EncounterInterval.Square(new EncounterInterval(window.Lo,window.Hi))));
         }
         static bool Excluded(EncounterMotion a,EncounterMotion b,Window window)
         {
-            var x=RelativeAxis(a.Position.X,b.Position.X,a.Velocity.X,b.Velocity.X,window);
-            var y=RelativeAxis(a.Position.Y,b.Position.Y,a.Velocity.Y,b.Velocity.Y,window);
-            var z=RelativeAxis(a.Position.Z,b.Position.Z,a.Velocity.Z,b.Velocity.Z,window);
+            var x=RelativeAxis(a.Position.X,b.Position.X,a.Velocity.X,b.Velocity.X,a.NominalAcceleration.X,b.NominalAcceleration.X,window);
+            var y=RelativeAxis(a.Position.Y,b.Position.Y,a.Velocity.Y,b.Velocity.Y,a.NominalAcceleration.Y,b.NominalAcceleration.Y,window);
+            var z=RelativeAxis(a.Position.Z,b.Position.Z,a.Velocity.Z,b.Velocity.Z,a.NominalAcceleration.Z,b.NominalAcceleration.Z,window);
             var distance2=EncounterInterval.Add(EncounterInterval.Add(EncounterInterval.Square(x),EncounterInterval.Square(y)),EncounterInterval.Square(z));
             var radius=EncounterInterval.Add(Radius(a,window.Hi),Radius(b,window.Hi));
             return distance2.Lo>EncounterInterval.Square(radius).Hi;
