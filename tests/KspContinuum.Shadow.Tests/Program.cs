@@ -526,6 +526,49 @@ static class Program
                 && sample.frameVelocityDeltaPredictionErrorMetersPerSecond == 0,
             "independent persistence prediction matches synthetic endpoint"
         );
+        var miss = new ShadowSample
+        {
+            bodies = 1,
+            physicsEpoch = 3,
+            captureFixedTimeSeconds = 2,
+            stepSeconds = .2,
+            rawKrakensbaneFrameVelocity = new double[3],
+        };
+        baseline = new ShadowComparison();
+        baseline.Attach(miss, one, "t", "f");
+        paired.Attach(miss, gravity, one, new Vec(), "t", "f");
+        baseline.Observe(
+            4,
+            "t",
+            "f",
+            true,
+            .2,
+            2.2,
+            8,
+            1,
+            observedPosition,
+            observedVelocity,
+            endFrame
+        );
+        paired.Observe(
+            4,
+            "t",
+            "f",
+            true,
+            .2,
+            2.2,
+            8,
+            1,
+            observedPosition,
+            observedVelocity,
+            endFrame
+        );
+        Check(
+            miss.frameVelocityDeltaPredictionErrorMetersPerSecond == .2
+                && miss.gravityPredictedFrameVelocityAvailable
+                && miss.gravityPredictedFrameVelocityRmsMetersPerSecond == .2,
+            "persistence miss remains a finite result"
+        );
         var body = PhysicalBody();
         body.mass = 1;
         body.constraints = 0;
