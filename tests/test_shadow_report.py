@@ -76,6 +76,11 @@ class ShadowReportTests(unittest.TestCase):
         self.assertAlmostEqual(gravity['adjustedVelocity']['zeroMetersPerSecond']['rms'], .2)
         self.assertEqual(gravity['adjustedVelocity']['gravityMetersPerSecond']['rms'], 0)
         self.assertAlmostEqual(gravity['adjustedVelocity']['rmsDeltaFromZero'], -.2)
+        predicted = gravity['predictedFrameVelocity']
+        self.assertEqual(predicted['strategy'], 'krakensbane-last-correction-persistence/v1')
+        self.assertEqual(predicted['gravityMetersPerSecond']['rms'], 0)
+        self.assertAlmostEqual(predicted['zeroMetersPerSecond']['rms'], .2)
+        self.assertEqual(predicted['frameDeltaErrorMetersPerSecond']['maximum'], 0)
         self.assertEqual(gravity['accelerationSources'], {'analytic-fixture': 1})
         self.assertIn('gravityPredictionMilliseconds', gravity['timingsMilliseconds'])
         self.assertFalse(report['solverAccuracyQualified'])
@@ -129,6 +134,8 @@ class ShadowReportTests(unittest.TestCase):
             ('gravityFrameAdjustedVelocityRmsDeltaFromZero', 99),
             ('zeroFrameAdjustedVelocityAvailable', False),
             ('gravityEndpointFrameVelocityDelta', [99, 0, 0]),
+            ('predictedKrakensbaneFrameVelocityDelta', [99, 0, 0]),
+            ('frameVelocityDeltaPredictionError', [99, 0, 0]),
             ('gravityPredictionMilliseconds', -1),
         ]
         for field, value in changes:
@@ -138,6 +145,27 @@ class ShadowReportTests(unittest.TestCase):
                 self.assertEqual(self.invoke(data), (1, None))
         data = copy.deepcopy(self.gravity_fixture)
         del data['gravityStrategy']
+        self.assertEqual(self.invoke(data), (1, None))
+
+    def test_predicted_frame_requires_raw_comparison(self):
+        data = copy.deepcopy(self.gravity_fixture)
+        sample = data['samples'][0]
+        sample.update(gravityComparisonAvailable=False, gravityComparedBodies=0,
+                      gravityComparisonStatus='skipped-missed-boundary',
+                      gravityPositionMaxMeters=0, gravityPositionRmsMeters=0,
+                      gravityVelocityMaxMetersPerSecond=0,
+                      gravityVelocityRmsMetersPerSecond=0,
+                      gravityVelocityRmsDeltaFromZero=0,
+                      gravityVelocityRmsRatioToZero=None,
+                      gravityFrameAdjustedStatus='skipped-missed-boundary',
+                      gravityFrameAdjustedVelocityAvailable=False,
+                      zeroFrameAdjustedVelocityAvailable=False,
+                      gravityFrameAdjustedVelocityMaxMetersPerSecond=0,
+                      gravityFrameAdjustedVelocityRmsMetersPerSecond=0,
+                      zeroFrameAdjustedVelocityMaxMetersPerSecond=0,
+                      zeroFrameAdjustedVelocityRmsMetersPerSecond=0,
+                      gravityFrameAdjustedVelocityRmsDeltaFromZero=0,
+                      gravityEndpointFrameVelocityDelta=[])
         self.assertEqual(self.invoke(data), (1, None))
 
     def invoke(self, data=None, raw=None):

@@ -26,6 +26,9 @@ namespace KspContinuum
             "synchronous bounded main-thread counterfactual; observer overhead, not worker acceleration";
         public string gravityFrameAdjustedScope =
             "Velocity-only post-observation diagnostic subtracts measured endpoint Krakensbane frame-velocity delta; conditioned on future frame state, not an inertial forecast or rotating-frame model; no origin position correction.";
+        public string framePredictionStrategy = KrakensbaneFramePersistence.ModelId;
+        public string framePredictionScope =
+            "One-step velocity-only forecast persists the captured prior Krakensbane correction. It uses no endpoint state, does not predict floating-origin position shifts, and may miss safety, threshold, packed-state, or compatibility-mod transitions.";
         public string gravityInterpretation =
             "Captured per-body central-field acceleration frozen for one step in raw Unity coordinates; not stock shared vessel integrationAccel, gravity multipliers, rotating-frame terms, or orbit-drift correction. Omitted forces and moving-frame adjustment remain in residuals. A larger residual than zero is a valid negative result.";
         public int compared,
@@ -72,6 +75,8 @@ namespace KspContinuum
         public double warpRate;
         public string referenceFrame = ShadowPhysicalInput.UnityWorldReferenceFrame;
         public double[] rawKrakensbaneFrameVelocity = new double[0];
+        public double[] rawKrakensbaneLastCorrection = new double[0];
+        public double[] predictedKrakensbaneFrameVelocityDelta = new double[0];
         public double[] comparisonRawKrakensbaneFrameVelocity = new double[0];
         public long physicsEpoch,
             floatingOriginEventCount;
@@ -83,16 +88,26 @@ namespace KspContinuum
             gravityComparisonMilliseconds;
         public string gravityAccelerationSource = "not-captured";
         public string gravityFrameAdjustedStatus = "not-accepted";
+        public string gravityPredictedFrameStatus = "not-accepted";
         public bool gravityFrameAdjustedVelocityAvailable,
-            zeroFrameAdjustedVelocityAvailable;
+            zeroFrameAdjustedVelocityAvailable,
+            gravityPredictedFrameVelocityAvailable,
+            zeroPredictedFrameVelocityAvailable;
         public double zeroFrameAdjustedVelocityMaxMetersPerSecond,
             zeroFrameAdjustedVelocityRmsMetersPerSecond,
             gravityFrameAdjustedVelocityRmsDeltaFromZero;
         public double gravityFrameAdjustedVelocityMaxMetersPerSecond,
             gravityFrameAdjustedVelocityRmsMetersPerSecond;
+        public double gravityPredictedFrameVelocityMaxMetersPerSecond,
+            gravityPredictedFrameVelocityRmsMetersPerSecond,
+            zeroPredictedFrameVelocityMaxMetersPerSecond,
+            zeroPredictedFrameVelocityRmsMetersPerSecond,
+            gravityPredictedFrameVelocityRmsDeltaFromZero,
+            frameVelocityDeltaPredictionErrorMetersPerSecond;
         public double[] gravityCenterUnityWorld = new double[0],
             gravityMeanAcceleration = new double[0],
-            gravityEndpointFrameVelocityDelta = new double[0];
+            gravityEndpointFrameVelocityDelta = new double[0],
+            frameVelocityDeltaPredictionError = new double[0];
         public bool gravityComparisonAvailable;
         public int gravityComparedBodies;
         public double gravityPositionMaxMeters,

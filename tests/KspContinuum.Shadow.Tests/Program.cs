@@ -336,6 +336,20 @@ static class Program
 
     static void GravityTests()
     {
+        Check(
+            KrakensbaneFramePersistence.PredictFrameVelocityDelta(new Vec(-2, 3, 0)).X == 2,
+            "frame persistence reverses prior correction"
+        );
+        bool badCorrection = false;
+        try
+        {
+            KrakensbaneFramePersistence.PredictFrameVelocityDelta(new Vec(double.NaN, 0, 0));
+        }
+        catch (ArgumentException)
+        {
+            badCorrection = true;
+        }
+        Check(badCorrection, "nonfinite frame correction rejected");
         var source = SimulationBatch.FromColumns(
             new WorkStamp(1, 1, 1),
             .2,
@@ -427,6 +441,8 @@ static class Program
             captureFixedTimeSeconds = 2,
             stepSeconds = .2,
             rawKrakensbaneFrameVelocity = new double[3],
+            rawKrakensbaneLastCorrection = new[] { .2, 0, 0 },
+            predictedKrakensbaneFrameVelocityDelta = new[] { -.2, 0, 0 },
             vesselId = "00000000-0000-0000-0000-000000000001",
             body = "synthetic-central-body",
             situation = "FLYING",
@@ -445,7 +461,7 @@ static class Program
         var baseline = new ShadowComparison();
         baseline.Attach(sample, one, "t", "f");
         var paired = new CentralGravityComparison();
-        paired.Attach(sample, gravity, one, "t", "f");
+        paired.Attach(sample, gravity, one, new Vec(-.2, 0, 0), "t", "f");
         var observedPosition = new[] { new Vec(10, 0, 0) };
         var observedVelocity = new Vec[1];
         var endFrame = new[] { -.2, 0.0, 0.0 };
@@ -503,6 +519,56 @@ static class Program
             sample.gravityEndpointFrameVelocityDelta[0] == -.2,
             "observed future frame delta retained"
         );
+        Check(
+            sample.gravityPredictedFrameVelocityAvailable
+                && sample.zeroPredictedFrameVelocityAvailable
+                && sample.gravityPredictedFrameVelocityRmsMetersPerSecond == 0
+                && sample.frameVelocityDeltaPredictionErrorMetersPerSecond == 0,
+            "independent persistence prediction matches synthetic endpoint"
+        );
+        var miss = new ShadowSample
+        {
+            bodies = 1,
+            physicsEpoch = 3,
+            captureFixedTimeSeconds = 2,
+            stepSeconds = .2,
+            rawKrakensbaneFrameVelocity = new double[3],
+        };
+        baseline = new ShadowComparison();
+        baseline.Attach(miss, one, "t", "f");
+        paired.Attach(miss, gravity, one, new Vec(), "t", "f");
+        baseline.Observe(
+            4,
+            "t",
+            "f",
+            true,
+            .2,
+            2.2,
+            8,
+            1,
+            observedPosition,
+            observedVelocity,
+            endFrame
+        );
+        paired.Observe(
+            4,
+            "t",
+            "f",
+            true,
+            .2,
+            2.2,
+            8,
+            1,
+            observedPosition,
+            observedVelocity,
+            endFrame
+        );
+        Check(
+            miss.frameVelocityDeltaPredictionErrorMetersPerSecond == .2
+                && miss.gravityPredictedFrameVelocityAvailable
+                && miss.gravityPredictedFrameVelocityRmsMetersPerSecond == .2,
+            "persistence miss remains a finite result"
+        );
         var body = PhysicalBody();
         body.mass = 1;
         body.constraints = 0;
@@ -533,7 +599,7 @@ static class Program
             captureFixedTimeSeconds = 2,
             stepSeconds = .2,
         };
-        paired.Attach(skipped, gravity, one, "t", "f");
+        paired.Attach(skipped, gravity, one, new Vec(), "t", "f");
         paired.Observe(
             5,
             "t",
@@ -552,7 +618,7 @@ static class Program
                 && skipped.gravityComparisonStatus == "skipped-missed-boundary",
             "gravity shares refusal gate"
         );
-        paired.Attach(skipped, gravity, one, "t", "f");
+        paired.Attach(skipped, gravity, one, new Vec(), "t", "f");
         paired.Cancel("on-interrupted");
         Check(
             skipped.gravityComparisonStatus == "skipped-on-interrupted",

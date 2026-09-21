@@ -82,8 +82,15 @@ def gravity_summary(data, samples):
     require(data.get('gravityStrategy') == 'central-point-mass-frozen-acceleration/v1', 'unsupported gravity strategy')
     for field in ('gravityExecution', 'gravityFrameAdjustedScope', 'gravityInterpretation'):
         text(data.get(field), field)
+    predictive = data.get('framePredictionStrategy') is not None
+    if predictive:
+        require(data.get('framePredictionStrategy') == 'krakensbane-last-correction-persistence/v1',
+                'unsupported frame prediction strategy')
+        text(data.get('framePredictionScope'), 'framePredictionScope')
     model_counts, comparison_counts, frame_counts, sources = Counter(), Counter(), Counter(), Counter()
     raw, adjusted = [], []
+    predicted = []
+    prediction_errors = []
     timing_fields = ('gravityPredictionMilliseconds', 'gravityComparisonMilliseconds')
     timings = {field: [] for field in timing_fields}
     raw_deltas, raw_ratios, adjusted_deltas = [], [], []
@@ -114,6 +121,68 @@ def gravity_summary(data, samples):
         zero_adjusted = sample['zeroFrameAdjustedVelocityAvailable']
         gravity_adjusted_count += gravity_adjusted
         zero_adjusted_count += zero_adjusted
+        if predictive:
+            for field in ('rawKrakensbaneLastCorrection', 'predictedKrakensbaneFrameVelocityDelta'):
+                vector = sample.get(field)
+                require(isinstance(vector, list) and len(vector) in (0, 3), 'invalid ' + field)
+                for value in vector:
+                    finite(value, field, -1e100, 1e100)
+            require(len(sample['rawKrakensbaneLastCorrection'])
+                    == len(sample['predictedKrakensbaneFrameVelocityDelta']),
+                    'frame persistence vector availability mismatch')
+            if sample['rawKrakensbaneLastCorrection']:
+                for correction, delta in zip(sample['rawKrakensbaneLastCorrection'],
+                                             sample['predictedKrakensbaneFrameVelocityDelta']):
+                    near(delta, -correction, 'frame persistence algebra')
+            predicted_status = sample.get('gravityPredictedFrameStatus')
+            require(predicted_status in comparison_statuses, 'invalid predicted frame status')
+            gravity_predicted = sample.get('gravityPredictedFrameVelocityAvailable')
+            zero_predicted = sample.get('zeroPredictedFrameVelocityAvailable')
+            require(type(gravity_predicted) is bool and type(zero_predicted) is bool,
+                    'predicted availability must be boolean')
+            require(gravity_predicted == (predicted_status == 'compared'),
+                    'predicted status contradicts availability')
+            require(not zero_predicted or gravity_predicted, 'predicted zero lacks paired gravity')
+            require(not (gravity_predicted or zero_predicted) or available,
+                    'predicted frame metric lacks raw comparison')
+            predictive_metrics = (
+                ('gravityPredictedFrameVelocityMaxMetersPerSecond',
+                 'gravityPredictedFrameVelocityRmsMetersPerSecond', gravity_predicted),
+                ('zeroPredictedFrameVelocityMaxMetersPerSecond',
+                 'zeroPredictedFrameVelocityRmsMetersPerSecond', zero_predicted))
+            for maximum_field, rms_field, metric_available in predictive_metrics:
+                maximum = finite(sample.get(maximum_field), maximum_field, 0, 1e100)
+                rms = finite(sample.get(rms_field), rms_field, 0, 1e100)
+                require(rms <= maximum, 'predicted frame RMS exceeds maximum')
+                require(metric_available or maximum == rms == 0,
+                        'unavailable predicted metric contains data')
+            predicted_delta = finite(sample.get('gravityPredictedFrameVelocityRmsDeltaFromZero'),
+                                     'predicted gravity delta', -1e100, 1e100)
+            error_vector = sample.get('frameVelocityDeltaPredictionError')
+            require(isinstance(error_vector, list) and len(error_vector) in (0, 3),
+                    'invalid frame prediction error')
+            error_norm = finite(sample.get('frameVelocityDeltaPredictionErrorMetersPerSecond'),
+                                'frame prediction error norm', 0, 1e100)
+            if gravity_predicted and zero_predicted:
+                require(len(sample['predictedKrakensbaneFrameVelocityDelta']) == 3,
+                        'predicted comparison lacks captured forecast')
+                near(predicted_delta,
+                     sample['gravityPredictedFrameVelocityRmsMetersPerSecond']
+                     - sample['zeroPredictedFrameVelocityRmsMetersPerSecond'],
+                     'predicted gravity delta')
+                require(len(error_vector) == 3, 'missing frame prediction error')
+                endpoint = sample.get('gravityEndpointFrameVelocityDelta')
+                for error, forecast, observed in zip(
+                    error_vector, sample['predictedKrakensbaneFrameVelocityDelta'], endpoint
+                ):
+                    near(error, forecast - observed, 'frame prediction error algebra')
+                near(error_norm, math.sqrt(sum(value * value for value in error_vector)),
+                     'frame prediction error norm')
+                predicted.append(sample)
+                prediction_errors.append(error_norm)
+            else:
+                require(predicted_delta == 0 and error_norm == 0 and not error_vector,
+                        'unavailable frame prediction contains results')
         require(available == (comparison == 'compared'), 'gravity availability contradicts status')
         count = integer(sample.get('gravityComparedBodies'), 'gravityComparedBodies', 0, sample['bodies'])
         for field in ('gravityMu', 'gravityOrbitalMu'):
@@ -197,6 +266,22 @@ def gravity_summary(data, samples):
         adjusted_summary = {'gravityMetersPerSecond': gravity, 'zeroMetersPerSecond': zero,
                             'rmsDeltaFromZero': gravity['rms'] - zero['rms'],
                             'sampleRmsDeltas': distribution(adjusted_deltas)}
+    predicted_summary = None
+    if predicted:
+        gravity = paired_stat(predicted, 'gravityPredictedFrameVelocityMaxMetersPerSecond',
+                              'gravityPredictedFrameVelocityRmsMetersPerSecond')
+        zero = paired_stat(predicted, 'zeroPredictedFrameVelocityMaxMetersPerSecond',
+                           'zeroPredictedFrameVelocityRmsMetersPerSecond')
+        predicted_summary = {
+            'strategy': data['framePredictionStrategy'],
+            'scope': data['framePredictionScope'],
+            'pairedSamples': len(predicted),
+            'pairedBodyComparisons': sum(s['gravityComparedBodies'] for s in predicted),
+            'gravityMetersPerSecond': gravity,
+            'zeroMetersPerSecond': zero,
+            'rmsDeltaFromZero': gravity['rms'] - zero['rms'],
+            'frameDeltaErrorMetersPerSecond': distribution(prediction_errors),
+        }
     return {'strategy': data['gravityStrategy'], 'execution': data['gravityExecution'],
             'interpretation': data['gravityInterpretation'], 'frameAdjustedScope': data['gravityFrameAdjustedScope'],
             'modelStatuses': dict(model_counts), 'comparisonStatuses': dict(comparison_counts),
@@ -205,6 +290,7 @@ def gravity_summary(data, samples):
             'gravityAdjustedAvailableSamples': gravity_adjusted_count, 'zeroAdjustedAvailableSamples': zero_adjusted_count,
             'adjustedPairedSamples': len(adjusted), 'adjustedPairedBodyComparisons': sum(s['gravityComparedBodies'] for s in adjusted),
             'raw': raw_summary, 'adjustedVelocity': adjusted_summary,
+            'predictedFrameVelocity': predicted_summary,
             'timingsMilliseconds': {key: distribution(values) for key, values in timings.items()},
             'aggregation': 'body-weighted RMS on matched samples; deltas compare like-for-like frames; adjusted results condition on observed future frame velocity'}
 

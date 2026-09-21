@@ -91,4 +91,25 @@ An installed KSP 1.12.5 run used CKAN package `0.1.4-gravity.CA501F739415` from 
 
 In raw Unity coordinates, central-field velocity RMS was `0.00465526 m/s` versus `0.0000799288 m/s` for zero force, a ratio of `58.24`. After applying the same observed endpoint Krakensbane velocity delta to both predictions, central-field RMS was `0.000841748 m/s` versus `0.00381787 m/s` for zero force, a reduction of `0.00297613 m/s` or about 78%. Every matched sample favored central gravity in the adjusted pair. Median synchronous gravity prediction cost was `0.0192 ms`; median paired comparison cost was `0.0536 ms`.
 
-The opposing raw and adjusted results confirm that coordinate treatment dominates this one-step orbital workload. They support central gravity as a useful model and make prediction of the frame transition the next experiment. The adjusted result remains conditioned on the observed future frame delta; it is not yet an independently runnable forecast, stock-integrator equivalence, or evidence for active state publication.
+## Independent frame forecast
+
+The next candidate persists Krakensbane's most recent correction for one more physics boundary. Native KSP 1.12.5 inspection shows that `AddExcess(x)` records `lastCorrection = -x` while increasing frame velocity by `x`; `Zero()` records the old frame velocity as the correction while decreasing frame velocity by that amount. A quiet update clears the correction. The portable forecast is therefore:
+
+```text
+predicted next frame-velocity delta = -captured lastCorrection
+predicted raw body velocity = physical-model velocity - predicted frame delta
+```
+
+The plugin captures `Krakensbane.GetLastCorrection()` beside the existing frame velocity snapshot and freezes the resulting prediction before the endpoint exists. The same prediction is applied to both the zero-force and central-gravity branches. Receipts retain the captured correction, forecast, observed forecast error, and paired velocity residuals. The existing retrospective adjustment remains an oracle diagnostic.
+
+This is `krakensbane-last-correction-persistence/v1`, not an exact reproduction of the next native branch. Callback order, safety or velocity-threshold crossings, packed-state transitions, and other mods calling `AddFrameVelocity` may invalidate persistence. No forecast-specific endpoint filter hides a miss, but the existing eligibility guards still skip packed, paused, or otherwise unavailable observations. This candidate does not correct floating-origin position changes.
+
+### Installed persistence result
+
+Package `0.1.5-frame.B2348AE8CD1B` (archive SHA-256 `b2348ae8cd1b3e06d823df256a5e1d0544a8a9b18d1371cc5b2b9520e72d38ce`) ran from source commit `9fc9d2cb3f9dd39155767cf692499e08b3a3cf61` on the preserved Minmus-orbit workload at 1920×1080. The capture completed 120 submissions in 4.937 seconds, with 118 matched samples and 1,180 body comparisons; two requests retained explicit missed-boundary skips.
+
+The persistence forecast's frame-delta error ranged from `1.12885e-7` to `1.69753e-7 m/s`, with median `1.13064e-7 m/s`. Predicted-frame central-gravity velocity RMS was `0.000842197 m/s` versus `0.00381803 m/s` for predicted-frame zero force, a reduction of `0.00297583 m/s`, or about 78%. The corresponding retrospective-oracle values were `0.000842197` and `0.00381803 m/s`; their near equality on this smooth coast is measured evidence for persistence on this workload, not universal Krakensbane equivalence.
+
+The raw receipt SHA-256 is `5f3b127056e82679b75d8dc0bfb58e8e72af8c515afb97a50f97f4e6925663c2`. The derived summary SHA-256 is `80771e334b899dcdfb1310e89bf629264d1f52d25211ad9ea7cd2284cc1cc298`.
+
+The opposing raw and adjusted results confirm that coordinate treatment dominates this one-step orbital workload. They support central gravity as a useful model. The retrospective result remains conditioned on the observed future frame delta; the installed persistence result qualifies an independent forecast for this coast workload. Neither establishes stock-integrator equivalence, transition-regime coverage, or active state publication.
