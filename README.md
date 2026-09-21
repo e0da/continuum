@@ -67,7 +67,7 @@ Development advances along independent worker/backend, profiling, replay/input, 
 
 The optional `--continuum-part-forces` probe captures a bounded read-only Part census before integration, with provider-local epoch and explicit missing force channels. It is a component-observation candidate; installed ordering and mod compatibility remain unqualified.
 
-The standalone [encounter planner](docs/encounter-scheduler.md) tests conservative stopping boundaries and separate horizons for quiet objects. It does not yet own game time or resolve collisions.
+The standalone [encounter planner](docs/encounter-scheduler.md) tests conservative stopping boundaries and separate horizons for quiet objects. A bounded [worldline tube toy](docs/worldline-tubes.md) adds physical support, approximation uncertainty, validity and expiry around those paths and compares screening with prescribed-curve oracles. Neither owns game time or resolves collisions.
 
 See [interaction regimes and scheduling](docs/interaction-regimes.md), [integration map](docs/integration-map.md), [force-observation design](docs/force-observation.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
 
