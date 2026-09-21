@@ -22,7 +22,7 @@ namespace KspContinuum
         {
             AeroCaptureValidation.Text(provider, 128); AeroCaptureValidation.Text(version, 128);
             AeroCaptureValidation.Text(assembly, 256); AeroCaptureValidation.Sha256(sha256);
-            Guid parsed; if (!Guid.TryParse(mvid, out parsed)) throw new ArgumentException("Invalid provider MVID.");
+            Guid parsed; if (!Guid.TryParse(mvid, out parsed) || parsed == Guid.Empty) throw new ArgumentException("Invalid provider MVID.");
             this.provider = provider; providerVersion = version; assemblyName = assembly;
             assemblySha256 = sha256.ToLowerInvariant(); assemblyMvid = parsed.ToString("D");
         }
@@ -32,21 +32,39 @@ namespace KspContinuum
     {
         public const int MaximumPatches = 64;
         public readonly AeroProviderFingerprint provider;
+        public readonly ReadOnlyCollection<AeroPatchTarget> targets;
+        public AeroPatchProvenance(AeroProviderFingerprint provider, AeroPatchTarget[] targets)
+        {
+            if (provider == null || targets == null || targets.Length != 3)
+                throw new ArgumentException("Invalid patch provenance.");
+            var required = new HashSet<string> { "FlightIntegrator.UpdateAerodynamics", "FlightIntegrator.ApplyAeroDrag", "FlightIntegrator.ApplyAeroLift" };
+            int patchCount = 0;
+            foreach (var target in targets)
+            {
+                if (target == null || !required.Remove(target.targetMethod)) throw new ArgumentException("Patch provenance must cover each stock aero target exactly once.");
+                patchCount += target.orderedPatches.Count;
+            }
+            if (patchCount > MaximumPatches) throw new ArgumentException("Patch graph exceeds its bound.");
+            this.provider = provider; this.targets = Array.AsReadOnly((AeroPatchTarget[])targets.Clone());
+        }
+    }
+
+    public sealed class AeroPatchTarget
+    {
         public readonly string targetMethod;
         public readonly ReadOnlyCollection<AeroPatchEntry> orderedPatches;
-        public AeroPatchProvenance(AeroProviderFingerprint provider, string target, AeroPatchEntry[] patches)
+        public AeroPatchTarget(string target, AeroPatchEntry[] patches)
         {
-            if (provider == null || patches == null || patches.Length > MaximumPatches)
-                throw new ArgumentException("Invalid patch provenance.");
             AeroCaptureValidation.Text(target, 512);
+            if (patches == null || patches.Length > AeroPatchProvenance.MaximumPatches) throw new ArgumentException("Invalid patch list.");
             var identities = new HashSet<string>();
             for (int index = 0; index < patches.Length; index++)
             {
                 var patch = patches[index];
                 if (patch == null || patch.executionIndex != index || !identities.Add(patch.owner + "\n" + patch.patchMethod))
-                    throw new ArgumentException("Patch identities must be present and unique.");
+                    throw new ArgumentException("Patch identities and order must be unique and contiguous.");
             }
-            this.provider = provider; targetMethod = target;
+            targetMethod = target;
             orderedPatches = Array.AsReadOnly((AeroPatchEntry[])patches.Clone());
         }
     }
@@ -76,14 +94,14 @@ namespace KspContinuum
         public AeroCaptureContext(string session, string vessel, string frameKey, long epoch, long topology, long frame,
             int unityFrame, int thread, int ordinal, double ut, double fixedTime, double step)
         {
-            Guid parsed;
-            if (!Guid.TryParse(session, out parsed) || !Guid.TryParse(vessel, out parsed))
+            Guid sessionGuid, vesselGuid;
+            if (!Guid.TryParse(session, out sessionGuid) || sessionGuid == Guid.Empty || !Guid.TryParse(vessel, out vesselGuid) || vesselGuid == Guid.Empty)
                 throw new ArgumentException("Invalid capture identity.");
             AeroCaptureValidation.Text(frameKey, 512);
-            if (epoch < 1 || topology < 1 || frame < 1 || unityFrame < 0 || thread < 1 || ordinal < 0 || ordinal >= AeroCaptureReport.MaximumPartsPerSample)
+            if (epoch < 1 || topology < 1 || frame < 1 || unityFrame < 0 || thread < 1 || ordinal < 0 || ordinal >= AeroCaptureReport.MaximumPartsPerSample * 2)
                 throw new ArgumentException("Invalid synchronous capture context.");
             AeroCaptureValidation.Number(ut); AeroCaptureValidation.Number(fixedTime); AeroCaptureValidation.Positive(step);
-            sessionId = session; vesselId = vessel; this.frameKey = frameKey; physicsEpoch = epoch;
+            sessionId = sessionGuid.ToString("D"); vesselId = vesselGuid.ToString("D"); this.frameKey = frameKey; physicsEpoch = epoch;
             topologyGeneration = topology; frameGeneration = frame; this.unityFrame = unityFrame;
             mainThreadId = thread; callOrdinal = ordinal; universalTime = ut; fixedTimeSeconds = fixedTime; stepSeconds = step;
         }
@@ -98,19 +116,40 @@ namespace KspContinuum
         public readonly AeroCaptureContext step;
         public readonly long flightId;
         public readonly int nativePartInstanceId, nativeRigidbodyInstanceId;
-        public readonly double massKilograms, densityKilogramsPerCubicMeter, mach;
-        public readonly Vec worldCenterOfMass, worldVelocity, relativeAirVelocity;
+        public readonly double massKilograms, densityKilogramsPerCubicMeter, staticPressurePascals, temperatureKelvin,
+            speedOfSoundMetersPerSecond, mach, aerodynamicAreaSquareMeters, exposedAreaSquareMeters;
+        public readonly bool shielded;
+        public readonly Vec worldCenterOfMass, worldVelocity, relativeAirVelocity, worldAngularVelocity,
+            worldAttitudeXYZ, dragCubeArea, dragCubeDepth;
+        public readonly double worldAttitudeW;
         public AeroPartContext(AeroCaptureContext step, long flightId, int partId, int rigidbodyId, double mass, double density,
-            double mach, Vec center, Vec velocity, Vec airVelocity)
+            double pressure, double temperature, double speedOfSound, double mach, double aerodynamicArea, double exposedArea,
+            bool shielded, Vec center, Vec velocity, Vec airVelocity, Vec angularVelocity, Vec attitudeXYZ, double attitudeW,
+            Vec dragCubeArea, Vec dragCubeDepth)
         {
-            if (step == null || flightId < 1 || flightId > uint.MaxValue || mass <= 0 || density < 0 || mach < 0)
+            if (step == null || flightId < 1 || flightId > uint.MaxValue || mass <= 0 || density < 0 || pressure < 0 ||
+                temperature < 0 || speedOfSound < 0 || mach < 0 || aerodynamicArea < 0 || exposedArea < 0)
                 throw new ArgumentException("Invalid aero part context.");
-            AeroCaptureValidation.Positive(mass); AeroCaptureValidation.Number(density); AeroCaptureValidation.Number(mach);
-            AeroCaptureValidation.Vector(center); AeroCaptureValidation.Vector(velocity); AeroCaptureValidation.Vector(airVelocity);
+            foreach (double value in new[] { mass, density, pressure, temperature, speedOfSound, mach, aerodynamicArea, exposedArea, attitudeW }) AeroCaptureValidation.Number(value);
+            foreach (var value in new[] { center, velocity, airVelocity, angularVelocity, attitudeXYZ, dragCubeArea, dragCubeDepth }) AeroCaptureValidation.Vector(value);
+            double norm = attitudeXYZ.X * attitudeXYZ.X + attitudeXYZ.Y * attitudeXYZ.Y + attitudeXYZ.Z * attitudeXYZ.Z + attitudeW * attitudeW;
+            if (Math.Abs(norm - 1) > 1e-9 || dragCubeArea.X < 0 || dragCubeArea.Y < 0 || dragCubeArea.Z < 0 ||
+                dragCubeDepth.X < 0 || dragCubeDepth.Y < 0 || dragCubeDepth.Z < 0) throw new ArgumentException("Invalid stock geometry state.");
             this.step = step; this.flightId = flightId; nativePartInstanceId = partId; nativeRigidbodyInstanceId = rigidbodyId;
-            massKilograms = mass; densityKilogramsPerCubicMeter = density; this.mach = mach;
-            worldCenterOfMass = center; worldVelocity = velocity; relativeAirVelocity = airVelocity;
+            massKilograms = mass; densityKilogramsPerCubicMeter = density; staticPressurePascals = pressure;
+            temperatureKelvin = temperature; speedOfSoundMetersPerSecond = speedOfSound; this.mach = mach;
+            aerodynamicAreaSquareMeters = aerodynamicArea; exposedAreaSquareMeters = exposedArea; this.shielded = shielded;
+            worldCenterOfMass = center; worldVelocity = velocity; relativeAirVelocity = airVelocity; worldAngularVelocity = angularVelocity;
+            worldAttitudeXYZ = attitudeXYZ; worldAttitudeW = attitudeW; this.dragCubeArea = dragCubeArea; this.dragCubeDepth = dragCubeDepth;
         }
+        public bool SameState(AeroPartContext other) => other != null && flightId == other.flightId && nativePartInstanceId == other.nativePartInstanceId &&
+            nativeRigidbodyInstanceId == other.nativeRigidbodyInstanceId && massKilograms == other.massKilograms && densityKilogramsPerCubicMeter == other.densityKilogramsPerCubicMeter &&
+            staticPressurePascals == other.staticPressurePascals && temperatureKelvin == other.temperatureKelvin && speedOfSoundMetersPerSecond == other.speedOfSoundMetersPerSecond &&
+            mach == other.mach && aerodynamicAreaSquareMeters == other.aerodynamicAreaSquareMeters && exposedAreaSquareMeters == other.exposedAreaSquareMeters && shielded == other.shielded &&
+            AeroCaptureValidation.Equal(worldCenterOfMass, other.worldCenterOfMass) && AeroCaptureValidation.Equal(worldVelocity, other.worldVelocity) &&
+            AeroCaptureValidation.Equal(relativeAirVelocity, other.relativeAirVelocity) && AeroCaptureValidation.Equal(worldAngularVelocity, other.worldAngularVelocity) &&
+            AeroCaptureValidation.Equal(worldAttitudeXYZ, other.worldAttitudeXYZ) && worldAttitudeW == other.worldAttitudeW &&
+            AeroCaptureValidation.Equal(dragCubeArea, other.dragCubeArea) && AeroCaptureValidation.Equal(dragCubeDepth, other.dragCubeDepth);
     }
 
     public sealed class AeroBodyPublication
@@ -143,11 +182,13 @@ namespace KspContinuum
         {
             if (context == null || publications == null || publications.Length > AeroCaptureReport.MaximumPartsPerSample * 2)
                 throw new ArgumentException("Invalid aero sample.");
-            var keys = new HashSet<string>(); var parts = new HashSet<long>(); var ordinals = new HashSet<int>();
+            var keys = new HashSet<string>(); var parts = new Dictionary<long, AeroPartContext>(); var ordinals = new HashSet<int>();
             foreach (var publication in publications)
             {
                 if (publication == null || !context.SameStep(publication.context.step)) throw new ArgumentException("Publication context mismatch.");
-                parts.Add(publication.context.flightId);
+                AeroPartContext prior;
+                if (parts.TryGetValue(publication.context.flightId, out prior) && !prior.SameState(publication.context)) throw new ArgumentException("Drag and lift must share identical per-part state.");
+                parts[publication.context.flightId] = publication.context;
                 if (!ordinals.Add(publication.context.step.callOrdinal)) throw new ArgumentException("Call ordinals must be unique.");
                 string key = publication.context.flightId + ":" + publication.kind;
                 if (!keys.Add(key)) throw new ArgumentException("Duplicate part publication kind.");
@@ -185,6 +226,8 @@ namespace KspContinuum
                 throw new ArgumentException("Invalid capture requires an integrity reason.");
             if (disposition != AeroCaptureDisposition.Valid && samples.Length != 0)
                 throw new ArgumentException("Abstained or invalid captures cannot publish partial samples.");
+            if (cleanup == AeroCleanupOutcome.Failed && disposition != AeroCaptureDisposition.Invalid)
+                throw new ArgumentException("Cleanup failure invalidates the capture.");
             this.provenance = provenance; this.disposition = disposition; this.reason = reason; this.cleanup = cleanup;
             this.samples = Array.AsReadOnly((AeroCaptureSample[])samples.Clone());
         }

@@ -19,6 +19,7 @@ jobs:
       - run: dotnet run --project tests/KspContinuum.Profiling.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.PlayerLoop.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.ForceObservation.Tests -c Release
+      - run: dotnet run --project tests/KspContinuum.AeroCapture.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.LifecycleTrace.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.Shadow.Tests -c Release
       - run: dotnet run --project src/KspContinuum.Mission/Tests/Mission.Tests.csproj -c Release
