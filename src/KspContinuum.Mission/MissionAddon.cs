@@ -17,6 +17,7 @@ namespace KspContinuum.Mission
         Phase phase;
         readonly LandingAcceptance acceptance = new LandingAcceptance();
         readonly MissionCleanup cleanup = new MissionCleanup();
+        readonly MissionTermination termination = new MissionTermination();
         readonly HashSet<uint> landerParts = new HashSet<uint>();
         readonly Dictionary<string, double> screenshots = new Dictionary<string, double>();
         FlightTimeline timeline;
@@ -46,6 +47,8 @@ namespace KspContinuum.Mission
             string[] arguments = Environment.GetCommandLineArgs();
             if (Array.IndexOf(arguments, "--continuum-survey") < 0 && Array.IndexOf(arguments, "--continuum-minmus") < 0 &&
                 Array.IndexOf(arguments, "--continuum-survey-disable-throttle-floor") < 0) return;
+            var shutdownRegistration = QualificationShutdown.Requests.Register("mission", CancelMission);
+            cleanup.Track("shutdown-registration", shutdownRegistration.Dispose);
             bootstrapPending = true;
             bootstrapWall = Time.realtimeSinceStartup;
             DontDestroyOnLoad(gameObject);
@@ -237,7 +240,7 @@ namespace KspContinuum.Mission
                         OwnFlightCleanup();
                         core.Staging.AutoStageLimitRequest(2, this);
                         var checkpointStaging = core.Staging;
-                        cleanup.Track("staging-limit", () => checkpointStaging.AutoStageLimitRemove(this));
+                        cleanup.TrackFlight("staging-limit", FlightOwnerAvailable, () => checkpointStaging.AutoStageLimitRemove(this));
                         core.Node.Autowarp = true;
                         PrepareSite(checkpointRestore.Epoch);
                         SaveMilestone("checkpoint-restored");
@@ -263,7 +266,7 @@ namespace KspContinuum.Mission
                         File.AppendAllText(Path.Combine(directory, "mission.txt"), "inputDirectory=" + timeline.OutputDirectory + "\n");
                         core.Staging.AutostageLimit.Val = 2;
                         var staging = core.Staging;
-                        cleanup.Track("staging-limit", () => staging.AutoStageLimitRemove(this));
+                        cleanup.TrackFlight("staging-limit", FlightOwnerAvailable, () => staging.AutoStageLimitRemove(this));
                         core.Staging.AutoStageLimitRequest(2, this);
                         core.AscentSettings.AscentType = AscentType.CLASSIC;
                         core.AscentSettings.DesiredOrbitAltitude.Val = OrbitAltitude;
@@ -400,13 +403,13 @@ namespace KspContinuum.Mission
         void OwnFlightCleanup()
         {
             Vessel controlledVessel = vessel;
-            cleanup.Track("throttle", () =>
+            cleanup.TrackFlight("throttle", () => FlightGlobals.fetch != null && controlledVessel != null, () =>
             {
-                if (controlledVessel != null) controlledVessel.ctrlState.mainThrottle = 0;
-                if (FlightGlobals.ActiveVessel == controlledVessel) FlightInputHandler.state.mainThrottle = 0;
+                if (controlledVessel.ctrlState != null) controlledVessel.ctrlState.mainThrottle = 0;
+                if (FlightGlobals.ActiveVessel == controlledVessel && FlightInputHandler.state != null) FlightInputHandler.state.mainThrottle = 0;
             });
             var warp = core.Warp;
-            cleanup.Track("warp", () => { if (FlightGlobals.ActiveVessel == controlledVessel) warp.MinimumWarp(true); });
+            cleanup.TrackFlight("warp", FlightOwnerAvailable, () => { if (FlightGlobals.ActiveVessel == controlledVessel) warp.MinimumWarp(true); });
         }
 
         void StartLanding()
@@ -419,7 +422,7 @@ namespace KspContinuum.Mission
                 var thrust = core.Thrust;
                 bool previousFloor = thrust.LimiterMinThrottle;
                 // Register first so reverse cleanup releases the landing controller before restoring its setting.
-                cleanup.Track("landing-throttle-floor", () =>
+                cleanup.TrackFlight("landing-throttle-floor", FlightOwnerAvailable, () =>
                 {
                     if (!thrust.LimiterMinThrottle) thrust.LimiterMinThrottle = previousFloor;
                 });
@@ -724,9 +727,11 @@ namespace KspContinuum.Mission
             Finish(false, error.GetType().Name + ": " + error.Message);
         }
 
+        bool FlightOwnerAvailable() { return FlightGlobals.fetch != null && vessel != null && core != null; }
+
         void TrackController(string name, ComputerModule controller)
         {
-            cleanup.Track(name, () =>
+            cleanup.TrackFlight(name, FlightOwnerAvailable, () =>
             {
                 if (controller.Users.Contains(this)) controller.Users.Remove(this);
             });
@@ -759,10 +764,10 @@ namespace KspContinuum.Mission
 
         void Finish(bool passed, string reason)
         {
-            if (phase == Phase.Done) return;
+            if (!termination.TryBegin(passed ? "passed" : "failed")) return;
             phase = Phase.Done;
             List<Exception> errors = ReleaseOwned();
-            if (errors.Count != 0) passed = false;
+            if (errors.Count != 0 || cleanup.Skipped.Count != 0) { passed = false; termination.FailFinalization(); }
             try
             {
                 if (HighLogic.CurrentGame != null && HighLogic.SaveFolder == saveName)
@@ -778,14 +783,16 @@ namespace KspContinuum.Mission
             finally
             {
                 CloseTelemetry(errors);
-                if (errors.Count != 0) passed = false;
+                if (errors.Count != 0 || cleanup.Skipped.Count != 0) { passed = false; termination.FailFinalization(); }
                 try
                 {
                     if (directory != null) File.AppendAllText(Path.Combine(directory, "mission.txt"),
-                        "status=" + (passed ? "passed" : "failed") + "\nreason=" + reason.Replace('\n', ' ') + "\n" +
+                        "status=" + (passed ? "passed" : "failed") + "\nreason=" + reason.Replace('\n', ' ') + "\ncleanupStatus=" +
+                        (errors.Count != 0 ? "errors" : cleanup.Skipped.Count != 0 ? "flight-unavailable" : "complete") + "\n" +
+                        string.Concat(cleanup.Skipped.Select(name => "cleanupSkipped=" + name + "\n")) +
                         string.Concat(errors.Select(error => "finalization=" + error.GetType().Name + ": " + error.Message.Replace('\n', ' ') + "\n")));
                 }
-                catch (Exception error) { passed = false; Debug.LogError("[ContinuumMission] Outcome receipt failed: " + error); }
+                catch (Exception error) { passed = false; termination.FailFinalization(); Debug.LogError("[ContinuumMission] Outcome receipt failed: " + error); }
                 Debug.Log("[ContinuumMission] " + (passed ? "PASSED" : "FAILED") + ": " + reason);
                 if (MissionCompatibility.ShouldExit(Application.isBatchMode, Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-exit") >= 0))
                     Application.Quit(passed ? 0 : 1);
@@ -793,10 +800,50 @@ namespace KspContinuum.Mission
             }
         }
 
-        public void OnDestroy()
+        public string CancelMission(string reason) { return InterruptMission(reason, "before-application-quit"); }
+
+        string InterruptMission(string reason, string context)
         {
+            if (termination.Status != null) return "already-terminal";
+            if (!active && !bootstrapPending) return "inactive";
+            if (!termination.TryBegin("interrupted")) return "already-terminal";
+            string interruptedPhase = phase.ToString();
+            phase = Phase.Done; active = false; bootstrapPending = false;
             List<Exception> errors = ReleaseOwned();
             CloseTelemetry(errors);
+            string cleanupStatus = errors.Count != 0 ? "errors" : cleanup.Skipped.Count != 0 ? "flight-unavailable" : "complete";
+            bool written = false;
+            try
+            {
+                if (directory != null)
+                {
+                    File.AppendAllText(Path.Combine(directory, "mission.txt"), "status=interrupted\nreason=" +
+                        (reason ?? "unspecified").Replace('\n', ' ').Replace('\r', ' ') + "\nshutdownContext=" + context +
+                        "\ninterruptedPhase=" + interruptedPhase + "\ncleanupStatus=" + cleanupStatus + "\n" +
+                        string.Concat(cleanup.Skipped.Select(name => "cleanupSkipped=" + name + "\n")) +
+                        string.Concat(errors.Select(error => "finalization=" + error.GetType().Name + ": " +
+                            error.Message.Replace('\n', ' ').Replace('\r', ' ') + "\n")));
+                    written = true;
+                }
+            }
+            catch (Exception error)
+            {
+                errors.Add(error);
+                Debug.LogError("[ContinuumMission] Interrupted outcome receipt failed: " + error);
+            }
+            Debug.Log("[ContinuumMission] INTERRUPTED at " + interruptedPhase + "; cleanup=" + cleanupStatus + "; receipt=" + written);
+            if (cleanupStatus != "complete" || errors.Count != 0) return "error";
+            return written ? "interrupted" : "inactive";
+        }
+
+        public void OnDestroy()
+        {
+            if (termination.Status == null && (active || bootstrapPending)) InterruptMission("mission-addon-destroyed", "late-teardown");
+            else
+            {
+                List<Exception> errors = ReleaseOwned();
+                CloseTelemetry(errors);
+            }
         }
     }
 }

@@ -14,6 +14,18 @@ namespace KspContinuum.Mission
             owned.Add(new KeyValuePair<string, Action>(name, release));
         }
 
+        readonly List<string> skipped = new List<string>();
+        public IReadOnlyList<string> Skipped { get { return skipped.AsReadOnly(); } }
+        public void TrackFlight(string name, Func<bool> available, Action release)
+        {
+            if (available == null || release == null) throw new ArgumentNullException("Flight cleanup callbacks");
+            Track(name, () =>
+            {
+                if (!available()) { skipped.Add(name); return; }
+                release();
+            });
+        }
+
         public Exception Release(string name)
         {
             int index = owned.FindIndex(item => item.Key == name);

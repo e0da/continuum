@@ -11,7 +11,7 @@ namespace KspContinuum
         string directory;
         Probe probe;
         FlightPanel panel;
-        bool active, capturing;
+        bool active, capturing, exiting;
         int next;
         float started;
         readonly string[] phases = { "coast", "powered", "contact" };
@@ -21,14 +21,18 @@ namespace KspContinuum
             if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-qualify") < 0) return;
             if (Versioning.version_major != 1 || Versioning.version_minor != 12 || Versioning.Revision != 5)
             { Application.Quit(2); return; }
-            directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData",
-                "qualification-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") + "-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(directory);
-            File.WriteAllText(Path.Combine(directory, "scope.txt"),
-                "Start-context classified windows; inspect each raw frame for changes. Stock remains authoritative.\n" +
-                "Coast: near-zero throttle command, unpacked, airborne. Powered: throttle command > 0.05. Contact: landed or splashed.\n" +
-                "Throttle is a command, not proof of applied force. Contact is a native situation, not collision profiling attribution.\n");
-            started = Time.realtimeSinceStartup; active = true;
+            try
+            {
+                directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData",
+                    "qualification-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") + "-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, "scope.txt"),
+                    "Start-context classified windows; inspect each raw frame for changes. Stock remains authoritative.\n" +
+                    "Coast: near-zero throttle command, unpacked, airborne. Powered: throttle command > 0.05. Contact: landed or splashed.\n" +
+                    "Throttle is a command, not proof of applied force. Contact is a native situation, not collision profiling attribution.\n");
+                started = Time.realtimeSinceStartup; active = true;
+            }
+            catch (Exception error) { Fail(error); }
         }
 
         public void Update()
@@ -81,7 +85,7 @@ namespace KspContinuum
             IEnumerator work = probe.Run(report => File.WriteAllText(Path.Combine(directory, phase + "-markers.json"), ReportJson.Encode(report)));
             try
             {
-                while (true)
+                while (active)
                 {
                     bool more;
                     try { more = work.MoveNext(); }
@@ -89,7 +93,7 @@ namespace KspContinuum
                     if (!more) break;
                     yield return work.Current;
                 }
-                next++;
+                if (active) next++;
             }
             finally
             {
@@ -101,22 +105,46 @@ namespace KspContinuum
         void Fail(Exception error)
         {
             Debug.LogException(error);
-            File.WriteAllText(Path.Combine(directory, "error.txt"), error.ToString());
-            Finish("error", 2);
+            try { if (directory != null) File.WriteAllText(Path.Combine(directory, "error.txt"), error.ToString()); }
+            catch (Exception exportError) { Debug.LogException(exportError); }
+            finally { Finish("error", 2); }
         }
         void Finish(string status, int code)
         {
-            active = false;
-            if (probe != null) probe.Dispose();
-            if (panel != null) panel.StopShadowCapture();
-            File.WriteAllText(Path.Combine(directory, "status.txt"), status + "\ncompletedWindows=" + next + "\n");
-            Application.Quit(code);
+            if (exiting) return;
+            exiting = true; active = false;
+            bool captureReleased = StopCaptures();
+            int exitCode = code;
+            try
+            {
+                QualificationShutdown.RecordCaptureCleanup(captureReleased);
+                ShutdownReceipt shutdown = QualificationShutdown.Requests.Request("qualification-" + status);
+                if (shutdown.HasErrors) exitCode = 2;
+                File.WriteAllText(Path.Combine(directory, "shutdown.txt"), shutdown.Text(status));
+            }
+            catch (Exception error) { exitCode = 2; Debug.LogException(error); }
+            try { File.WriteAllText(Path.Combine(directory, "status.txt"), status + "\ncompletedWindows=" + next + "\n"); }
+            catch (Exception error) { exitCode = 2; Debug.LogException(error); }
+            finally { Application.Quit(exitCode); }
+        }
+        bool StopCaptures()
+        {
+            bool success = true;
+            try { if (probe != null) probe.Dispose(); }
+            catch (Exception error) { success = false; Debug.LogException(error); }
+            try { if (panel != null) panel.StopShadowCapture(); }
+            catch (Exception error) { success = false; Debug.LogException(error); }
+            return success;
         }
         public void OnDestroy()
         {
-            if (probe != null) probe.Dispose();
-            if (active && directory != null) File.WriteAllText(Path.Combine(directory, "status.txt"), "interrupted\ncompletedWindows=" + next + "\n");
-            active = false;
+            StopCaptures();
+            try
+            {
+                if (active && directory != null) File.WriteAllText(Path.Combine(directory, "status.txt"), "interrupted\ncompletedWindows=" + next + "\n");
+            }
+            catch (Exception error) { Debug.LogException(error); }
+            finally { active = false; }
         }
     }
 }

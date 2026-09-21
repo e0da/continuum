@@ -149,12 +149,45 @@ class QualificationReportTests(unittest.TestCase):
             cwd=ROOT, text=True, capture_output=True,
         )
 
+    def test_cleanup_error_is_separate_from_complete_capture(self):
+        (self.source / "shutdown.txt").write_text(
+            "schema=ksp-continuum-shutdown/v1\nstatus=error\nrequestedBy=qualification\n"
+            "captureStatus=complete\nhandlers=2\nhandler=mission:error\n"
+            "handler=recorder:inactive\nerrors=1\n")
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads((self.output / "summary.json").read_text())
+        self.assertEqual("complete", summary["status"])
+        self.assertIn("shutdown", summary)
+        self.assertEqual("error", summary["shutdown"]["status"])
+        self.assertEqual(1, summary["shutdown"]["errors"])
+        self.assertIn("shutdown.txt", [source["path"] for source in summary["sources"]])
+        page = (self.output / "index.html").read_text()
+        self.assertIn("Shutdown status: <strong>Error</strong>", page)
+        self.assertIn("mission: error", page)
+
+    def test_rejects_contradictory_or_unsafe_shutdown(self):
+        base = ("schema=ksp-continuum-shutdown/v1\nstatus=error\nrequestedBy=qualification\n"
+                "captureStatus=complete\nhandlers=1\nhandler=mission:error\nerrors=1\n")
+        for value in (base.replace("status=error", "status=complete"),
+                      base.replace("handlers=1", "handlers=2"),
+                      base.replace("errors=1", "errors=0"),
+                      base.replace("captureStatus=complete", "captureStatus=timeout"),
+                      base.replace("mission:error", "/private/runtime:error"),
+                      base + "status=error\n"):
+            with self.subTest(receipt=value):
+                (self.source / "shutdown.txt").write_text(value)
+                result = self.run_report()
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(self.output.exists())
+
     def test_builds_bounded_portable_summary_without_claiming_attribution(self):
         result = self.run_report()
         self.assertEqual(0, result.returncode, result.stderr)
         summary = json.loads((self.output / "summary.json").read_text(encoding="utf-8"))
         self.assertEqual("ksp-continuum-qualification-summary/v1", summary["schema"])
         self.assertEqual("qualification-session", summary["sourceSession"])
+        self.assertIsNone(summary["shutdown"])
         self.assertEqual(["coast", "powered", "contact"], [p["id"] for p in summary["phases"]])
 
         coast = summary["phases"][0]

@@ -7,6 +7,7 @@ static class Program
     static void Check(bool value) { assertions++; if (!value) throw new Exception("Mission acceptance assertion " + assertions); }
     static void Main()
     {
+        ShutdownTests.Run(Check);
         CheckpointTests.Run(Check);
         Check(Math.Abs(SurveyPolicy.Distance(60000, 0, 179.5, 0, -179.5) - Math.PI * 60000 / 180) < 1e-6);
         Check(Math.Abs(SurveyPolicy.FutureLongitude(-10, 100, 400) - 80) < 1e-9);
