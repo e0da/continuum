@@ -49,7 +49,8 @@ namespace KspContinuum
             }
             var type = value.GetType();
             if (type != typeof(BenchReport) && type != typeof(Sample) && type != typeof(VesselReport) &&
-                type != typeof(PartReport) && type != typeof(ProbeReport) && type != typeof(MarkerReport))
+                type != typeof(PartReport) && type != typeof(ProbeReport) && type != typeof(MarkerReport) &&
+                type != typeof(ProfileFrame) && type != typeof(ProfileDistribution) && type != typeof(ProfileMarkerSummary))
                 throw new ArgumentException("Unsupported report type: " + type.FullName);
             output.Append('{'); bool firstField = true;
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))

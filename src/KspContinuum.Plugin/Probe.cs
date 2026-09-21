@@ -1,51 +1,170 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
+using UnityEngine;
 using UnityEngine.Profiling;
 
 namespace KspContinuum
 {
     public sealed class Probe : IDisposable
     {
-        readonly List<Recorder> recorders = new List<Recorder>();
-        readonly List<bool> enabledBefore = new List<bool>();
-        public void Dispose()
+        sealed class Slot
         {
-            for (int i = 0; i < recorders.Count; i++) recorders[i].enabled = enabledBefore[i];
-            recorders.Clear(); enabledBefore.Clear();
+            public Recorder Recorder;
+            public bool EnabledBefore;
+            public MarkerReport Report;
         }
+        static Probe owner;
+        static readonly string[] Names = { "Physics.Simulate", "Physics.Processing", "BehaviourFixedUpdate", "BehaviourUpdate", "GC.Collect" };
+        readonly List<Slot> slots = new List<Slot>();
+        readonly Stopwatch clock = new Stopwatch();
+        ProbeReport report;
+        Action<ProbeReport> completion;
+        bool started, finished;
+        int completed;
+        Vessel lastVessel;
+        string lastVesselId;
+        const int FrameCount = 300;
+
         public IEnumerator Run(Action<ProbeReport> complete)
         {
-            var reports = new List<MarkerReport>();
+            if (complete == null) throw new ArgumentNullException("complete");
+            if (started || finished) throw new InvalidOperationException("Probe instances support one capture.");
+            if (owner != null) throw new InvalidOperationException("Another Continuum timing capture is already running.");
+            started = true; owner = this; completion = complete;
             try
             {
-                foreach (string name in new[] { "Physics.Simulate", "Physics.Processing", "BehaviourFixedUpdate", "GC.Collect" })
+                report = new ProbeReport {
+                    requestedFrames = FrameCount, frames = new ProfileFrame[FrameCount], markers = new MarkerReport[Names.Length],
+                    unity = Application.unityVersion, ksp = Versioning.GetVersionString(),
+                    plugin = typeof(Probe).Assembly.GetName().Version.ToString(), platform = Application.platform.ToString(),
+                    processor = SystemInfo.processorType, processorCount = SystemInfo.processorCount,
+                    graphicsDevice = SystemInfo.graphicsDeviceName, targetFrameRate = Application.targetFrameRate, vSyncCount = QualitySettings.vSyncCount
+                };
+                for (int i = 0; i < Names.Length; i++)
                 {
-                    var recorder = Recorder.Get(name);
-                    var row = new MarkerReport { name = name, status = "unavailable", nanoseconds = new long[0], blocks = new int[0] };
-                    if (recorder != null && recorder.isValid)
-                    {
-                        enabledBefore.Add(recorder.enabled); recorder.enabled = true; recorders.Add(recorder);
-                        row.status = "available-no-samples"; row.nanoseconds = new long[300]; row.blocks = new int[300];
-                    }
-                    reports.Add(row);
+                    var row = new MarkerReport { name = Names[i], status = "unavailable", availabilityDetail = "Recorder unavailable in this player or marker has not been created.",
+                        nanoseconds = new long[FrameCount], blocks = new int[FrameCount], available = new bool[FrameCount] };
+                    report.markers[i] = row;
+                    Acquire(row);
                 }
-                for (int frame = 0; frame < 300; frame++)
+                clock.Start();
+                // Recorder counters describe the previous frame; discard the partly enabled initial frame.
+                yield return null;
+                if (finished) yield break;
+                ProfileFrame previous = Context();
+                for (int frame = 0; frame < FrameCount; frame++)
                 {
                     yield return null;
-                    int index = 0;
-                    foreach (var row in reports)
-                    {
-                        if (row.status == "unavailable") continue;
-                        var recorder = recorders[index++];
-                        row.nanoseconds[frame] = recorder.elapsedNanoseconds;
-                        row.blocks[frame] = recorder.sampleBlockCount;
-                        if (row.blocks[frame] > 0) row.status = "observed";
-                    }
+                    if (finished) yield break;
+                    double now = clock.Elapsed.TotalSeconds;
+                    previous.observedFrame = Time.frameCount;
+                    previous.markerFrame = Time.frameCount - 1;
+                    previous.contextAligned = previous.contextFrame == previous.markerFrame;
+                    previous.wallMilliseconds = (now - previous.boundaryWallSeconds) * 1000;
+                    foreach (Slot slot in slots) Read(slot, frame);
+                    report.frames[frame] = previous;
+                    completed++;
+                    if (completed < FrameCount) previous = Context();
                 }
-                complete(new ProbeReport { markers = reports.ToArray() });
+                report.status = "complete";
+                Finish(false);
             }
             finally { Dispose(); }
         }
+
+        void Acquire(MarkerReport row)
+        {
+            try
+            {
+                Recorder recorder = Recorder.Get(row.name);
+                if (recorder == null || !recorder.isValid) return;
+                var slot = new Slot { Recorder = recorder, EnabledBefore = recorder.enabled, Report = row };
+                slots.Add(slot);
+                if (!slot.EnabledBefore) recorder.enabled = true;
+                row.recorderAvailableAtStart = recorder.enabled;
+                row.availabilityDetail = recorder.enabled ? "Recorder valid and enabled; per-frame availability is recorded separately." : "Recorder could not be enabled.";
+            }
+            catch (Exception error) { row.availabilityDetail = "Recorder setup failed: " + error.GetType().Name; }
+        }
+
+        static void Read(Slot slot, int index)
+        {
+            try
+            {
+                if (!slot.Recorder.isValid || !slot.Recorder.enabled)
+                {
+                    slot.Report.availabilityDetail = "Recorder became invalid or disabled during capture.";
+                    return;
+                }
+                long nanoseconds = slot.Recorder.elapsedNanoseconds;
+                int blocks = slot.Recorder.sampleBlockCount;
+                slot.Report.nanoseconds[index] = nanoseconds;
+                slot.Report.blocks[index] = blocks;
+                slot.Report.available[index] = nanoseconds >= 0 && blocks >= 0 && (blocks != 0 || nanoseconds == 0);
+                if (!slot.Report.available[index]) slot.Report.availabilityDetail = "Native counters contained an invalid or inconsistent reading; its availability is false.";
+            }
+            catch (Exception error) { slot.Report.availabilityDetail = "Recorder read failed: " + error.GetType().Name; }
+        }
+
+        ProfileFrame Context()
+        {
+            var frame = new ProfileFrame {
+                contextFrame = Time.frameCount, renderedFrame = Time.renderedFrameCount, boundaryWallSeconds = clock.Elapsed.TotalSeconds,
+                fixedDeltaSeconds = Time.fixedDeltaTime, timeScale = Time.timeScale, scene = HighLogic.LoadedScene.ToString(),
+                screenWidth = Screen.width, screenHeight = Screen.height, parts = -1,
+                managedBytes = GC.GetTotalMemory(false), gcGeneration0 = GC.CollectionCount(0), gcGeneration1 = GC.CollectionCount(1), gcGeneration2 = GC.CollectionCount(2),
+                vesselStatus = "unavailable-no-active-vessel"
+            };
+            if (HighLogic.CurrentGame != null) frame.universalTime = Planetarium.GetUniversalTime();
+            if (TimeWarp.fetch != null) frame.warpRate = TimeWarp.CurrentRate;
+            if (HighLogic.LoadedSceneIsFlight) frame.paused = FlightDriver.Pause;
+            Vessel vessel = HighLogic.LoadedSceneIsFlight && FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
+            if (vessel == null) return frame;
+            if (lastVessel != vessel) { lastVessel = vessel; lastVesselId = vessel.id.ToString("D"); }
+            frame.vesselId = lastVesselId;
+            frame.vesselStatus = vessel.loaded ? "loaded" : "unloaded";
+            frame.loaded = vessel.loaded; frame.packed = vessel.packed;
+            frame.parts = vessel.parts == null ? -1 : vessel.parts.Count;
+            frame.body = vessel.mainBody == null ? null : vessel.mainBody.bodyName;
+            frame.situation = vessel.situation.ToString();
+            return frame;
+        }
+
+        void Finish(bool suppressExportFailure)
+        {
+            if (finished) return;
+            finished = true;
+            var errors = new List<string>();
+            foreach (Slot slot in slots)
+            {
+                try { if (!slot.EnabledBefore && slot.Recorder.enabled) slot.Recorder.enabled = false; }
+                catch (Exception error) { errors.Add(slot.Report.name + ": " + error.GetType().Name); }
+            }
+            slots.Clear();
+            if (ReferenceEquals(owner, this)) owner = null;
+            clock.Stop();
+            Action<ProbeReport> callback = completion;
+            completion = null;
+            if (report == null || callback == null) return;
+            try
+            {
+                report.cleanupErrors = errors.ToArray();
+                report.recorderCleanupStatus = errors.Count == 0 ? "restored-owned-enables" : "restoration-errors";
+                if (errors.Count != 0) report.status = "cleanup-error";
+                ProfilingSummary.Finish(report, completed);
+                callback(report);
+            }
+            catch (Exception error)
+            {
+                if (!suppressExportFailure) throw;
+                // Teardown must continue even if the destination became unwritable.
+                UnityEngine.Debug.LogError("[Continuum] Partial profiling report export failed: " + error.GetType().Name);
+                UnityEngine.Debug.LogException(error);
+            }
+        }
+
+        public void Dispose() { Finish(true); }
     }
 }
