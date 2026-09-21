@@ -54,6 +54,7 @@ The experiments are independent of the running game:
 | [Data-layout comparison](docs/layout-benchmark.md) | Object, SoA, and AoSoA captures under the same free-body and neighbor-reading kernels |
 | [Gravitational trajectories](docs/field-trajectory.md) | Analytic and step-refined Plummer trajectories, conservation, reversibility and a potential-consistent split toy |
 | [3D field gravity](docs/field-gravity.md) | Isolated softened forces via padded FFT/CIC against direct forces, with retained accuracy failures |
+| [Modal rocket reduction](docs/modal-reduction.md) | Full spring-mass motion versus a gross mode and six exact flexible modes under smooth and localized loads |
 | [Telemetry playback](docs/telemetry-playback.md) | Scrubbing and phase navigation over recorded mission observations, without rerunning KSP |
 
 Native structural dependencies are fetched by pinned digest into ignored build artifacts. The orbital donor is supplied explicitly from a separate checkout; its implementation is not distributed here. Neither tool installs a backend into KSP.
