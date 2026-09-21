@@ -129,6 +129,210 @@ class QualificationReportTests(unittest.TestCase):
             "firstAcceptedTick": 10,
         }
 
+    def loop_report(self):
+        return {
+            "schema": "ksp-continuum-playerloop/v1", "status": "observed",
+            "integrityStatus": "verified-at-boundaries", "cleanupStatus": "removed-owned-hooks",
+            "clockFrequency": 1000000, "detail": "/private/runtime/not-exported",
+            "measurementScope": "untrusted raw prose",
+            "scopes": [{"name": "UnityEngine.PlayerLoop.FixedUpdate+" + name,
+                        "status": "observed", "droppedSamples": 0, "sequenceErrors": 0,
+                        "samples": [{"frame": 1, "fixedTimeSeconds": .02, "fixedDeltaSeconds": .02,
+                                     "elapsedTicks": 1000},
+                                    {"frame": 1, "fixedTimeSeconds": .04, "fixedDeltaSeconds": .02,
+                                     "elapsedTicks": 3000}],
+                        "milliseconds": None}
+                       for name in ("PhysicsFixedUpdate", "ScriptRunBehaviourFixedUpdate")],
+        }
+
+    def test_playerloop_samples_are_separate_from_frame_intervals(self):
+        report = self.marker_report(0)
+        report["playerLoop"] = self.loop_report()
+        (self.source / "coast-markers.json").write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads((self.output / "summary.json").read_text())
+        loop = summary["phases"][0]["profiler"]["playerLoop"]
+        self.assertEqual(2.0, loop["scopes"][0]["milliseconds"]["mean"])
+        self.assertEqual(1, loop["scopes"][0]["sampledFrames"])
+        self.assertIsNone(summary["phases"][1]["profiler"]["playerLoop"])
+        page = (self.output / "index.html").read_text()
+        self.assertIn("Fixed-step loop brackets", page)
+        self.assertIn("Elapsed wall time, not exclusive CPU time", page)
+        self.assertNotIn("untrusted raw prose", page)
+        self.assertNotIn("/private/runtime", page)
+
+    def test_invalidated_loop_never_exposes_usable_timing_summary(self):
+        report = self.marker_report(0)
+        report["playerLoop"] = self.loop_report()
+        report["playerLoop"].update(status="invalid", integrityStatus="invalidated")
+        for scope in report["playerLoop"]["scopes"]:
+            scope["status"] = "invalid"
+        (self.source / "coast-markers.json").write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads((self.output / "summary.json").read_text())
+        scope = summary["phases"][0]["profiler"]["playerLoop"]["scopes"][0]
+        self.assertEqual(2, scope["sampleCount"])
+        self.assertIsNone(scope["milliseconds"])
+        self.assertIn("Timing summaries withheld", (self.output / "index.html").read_text())
+
+    def test_loop_cleanup_failure_requires_outer_cleanup_error(self):
+        report = self.marker_report(0)
+        loop = report["playerLoop"] = self.loop_report()
+        loop.update(status="invalid", integrityStatus="invalidated", cleanupStatus="cleanup-error")
+        for scope in loop["scopes"]:
+            scope["status"] = "invalid"
+        path = self.source / "coast-markers.json"
+        path.write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("cleanup", result.stderr)
+        self.assertFalse(self.output.exists())
+        report["status"] = "cleanup-error"
+        path.write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("Cleanup Error", (self.output / "index.html").read_text())
+
+    def test_loop_unavailable_empty_and_partial_sequence_failure_states(self):
+        for state in ("unavailable", "no-samples", "invalid-sequence", "truncated"):
+            with self.subTest(state=state):
+                self.output = self.root / ("loop-state-" + state)
+                report = self.marker_report(0)
+                loop = report["playerLoop"] = self.loop_report()
+                if state in ("unavailable", "no-samples"):
+                    loop["status"] = state
+                    for scope in loop["scopes"]:
+                        scope.update(samples=[], status="invalid" if state == "unavailable" else "no-samples")
+                    if state == "unavailable":
+                        loop.update(integrityStatus="not-installed", cleanupStatus="not-installed")
+                elif state == "invalid-sequence":
+                    loop.update(status="invalid", integrityStatus="invalidated")
+                    loop["scopes"][0].update(status="invalid", sequenceErrors=1)
+                    loop["scopes"][1]["status"] = "invalid"
+                else:
+                    loop["scopes"][0]["droppedSamples"] = 4
+                (self.source / "coast-markers.json").write_text(json.dumps(report))
+                result = self.run_report()
+                self.assertEqual(0, result.returncode, result.stderr)
+                summary = json.loads((self.output / "summary.json").read_text())
+                output = summary["phases"][0]["profiler"]["playerLoop"]
+                if state == "truncated":
+                    self.assertEqual(4, output["scopes"][0]["droppedSamples"])
+                    self.assertIsNotNone(output["scopes"][0]["milliseconds"])
+                else:
+                    self.assertTrue(all(scope["milliseconds"] is None for scope in output["scopes"]))
+
+    def test_rejects_contradictory_or_unbounded_loop_contract(self):
+        mutations = [
+            lambda r: r.update(schema="unknown"),
+            lambda r: r.update(clockFrequency=0),
+            lambda r: r.update(status="invalid"),
+            lambda r: r.update(status="unavailable"),
+            lambda r: r.update(scopes=[]),
+            lambda r: r.update(status="observed", integrityStatus="not-installed"),
+            lambda r: r["scopes"][0].update(name="untrusted/name"),
+            lambda r: r["scopes"][0].update(status="no-samples"),
+            lambda r: r["scopes"][0].update(sequenceErrors=1),
+            lambda r: r["scopes"][0]["samples"][0].update(elapsedTicks=-1),
+            lambda r: r["scopes"][0]["samples"][0].update(fixedDeltaSeconds=0),
+            lambda r: r["scopes"][0].update(samples=r["scopes"][0]["samples"] * 2049),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.output = self.root / ("bad-loop-%d" % index)
+                report = self.marker_report(0)
+                report["playerLoop"] = self.loop_report()
+                mutate(report["playerLoop"])
+                (self.source / "coast-markers.json").write_text(json.dumps(report))
+                result = self.run_report()
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(self.output.exists())
+
+    def physical_shadow_report(self):
+        report = self.shadow_report(0)
+        report.update(
+            physicalInputSchema="ksp-continuum-rigidbody-input/v1",
+            referenceFrameSchema="ksp-continuum-unity-frame-context/v1",
+            aggregateForceStatus="unavailable-not-captured",
+        )
+        for index, sample in enumerate(report["samples"]):
+            sample.update(tick=10 + index, referenceFrame="unity-world-at-capture",
+                          rawKrakensbaneFrameVelocity=[0, 100, -2], physicsEpoch=index,
+                          floatingOriginEventCount=0)
+        for body in report["firstAcceptedBatch"]:
+            body.update(rotation=[0, 0, 0, 1], angularVelocity=[0, .1, 0],
+                        centerOfMass=[0, 0, 0], worldCenterOfMass=[0, 1, 0],
+                        position=[0, 1, 0], velocity=[0, 0, 0], inertiaTensor=[1, 2, 0],
+                        predictedPosition=[0, 1, 0], predictedVelocity=[0, 0, 0],
+                        inertiaTensorRotation=[0, 0, 0, 1], constraints=0, sleeping=False,
+                        force=[0, 0, 0], forceSource="synthetic-zero-not-native-measurement")
+        return report
+
+    def test_physical_capture_coverage_and_legacy_absence(self):
+        path = self.source / "coast-shadow.json"
+        path.write_text(json.dumps(self.physical_shadow_report()), encoding="utf-8")
+        before = {item.name: item.read_bytes() for item in self.source.iterdir()}
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads((self.output / "summary.json").read_text())
+        coverage = summary["phases"][0]["shadow"]["physicalInput"]
+        self.assertEqual(2, coverage["capturedBodies"])
+        self.assertEqual(2, coverage["frameSamples"])
+        self.assertEqual(2, coverage["zeroInertiaBodies"])
+        self.assertEqual("unavailable-not-captured", coverage["aggregateForceStatus"])
+        self.assertIsNone(summary["phases"][1]["shadow"]["physicalInput"])
+        page = (self.output / "index.html").read_text()
+        self.assertIn("Physical input coverage", page)
+        self.assertIn("No versioned physical input recorded", page)
+        self.assertIn("Native aggregate force and torque are not captured", page)
+        self.assertEqual(before, {item.name: item.read_bytes() for item in self.source.iterdir()})
+
+    def test_physical_contract_without_accepted_bodies_is_not_capture_proof(self):
+        report = self.physical_shadow_report()
+        report.update(accepted=0, stale=2, firstAcceptedBatch=[], firstAcceptedTick=0)
+        report["samples"][0]["status"] = "stale-discarded"
+        (self.source / "coast-shadow.json").write_text(json.dumps(report), encoding="utf-8")
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads((self.output / "summary.json").read_text())
+        self.assertEqual(0, summary["phases"][0]["shadow"]["physicalInput"]["capturedBodies"])
+        page = (self.output / "index.html").read_text()
+        self.assertIn("no accepted body snapshot", page)
+        self.assertNotIn("Pose, angular velocity, centers of mass and principal inertia are recorded", page)
+
+    def test_rejects_malformed_physical_capture_claims(self):
+        def body_change(field, value):
+            return lambda report: report["firstAcceptedBatch"][0].update({field: value})
+        mutations = [
+            lambda report: report.pop("referenceFrameSchema"),
+            lambda report: report.update(physicalInputSchema="future/v9"),
+            body_change("rotation", [0, 0, 0, 2]),
+            body_change("angularVelocity", [0, 1]),
+            lambda report: report["firstAcceptedBatch"][0].pop("predictedPosition"),
+            body_change("predictedVelocity", [0, 0, "bad"]),
+            body_change("mass", 0),
+            body_change("inertiaTensor", [-1, 1, 1]),
+            body_change("sleeping", 1),
+            body_change("force", [1, 0, 0]),
+            body_change("forceSource", "native"),
+            lambda report: report["firstAcceptedBatch"][1].update(id=0),
+            lambda report: report["samples"][0].update(tick=9),
+            lambda report: report["samples"][0].update(bodies=3),
+            lambda report: report["samples"][0].update(referenceFrame="inertial"),
+            lambda report: report["samples"][0].update(rawKrakensbaneFrameVelocity=[False, 0, 0]),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.output = self.root / ("invalid-output-%d" % index)
+                report = self.physical_shadow_report()
+                mutate(report)
+                (self.source / "coast-shadow.json").write_text(json.dumps(report), encoding="utf-8")
+                result = self.run_report()
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(self.output.exists())
+
     def write_phase(self, phase, index):
         (self.source / (phase + "-start.txt")).write_text(
             "vessel=00000000-0000-0000-0000-%012d\n" % index

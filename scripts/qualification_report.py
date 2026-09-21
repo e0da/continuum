@@ -277,13 +277,104 @@ def parse_profiler(data, phase):
             "zeroBlockFrames": zero, "totalBlocks": blocks,
             "observedMilliseconds": observed_ms,
         })
+    player_loop = parse_player_loop(data.get("playerLoop"))
+    if player_loop and player_loop["cleanupStatus"] == "cleanup-error" and status != "cleanup-error":
+        raise ReportError("player-loop cleanup failure must propagate to profiler cleanup status")
     return {
         "status": status, "requestedFrames": requested, "completedFrames": completed,
         "contextMisalignedFrames": misaligned, "frameIntervalsMilliseconds": distribution(intervals),
         "frameContexts": {"throttleCommand": throttle, "packed": packed,
                           "bodies": bodies, "situations": situations},
-        "markers": markers,
+        "markers": markers, "playerLoop": player_loop,
     }
+
+
+def parse_player_loop(data):
+    if data is None:
+        return None
+    if not isinstance(data, dict) or data.get("schema") != "ksp-continuum-playerloop/v1":
+        raise ReportError("unsupported player-loop contract")
+    status, integrity, cleanup = (data.get(key) for key in ("status", "integrityStatus", "cleanupStatus"))
+    if (status not in ("unavailable", "observed", "no-samples", "invalid")
+            or integrity not in ("verified-at-boundaries", "invalidated", "not-installed")
+            or cleanup not in ("not-installed", "removed-owned-hooks", "cleanup-error")):
+        raise ReportError("invalid player-loop status")
+    usable = status in ("observed", "no-samples")
+    if usable and (integrity != "verified-at-boundaries" or cleanup != "removed-owned-hooks"):
+        raise ReportError("player-loop timing lacks intact boundary and cleanup evidence")
+    frequency = integer(data.get("clockFrequency"), "player-loop clock frequency", 1, 10 ** 12)
+    raw_scopes = data.get("scopes")
+    if not isinstance(raw_scopes, list) or len(raw_scopes) != 2:
+        raise ReportError("invalid player-loop scope list")
+    scopes, names = [], set()
+    allowed_names = {"UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate",
+                     "UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate"}
+    for scope in raw_scopes:
+        if not isinstance(scope, dict):
+            raise ReportError("invalid player-loop scope")
+        name = scope.get("name")
+        if name not in allowed_names or name in names:
+            raise ReportError("unsupported or duplicate player-loop scope")
+        names.add(name)
+        scope_status = scope.get("status")
+        if scope_status not in ("observed", "no-samples", "invalid"):
+            raise ReportError("invalid player-loop scope status")
+        dropped = integer(scope.get("droppedSamples"), "dropped loop samples", 0, 2 ** 31 - 1)
+        errors = integer(scope.get("sequenceErrors"), "loop sequence errors", 0, 2 ** 31 - 1)
+        samples = scope.get("samples")
+        if not isinstance(samples, list) or len(samples) > 4096:
+            raise ReportError("invalid or unbounded player-loop samples")
+        if ((scope_status == "observed" and (not samples or errors))
+                or (scope_status == "no-samples" and (samples or errors or dropped))
+                or (usable and scope_status == "invalid")):
+            raise ReportError("player-loop scope status contradicts samples or sequence errors")
+        durations, frames = [], set()
+        for sample in samples:
+            if not isinstance(sample, dict):
+                raise ReportError("invalid player-loop sample")
+            frames.add(integer(sample.get("frame"), "loop sample frame", 0, 2 ** 31 - 1))
+            finite(sample.get("fixedTimeSeconds"), "loop fixed time", 0, 1e15)
+            delta = finite(sample.get("fixedDeltaSeconds"), "loop fixed delta", 0, 1e6)
+            if delta == 0:
+                raise ReportError("loop fixed delta must be positive")
+            ticks = integer(sample.get("elapsedTicks"), "loop elapsed ticks", 0, 2 ** 63 - 1)
+            durations.append(ticks * 1000.0 / frequency)
+        scopes.append({"name": name, "status": scope_status, "sampleCount": len(samples),
+                       "sampledFrames": len(frames), "droppedSamples": dropped,
+                       "sequenceErrors": errors,
+                       "milliseconds": distribution(durations) if usable else None})
+    invalid_scopes = sum(scope["status"] == "invalid" for scope in scopes)
+    if status == "invalid" and (integrity != "invalidated" or cleanup == "not-installed" or invalid_scopes != 2):
+        raise ReportError("invalid player-loop capture lacks invalidation evidence")
+    if status == "unavailable":
+        expected_integrity = "not-installed" if cleanup == "not-installed" else "invalidated"
+        if integrity != expected_integrity or invalid_scopes != 2 or any(scope["sampleCount"] for scope in scopes):
+            raise ReportError("unavailable player-loop capture contradicts lifecycle evidence")
+    any_samples = any(scope["sampleCount"] for scope in scopes)
+    if (status == "observed" and not any_samples) or (status == "no-samples" and any_samples):
+        raise ReportError("player-loop status contradicts observations")
+    return {"status": status, "integrityStatus": integrity, "cleanupStatus": cleanup,
+            "clockFrequency": frequency, "scopes": scopes}
+
+
+def player_loop_html(loop):
+    heading = "<h3>Fixed-step loop brackets</h3>"
+    if loop is None:
+        return heading + "<p>No player-loop timing recorded.</p>"
+    content = "<p>Status: {}; integrity: {}; cleanup: {}.</p>".format(
+        html.escape(loop["status"]), html.escape(loop["integrityStatus"]), html.escape(loop["cleanupStatus"]))
+    content += ("<p>Elapsed wall time, not exclusive CPU time. These brackets include waits and callback overhead. "
+                "The install-to-cleanup window includes warmup; multiple fixed steps can share one rendered frame. "
+                "Do not sum these with Recorder markers or infer a physics percentage.</p>")
+    if loop["status"] not in ("observed", "no-samples"):
+        content += "<p>Timing summaries withheld: capture integrity or availability is unqualified.</p>"
+    content += "<ul>" + "".join(
+        "<li><strong>{}</strong>: {} raw samples across {} sampled frames; {} dropped; {} sequence errors. "
+        "Elapsed ms: {}.</li>".format(html.escape(scope["name"]), scope["sampleCount"], scope["sampledFrames"],
+                                      scope["droppedSamples"], scope["sequenceErrors"],
+                                      html.escape(dist_text(scope["milliseconds"])))
+        for scope in loop["scopes"]) + "</ul>"
+    return heading + content
 
 
 def parse_shadow(data, phase):
@@ -341,8 +432,86 @@ def parse_shadow(data, phase):
         "wallSeconds": wall, "sampleBodyCounts": distribution([float(x) for x in body_counts]),
         "firstAcceptedBodyCount": len(first), "firstAcceptedTick": first_tick if accepted else None,
         "massUnits": "native Rigidbody.mass units as recorded; no kilogram conversion asserted",
+        "physicalInput": parse_physical_input(data, first, samples, first_tick),
         "timingsMilliseconds": {key: distribution(values) for key, values in timings.items()},
     }
+
+
+def parse_physical_input(data, first, samples, first_tick):
+    schemas = ("physicalInputSchema", "referenceFrameSchema", "aggregateForceStatus")
+    if not any(key in data for key in schemas):
+        return None
+    if (data.get("physicalInputSchema") != "ksp-continuum-rigidbody-input/v1"
+            or data.get("referenceFrameSchema") != "ksp-continuum-unity-frame-context/v1"
+            or data.get("aggregateForceStatus") != "unavailable-not-captured"):
+        raise ReportError("unsupported or incomplete physical input contract")
+
+    def vector(value, length, label, minimum=-1e100):
+        if not isinstance(value, list) or len(value) != length:
+            raise ReportError("physical " + label + " has the wrong shape")
+        return [finite(item, "physical " + label, minimum, 1e100) for item in value]
+
+    ids = set()
+    sleeping = constrained = zero_inertia = 0
+    for body in first:
+        identity = body["id"]
+        if identity in ids or body["mass"] <= 0:
+            raise ReportError("physical body IDs must be unique and mass positive")
+        ids.add(identity)
+        for key in ("position", "velocity", "angularVelocity", "centerOfMass", "worldCenterOfMass",
+                    "predictedPosition", "predictedVelocity"):
+            vector(body.get(key), 3, key)
+        for key in ("rotation", "inertiaTensorRotation"):
+            quaternion = vector(body.get(key), 4, key)
+            if abs(sum(item * item for item in quaternion) - 1) > .001:
+                raise ReportError("physical " + key + " must be a unit quaternion")
+        inertia = vector(body.get("inertiaTensor"), 3, "inertia tensor", 0)
+        zero_inertia += int(any(item == 0 for item in inertia))
+        constrained += int(integer(body.get("constraints"), "physical constraints", 0, 2 ** 31 - 1) != 0)
+        if not isinstance(body.get("sleeping"), bool):
+            raise ReportError("physical sleeping state must be boolean")
+        sleeping += int(body["sleeping"])
+        force = vector(body.get("force"), 3, "force")
+        if any(force) or body.get("forceSource") != "synthetic-zero-not-native-measurement":
+            raise ReportError("physical force must retain synthetic zero provenance")
+    accepted_samples = []
+    for sample in samples:
+        if sample.get("referenceFrame") != "unity-world-at-capture":
+            raise ReportError("unsupported physical reference frame")
+        vector(sample.get("rawKrakensbaneFrameVelocity"), 3, "frame velocity")
+        integer(sample.get("physicsEpoch"), "physical epoch", 0, 2 ** 63 - 1)
+        integer(sample.get("floatingOriginEventCount"), "physical origin count", 0, 2 ** 63 - 1)
+        integer(sample.get("tick"), "physical sample tick", 0, 2 ** 63 - 1)
+        if sample["status"] == "accepted":
+            accepted_samples.append(sample)
+    if first and (not accepted_samples or accepted_samples[0]["tick"] != first_tick
+                  or accepted_samples[0]["bodies"] != len(first)):
+        raise ReportError("physical snapshot does not match first accepted sample")
+    return {
+        "schema": data["physicalInputSchema"], "frameSchema": data["referenceFrameSchema"],
+        "aggregateForceStatus": data["aggregateForceStatus"],
+        "capturedBodies": len(first), "sleepingBodies": sleeping,
+        "constrainedBodies": constrained, "zeroInertiaBodies": zero_inertia,
+        "frameSamples": len(samples), "referenceFrame": "unity-world-at-capture",
+    }
+
+
+def physical_input_html(coverage):
+    if coverage is None:
+        content = "<p>No versioned physical input recorded. Body and frame coverage are unqualified.</p>"
+    elif coverage["capturedBodies"] == 0:
+        content = ("<p>Versioned physical input contract recorded, but no accepted body snapshot. "
+                   "Body coverage is unqualified. Native aggregate force and torque are not captured.</p>")
+    else:
+        content = ("<p>Validated receipt fields for {capturedBodies} bodies and {frameSamples} frame samples. "
+                   "Sleeping bodies: {sleepingBodies}; constrained bodies: {constrainedBodies}; "
+                   "bodies with a zero principal inertia component: {zeroInertiaBodies}.</p>"
+                   "<p>Pose, angular velocity, centers of mass and principal inertia are recorded. "
+                   "Frame: Unity world at capture, with raw frame velocity and epoch counters. "
+                   "This is not a complete inertial transform or replay checkpoint.</p>"
+                   "<p>Native aggregate force and torque are not captured; worker force is synthetic zero. "
+                   "Zero inertia components are preserved without assigning a physical meaning.</p>").format(**coverage)
+    return "<h3>Physical input coverage</h3>" + content
 
 
 def parse_shutdown(text, capture_status):
@@ -497,6 +666,8 @@ def render(summary):
       <dt>Mass units</dt><dd>{mass_units}</dd>
     </dl><ul>{timings}</ul></article>
   </div>
+  {physical_input}
+  {player_loop}
   <h3>Profiler markers</h3>
   <div class="table"><table><thead><tr><th>Marker</th><th>Status</th><th>Available / unavailable frames</th><th>Observed frames</th><th>Observed marker time (ms)</th></tr></thead><tbody>{markers}</tbody></table></div>
 </section>""".format(
@@ -514,7 +685,8 @@ def render(summary):
             submitted=shadow["submitted"], accepted=shadow["accepted"], stale=shadow["stale"],
             abandoned=shadow["abandoned"], wall=fmt(shadow["wallSeconds"]),
             first_bodies=shadow["firstAcceptedBodyCount"], mass_units=html.escape(shadow["massUnits"]),
-            timings=timings, markers=markers,
+            player_loop=player_loop_html(profiler.get("playerLoop")),
+            timings=timings, markers=markers, physical_input=physical_input_html(shadow.get("physicalInput")),
         ))
     missing = "None" if not summary["missingPhases"] else ", ".join(summary["missingPhases"])
     source_rows = "".join(
