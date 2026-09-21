@@ -32,6 +32,7 @@ namespace KspContinuum
                 output.Append('"'); return;
             }
             if (value is bool) { output.Append((bool)value ? "true" : "false"); return; }
+            if (value is Enum) { Write(output, value.ToString()); return; }
             if (value is int || value is long || value is float || value is double)
             {
                 double number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
@@ -41,7 +42,11 @@ namespace KspContinuum
                     CultureInfo.InvariantCulture)); return;
             }
             if (value is Array || value is ReadOnlyCollection<ForcePartObservation> ||
-                value is ReadOnlyCollection<ForceAtPositionObservation> || value is ReadOnlyCollection<LifecyclePartSample>)
+                value is ReadOnlyCollection<ForceAtPositionObservation> || value is ReadOnlyCollection<LifecyclePartSample> ||
+                value is ReadOnlyCollection<AeroPatchTarget> || value is ReadOnlyCollection<AeroPatchEntry> ||
+                value is ReadOnlyCollection<AeroCaptureSample> || value is ReadOnlyCollection<AeroBodyPublication> ||
+                value is ReadOnlyCollection<AeroDragCubeState> || value is ReadOnlyCollection<double> ||
+                value is ReadOnlyCollection<string>)
             {
                 output.Append('['); bool first = true;
                 foreach (var item in (IEnumerable)value)
@@ -60,7 +65,11 @@ namespace KspContinuum
                 type != typeof(LifecycleTraceContext) && type != typeof(LifecyclePartSample) &&
                 type != typeof(ForceObservationBatch) && type != typeof(ForcePartObservation) &&
                 type != typeof(ForceAtPositionObservation) && type != typeof(Vec) &&
-                type != typeof(ShadowReport) && type != typeof(ShadowSample) && type != typeof(ShadowBody))
+                type != typeof(ShadowReport) && type != typeof(ShadowSample) && type != typeof(ShadowBody) &&
+                type != typeof(AeroCaptureReport) && type != typeof(AeroProviderFingerprint) && type != typeof(AeroPatchProvenance) &&
+                type != typeof(AeroPatchTarget) && type != typeof(AeroPatchEntry) && type != typeof(AeroCaptureSample) &&
+                type != typeof(AeroCaptureContext) && type != typeof(AeroPartContext) && type != typeof(AeroBodyPublication) &&
+                type != typeof(AeroDragCubeState))
                 throw new ArgumentException("Unsupported report type: " + type.FullName);
             output.Append('{'); bool firstField = true;
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
