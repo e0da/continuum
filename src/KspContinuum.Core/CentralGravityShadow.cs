@@ -2,6 +2,24 @@ using System;
 
 namespace KspContinuum
 {
+    public static class KrakensbaneFramePersistence
+    {
+        public const string ModelId = "krakensbane-last-correction-persistence/v1";
+
+        public static Vec PredictFrameVelocityDelta(Vec capturedLastCorrection)
+        {
+            Validate(capturedLastCorrection);
+            return capturedLastCorrection * -1;
+        }
+
+        static void Validate(Vec value)
+        {
+            AssemblyModel.Finite(value.X);
+            AssemblyModel.Finite(value.Y);
+            AssemblyModel.Finite(value.Z);
+        }
+    }
+
     public static class CentralGravityShadow
     {
         public const string ModelId = "central-point-mass-frozen-acceleration/v1";
@@ -123,6 +141,7 @@ namespace KspContinuum
             local;
         SimulationBatch prediction,
             zeroPrediction;
+        Vec predictedFrameDelta;
         string topologyKey,
             frameKey;
 
@@ -130,6 +149,7 @@ namespace KspContinuum
             ShadowSample source,
             SimulationBatch predicted,
             SimulationBatch zeroPrediction,
+            Vec predictedFrameDelta,
             string topology,
             string frame
         )
@@ -159,9 +179,11 @@ namespace KspContinuum
             this.source = source;
             this.prediction = predicted;
             this.zeroPrediction = zeroPrediction;
+            this.predictedFrameDelta = predictedFrameDelta;
             topologyKey = topology;
             frameKey = frame;
             source.gravityComparisonStatus = "waiting";
+            source.gravityPredictedFrameStatus = "waiting";
         }
 
         public void Observe(
@@ -208,7 +230,32 @@ namespace KspContinuum
                             frameVelocity[1] - initial[1],
                             frameVelocity[2] - initial[2]
                         );
+                        Vec predictionError = predictedFrameDelta + delta * -1;
+                        source.frameVelocityDeltaPredictionError = new[]
+                        {
+                            predictionError.X,
+                            predictionError.Y,
+                            predictionError.Z,
+                        };
+                        source.frameVelocityDeltaPredictionErrorMetersPerSecond = Math.Sqrt(
+                            predictionError.X * predictionError.X
+                                + predictionError.Y * predictionError.Y
+                                + predictionError.Z * predictionError.Z
+                        );
                         var adjusted = CentralGravityShadow.AdjustVelocityFrame(prediction, delta);
+                        ComparePredictedFrame(
+                            epoch,
+                            topology,
+                            frame,
+                            eligible,
+                            step,
+                            fixedTime,
+                            unityFrame,
+                            origin,
+                            positions,
+                            velocities,
+                            frameVelocity
+                        );
                         var adjustedSample = new ShadowSample
                         {
                             bodies = source.bodies,
@@ -286,9 +333,94 @@ namespace KspContinuum
                     }
                 }
                 else
+                {
                     source.gravityFrameAdjustedStatus = local.comparisonStatus;
+                    source.gravityPredictedFrameStatus = local.comparisonStatus;
+                }
                 Publish();
             }
+        }
+
+        void ComparePredictedFrame(
+            long epoch,
+            string topology,
+            string frame,
+            bool eligible,
+            double step,
+            double fixedTime,
+            int unityFrame,
+            long origin,
+            Vec[] positions,
+            Vec[] velocities,
+            double[] frameVelocity
+        )
+        {
+            var gravity = CentralGravityShadow.AdjustVelocityFrame(prediction, predictedFrameDelta);
+            var zero = CentralGravityShadow.AdjustVelocityFrame(
+                zeroPrediction,
+                predictedFrameDelta
+            );
+            var gravitySample = ComparisonSample();
+            var zeroSample = ComparisonSample();
+            var gravityComparison = new ShadowComparison();
+            var zeroComparison = new ShadowComparison();
+            gravityComparison.Attach(gravitySample, gravity, topologyKey, frameKey);
+            zeroComparison.Attach(zeroSample, zero, topologyKey, frameKey);
+            gravityComparison.Observe(
+                epoch,
+                topology,
+                frame,
+                eligible,
+                step,
+                fixedTime,
+                unityFrame,
+                origin,
+                positions,
+                velocities,
+                frameVelocity
+            );
+            zeroComparison.Observe(
+                epoch,
+                topology,
+                frame,
+                eligible,
+                step,
+                fixedTime,
+                unityFrame,
+                origin,
+                positions,
+                velocities,
+                frameVelocity
+            );
+            source.gravityPredictedFrameStatus = gravitySample.comparisonStatus;
+            source.gravityPredictedFrameVelocityAvailable =
+                gravitySample.observedComparisonAvailable;
+            source.zeroPredictedFrameVelocityAvailable = zeroSample.observedComparisonAvailable;
+            if (gravitySample.observedComparisonAvailable && zeroSample.observedComparisonAvailable)
+            {
+                source.gravityPredictedFrameVelocityMaxMetersPerSecond =
+                    gravitySample.observedVelocityMaxMetersPerSecond;
+                source.gravityPredictedFrameVelocityRmsMetersPerSecond =
+                    gravitySample.observedVelocityRmsMetersPerSecond;
+                source.zeroPredictedFrameVelocityMaxMetersPerSecond =
+                    zeroSample.observedVelocityMaxMetersPerSecond;
+                source.zeroPredictedFrameVelocityRmsMetersPerSecond =
+                    zeroSample.observedVelocityRmsMetersPerSecond;
+                source.gravityPredictedFrameVelocityRmsDeltaFromZero =
+                    gravitySample.observedVelocityRmsMetersPerSecond
+                    - zeroSample.observedVelocityRmsMetersPerSecond;
+            }
+        }
+
+        ShadowSample ComparisonSample()
+        {
+            return new ShadowSample
+            {
+                bodies = source.bodies,
+                physicsEpoch = source.physicsEpoch,
+                captureFixedTimeSeconds = source.captureFixedTimeSeconds,
+                stepSeconds = source.stepSeconds,
+            };
         }
 
         public void Cancel(string reason)
@@ -297,6 +429,7 @@ namespace KspContinuum
             {
                 comparison.Cancel(reason);
                 source.gravityFrameAdjustedStatus = local.comparisonStatus;
+                source.gravityPredictedFrameStatus = local.comparisonStatus;
                 Publish();
             }
         }
@@ -348,6 +481,7 @@ namespace KspContinuum
             local = null;
             prediction = null;
             zeroPrediction = null;
+            predictedFrameDelta = new Vec();
         }
     }
 }

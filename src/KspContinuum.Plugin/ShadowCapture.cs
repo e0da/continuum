@@ -99,6 +99,7 @@ namespace KspContinuum
             var bodies = new List<Rigidbody>();
             string topology = Topology(vessel, bodies);
             Vector3d frameVelocity = Krakensbane.GetFrameVelocity();
+            Vector3d lastCorrection = Krakensbane.GetLastCorrection();
             string physicalFrame = HighLogic.LoadedScene.ToString();
             string frame =
                 physicsEpoch
@@ -318,10 +319,15 @@ namespace KspContinuum
                 captureMilliseconds = auditMs + clock.Elapsed.TotalMilliseconds - captureStart,
                 referenceFrame = ShadowPhysicalInput.UnityWorldReferenceFrame,
                 rawKrakensbaneFrameVelocity = A(frameVelocity),
+                rawKrakensbaneLastCorrection = A(lastCorrection),
                 physicsEpoch = physicsEpoch,
                 floatingOriginEventCount = originEvents,
                 captureFixedTimeSeconds = Time.fixedTime,
             };
+            Vec predictedFrameDelta = KrakensbaneFramePersistence.PredictFrameVelocityDelta(
+                new Vec(lastCorrection.x, lastCorrection.y, lastCorrection.z)
+            );
+            sample.predictedKrakensbaneFrameVelocityDelta = A(predictedFrameDelta);
             pendingGravity = null;
             double gravityStart = clock.Elapsed.TotalMilliseconds;
             if (vessel.mainBody == null)
@@ -468,6 +474,11 @@ namespace KspContinuum
                     pendingSample,
                     pendingGravity,
                     result,
+                    new Vec(
+                        pendingSample.predictedKrakensbaneFrameVelocityDelta[0],
+                        pendingSample.predictedKrakensbaneFrameVelocityDelta[1],
+                        pendingSample.predictedKrakensbaneFrameVelocityDelta[2]
+                    ),
                     topology,
                     physicalFrame
                 );

@@ -60,7 +60,7 @@ Native structural dependencies are fetched by pinned digest into ignored build a
 
 ## Research direction
 
-The longer-term experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, and GPU compute remain candidates rather than assumed winners.
+The longer-term experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, GPU compute, and [learned or stochastic candidates](docs/learned-compute.md) remain measurable strategies rather than assumed winners.
 
 Development advances along independent worker/backend, profiling, replay/input, and space-program/chronicle tracks. Missions provide workloads and acceptance evidence; landing precision does not gate unrelated simulation infrastructure. The current free-body worker proves a compute boundary, not complete force capture or a shadow vessel solver.
 

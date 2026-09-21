@@ -76,6 +76,11 @@ class ShadowReportTests(unittest.TestCase):
         self.assertAlmostEqual(gravity['adjustedVelocity']['zeroMetersPerSecond']['rms'], .2)
         self.assertEqual(gravity['adjustedVelocity']['gravityMetersPerSecond']['rms'], 0)
         self.assertAlmostEqual(gravity['adjustedVelocity']['rmsDeltaFromZero'], -.2)
+        predicted = gravity['predictedFrameVelocity']
+        self.assertEqual(predicted['strategy'], 'krakensbane-last-correction-persistence/v1')
+        self.assertEqual(predicted['gravityMetersPerSecond']['rms'], 0)
+        self.assertAlmostEqual(predicted['zeroMetersPerSecond']['rms'], .2)
+        self.assertEqual(predicted['frameDeltaErrorMetersPerSecond']['maximum'], 0)
         self.assertEqual(gravity['accelerationSources'], {'analytic-fixture': 1})
         self.assertIn('gravityPredictionMilliseconds', gravity['timingsMilliseconds'])
         self.assertFalse(report['solverAccuracyQualified'])
@@ -129,6 +134,8 @@ class ShadowReportTests(unittest.TestCase):
             ('gravityFrameAdjustedVelocityRmsDeltaFromZero', 99),
             ('zeroFrameAdjustedVelocityAvailable', False),
             ('gravityEndpointFrameVelocityDelta', [99, 0, 0]),
+            ('predictedKrakensbaneFrameVelocityDelta', [99, 0, 0]),
+            ('frameVelocityDeltaPredictionError', [99, 0, 0]),
             ('gravityPredictionMilliseconds', -1),
         ]
         for field, value in changes:
