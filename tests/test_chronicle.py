@@ -119,6 +119,45 @@ class ChronicleTests(unittest.TestCase):
             command.extend(["--inputs", str(self.inputs)])
         return subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
 
+    def test_interrupted_receipt_survives_chronicle_index_and_connected_site(self):
+        receipt = self.mission / "mission.txt"
+        receipt.write_text(receipt.read_text().replace("status=passed", "status=interrupted")
+                           + "shutdownContext=before-application-quit\ncleanupStatus=errors\n",
+                           encoding="utf-8")
+        original = receipt.read_bytes()
+        archive = self.root / "archive"
+        archive.mkdir()
+        output = archive / "attempt"
+        result = self.run_generator(output)
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text())
+        self.assertEqual("interrupted", manifest["outcome"])
+        page = (output / "index.html").read_text()
+        self.assertIn("before-application-quit", page)
+        self.assertIn("Cleanup status", page)
+        self.assertIn("errors", page)
+        catalog = archive / "catalog.json"
+        catalog.write_text(json.dumps({
+            "schema": "ksp-continuum-space-program/v1",
+            "program": {"name": "Test program", "tagline": "Interrupted workload", "summary": "Synthetic fixture."},
+            "missions": [{"id": "CSP-0001", "name": "Pathfinder", "status": "active",
+                          "summary": "Test mission.", "facts": [], "media": []}],
+            "vehicles": [{"id": "CV-0001-R01", "name": "Fixture", "status": "test",
+                          "summary": "Test vehicle.", "facts": [], "media": []}],
+            "sites": [], "experiments": [],
+        }))
+        for script, arguments, entry in (
+            ("chronicle_index.py", ["--output", "index.html"], archive / "index.html"),
+            ("space_program.py", ["--catalog", str(catalog), "--output", str(archive / "site")],
+             archive / "site" / "attempts" / "CSP-0001-A003" / "index.html"),
+        ):
+            result = subprocess.run([sys.executable, str(ROOT / "scripts" / script),
+                                     "--archive", str(archive)] + arguments,
+                                    cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("Recorded outcome: <strong>interrupted</strong>", entry.read_text())
+        self.assertEqual(original, receipt.read_bytes())
+
     def test_generates_escaped_relocatable_report_and_manifest(self):
         output = self.root / "chronicle"
         result = self.run_generator(output)

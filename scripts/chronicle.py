@@ -242,7 +242,7 @@ def receipt_display(value, fallback):
 
 def receipt_status(mission_values):
     value = mission_values.get("status")
-    return value if value in ("running", "passed", "failed") else "unknown"
+    return value if value in ("running", "passed", "failed", "interrupted") else "unknown"
 
 
 def craft_display(mission_values):
@@ -654,6 +654,8 @@ def render_page(metadata, mission_values, lineage, rows, events, clock_view, cap
     outcome_items = [
         ("Receipt status", receipt_status(mission_values)),
         ("Receipt reason", receipt_display(mission_values.get("reason"), "Not recorded")),
+        ("Shutdown context", receipt_display(mission_values.get("shutdownContext"), "Not recorded")),
+        ("Cleanup status", receipt_display(mission_values.get("cleanupStatus"), "Not recorded")),
         ("Terminal phase", final["phase"]), ("Body / situation", (final["body"] or "unknown") + " / " + (final["situation"] or "unknown")),
         ("Surface speed", (final["speed"] or "unknown") + " m/s"), ("Throttle", final["throttle"] or "unknown"),
         ("Stage / parts", (final["stage"] or "unknown") + " / " + (final["parts"] or "unknown")),

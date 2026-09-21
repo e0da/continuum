@@ -345,6 +345,40 @@ def parse_shadow(data, phase):
     }
 
 
+def parse_shutdown(text, capture_status):
+    fields, handlers = {}, []
+    for line in text.splitlines():
+        if "=" not in line:
+            raise ReportError("invalid shutdown receipt line")
+        key, value = line.split("=", 1)
+        if key == "handler":
+            parts = value.split(":")
+            if (len(parts) != 2 or not SAFE_NAME.fullmatch(parts[0])
+                    or parts[1] not in ("interrupted", "already-terminal", "inactive", "error")):
+                raise ReportError("invalid shutdown handler")
+            handlers.append({"id": parts[0], "status": parts[1]})
+        elif key in fields:
+            raise ReportError("duplicate shutdown field")
+        else:
+            fields[key] = value
+    if set(fields) != {"schema", "status", "requestedBy", "captureStatus", "handlers", "errors"}:
+        raise ReportError("invalid shutdown receipt fields")
+    if (fields["schema"] != "ksp-continuum-shutdown/v1" or fields["requestedBy"] != "qualification"
+            or fields["captureStatus"] != capture_status):
+        raise ReportError("shutdown receipt does not match qualification")
+    if not re.fullmatch(r"[0-9]{1,2}", fields["handlers"]) or not re.fullmatch(r"[0-9]{1,2}", fields["errors"]):
+        raise ReportError("invalid shutdown counts")
+    count = integer(int(fields["handlers"]), "shutdown handlers", 0, 32)
+    errors = integer(int(fields["errors"]), "shutdown errors", 0, 32)
+    if count != len(handlers) or len({item["id"] for item in handlers}) != count:
+        raise ReportError("shutdown handler count or identities disagree")
+    if errors != sum(item["status"] == "error" for item in handlers):
+        raise ReportError("shutdown error count disagrees")
+    if fields["status"] != ("error" if errors else "complete"):
+        raise ReportError("shutdown status disagrees with errors")
+    return {"status": fields["status"], "handlers": handlers, "errors": errors}
+
+
 def collect(source):
     if source.is_symlink() or not source.is_dir():
         raise ReportError("source must be a non-symbolic directory")
@@ -375,9 +409,13 @@ def collect(source):
         raise ReportError("completed window count does not match phase receipts")
     if status == "complete" and completed_windows != len(PHASES):
         raise ReportError("complete qualification requires all phases")
+    shutdown_path = source / "shutdown.txt"
+    shutdown = (parse_shutdown(reader.text("shutdown.txt"), status)
+                if shutdown_path.exists() or shutdown_path.is_symlink() else None)
     return {
         "schema": "ksp-continuum-qualification-summary/v1",
         "sourceSession": source.name, "status": status, "completedWindows": completed_windows,
+        "shutdown": shutdown,
         "missingPhases": list(PHASES[completed_windows:]),
         "scope": {
             "phaseLabels": "Each phase name classifies its start context only; frame contexts report the observations within that window.",
@@ -403,6 +441,16 @@ def dist_text(value):
 
 
 def render(summary):
+    shutdown = summary.get("shutdown")
+    if shutdown is None:
+        shutdown_html = "<p>No shutdown receipt recorded. Cleanup is unqualified.</p>"
+    else:
+        shutdown_html = ("<p>Shutdown status: <strong>{}</strong>. Handler errors: {}.</p>"
+                         "<ul>{}</ul><p>These callback receipts do not independently prove restored game state.</p>").format(
+            html.escape(shutdown["status"].title()), shutdown["errors"],
+            "".join("<li>{}: {}</li>".format(html.escape(item["id"]), html.escape(item["status"]))
+                    for item in shutdown["handlers"]))
+    shutdown_html = "<section><h2>Shutdown and mission ownership</h2>" + shutdown_html + "</section>"
     phase_sections = []
     for phase in summary["phases"]:
         start = phase["startContext"]
@@ -481,6 +529,7 @@ def render(summary):
 <p class="status"><!--STATUS--></p><p class="lede">Session <!--SESSION-->. Completed windows: <!--COMPLETED-->/3. Missing phases: <!--MISSING-->.</p>
 <div class="limits"><strong>Evidence boundary.</strong> Phase names classify only each window’s start context. Profiler markers may overlap and are not whole-frame attribution. Zero-force transport checks data movement and its own analytic oracle; it is not a stock-physics comparison, deterministic replay result, or speedup claim.</div>
 <!--PHASES-->
+<!--SHUTDOWN-->
 <section><h2>Portable source manifest</h2><p>Hashes bind the fixed input files without embedding their local directory.</p><div class="table"><table><thead><tr><th>Relative file</th><th>Bytes</th><th>SHA-256</th></tr></thead><tbody>{sources}</tbody></table></div></section>
 </main></body></html>"""
     return (template.replace("<!--STATUS-->", html.escape(summary["status"].title()))
@@ -488,6 +537,7 @@ def render(summary):
             .replace("<!--COMPLETED-->", str(summary["completedWindows"]))
             .replace("<!--MISSING-->", html.escape(missing))
             .replace("<!--PHASES-->", "".join(phase_sections))
+            .replace("<!--SHUTDOWN-->", shutdown_html)
             .replace("{sources}", source_rows))
 
 

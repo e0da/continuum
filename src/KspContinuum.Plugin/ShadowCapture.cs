@@ -18,7 +18,7 @@ namespace KspContinuum
         Action<ShadowReport> completion;
         SimulationBatch pending;
         ShadowSample pendingSample;
-        int[] pendingNativeIds;
+        ShadowBody[] pendingPhysical;
         double activeStart = -1, submittedAt;
         long physicsEpoch, originEvents, lastCaptureEpoch = -1;
         bool finished;
@@ -77,7 +77,7 @@ namespace KspContinuum
                     pendingSample.handoffWallMilliseconds = clock.Elapsed.TotalMilliseconds - submittedAt;
                     if (state == ResultStatus.Ready) Accept(result);
                     else report.stale++;
-                    samples.Add(pendingSample); pending = null; pendingSample = null; pendingNativeIds = null;
+                    samples.Add(pendingSample); pending = null; pendingSample = null; pendingPhysical = null;
                     if (samples.Count >= report.requestedSamples) { Finish("complete", "Bounded sample count reached."); return; }
                 }
                 else if (state == ResultStatus.Faulted || state == ResultStatus.Disposed || state == ResultStatus.Empty)
@@ -92,25 +92,36 @@ namespace KspContinuum
             if (!allowCapture || pending != null || lastCaptureEpoch == physicsEpoch) return;
             double captureStart = clock.Elapsed.TotalMilliseconds;
             int count = bodies.Count;
-            var ids = new int[count]; var nativeIds = new int[count]; var masses = new double[count];
+            var ids = new int[count]; var masses = new double[count];
             var positions = new Vec[count]; var velocities = new Vec[count]; var forces = new Vec[count];
+            ShadowBody[] physical = report.firstAcceptedBatch.Length == 0 ? new ShadowBody[count] : null;
             for (int i = 0; i < count; i++)
             {
                 Rigidbody body = bodies[i];
-                ids[i] = i; nativeIds[i] = body.GetInstanceID(); masses[i] = body.mass;
-                positions[i] = V(body.position); velocities[i] = V(body.velocity);
+                Vector3 position = body.position, velocity = body.velocity;
+                float mass = body.mass;
+                ids[i] = i; masses[i] = mass; positions[i] = V(position); velocities[i] = V(velocity);
+                if (physical != null) physical[i] = new ShadowBody {
+                    id = i, nativeInstanceId = body.GetInstanceID(), mass = mass,
+                    constraints = (int)body.constraints, sleeping = body.IsSleeping(),
+                    position = A(position), rotation = A(body.rotation), velocity = A(velocity), angularVelocity = A(body.angularVelocity),
+                    centerOfMass = A(body.centerOfMass), worldCenterOfMass = A(body.worldCenterOfMass),
+                    inertiaTensor = A(body.inertiaTensor), inertiaTensorRotation = A(body.inertiaTensorRotation),
+                    force = new double[3], forceSource = ShadowPhysicalInput.SyntheticZeroForce };
             }
             var batch = SimulationBatch.FromColumns(epoch.CaptureStamp(), Time.fixedDeltaTime, ids, masses, positions, velocities, forces);
             var sample = new ShadowSample { tick = batch.Stamp.Tick, topologyGeneration = batch.Stamp.TopologyGeneration,
                 frameGeneration = batch.Stamp.FrameGeneration, vesselId = vessel.id.ToString("D"), body = vessel.mainBody == null ? null : vessel.mainBody.bodyName,
                 situation = vessel.situation.ToString(), parts = vessel.parts.Count, bodies = count, captureUnityFrame = Time.frameCount,
                 universalTime = Planetarium.GetUniversalTime(), stepSeconds = batch.StepSeconds, packed = vessel.packed, warpRate = TimeWarp.CurrentRate,
-                captureMilliseconds = auditMs + clock.Elapsed.TotalMilliseconds - captureStart };
+                captureMilliseconds = auditMs + clock.Elapsed.TotalMilliseconds - captureStart,
+                referenceFrame = ShadowPhysicalInput.UnityWorldReferenceFrame, rawKrakensbaneFrameVelocity = A(frameVelocity),
+                physicsEpoch = physicsEpoch, floatingOriginEventCount = originEvents };
             submittedAt = clock.Elapsed.TotalMilliseconds;
             SubmitStatus submission = worker.TrySubmit(batch);
             sample.submitMilliseconds = clock.Elapsed.TotalMilliseconds - submittedAt;
             if (submission != SubmitStatus.Accepted) throw new InvalidOperationException("Shadow submission: " + submission);
-            pending = batch; pendingSample = sample; pendingNativeIds = nativeIds; lastCaptureEpoch = physicsEpoch;
+            pending = batch; pendingSample = sample; pendingPhysical = physical; lastCaptureEpoch = physicsEpoch;
             report.submitted++;
             Status = "Shadow transport: " + report.accepted + " accepted, " + report.stale + " stale, " + count + " bodies. No vessel writes.";
         }
@@ -152,18 +163,23 @@ namespace KspContinuum
             if (maxPosition != 0 || maxVelocity != 0) throw new InvalidOperationException("Zero-force transport oracle mismatch.");
             if (report.firstAcceptedBatch.Length == 0)
             {
+                if (pendingPhysical == null || pendingPhysical.Length != pending.Count)
+                    throw new InvalidOperationException("Accepted shadow request has no physical input snapshot.");
                 report.firstAcceptedTick = pending.Stamp.Tick;
-                report.firstAcceptedBatch = new ShadowBody[pending.Count];
-                for (int i = 0; i < pending.Count; i++) report.firstAcceptedBatch[i] = new ShadowBody {
-                    id = pending.GetId(i), nativeInstanceId = pendingNativeIds[i], mass = pending.GetMass(i),
-                    position = A(pending.GetPosition(i)), velocity = A(pending.GetVelocity(i)), force = A(pending.GetForce(i)),
-                    predictedPosition = A(result.GetPosition(i)), predictedVelocity = A(result.GetVelocity(i)) };
+                for (int i = 0; i < pending.Count; i++) {
+                    pendingPhysical[i].predictedPosition = A(result.GetPosition(i));
+                    pendingPhysical[i].predictedVelocity = A(result.GetVelocity(i));
+                }
+                report.firstAcceptedBatch = pendingPhysical;
             }
             report.accepted++;
         }
         static double Distance(Vec a, Vec b) { double x = a.X - b.X, y = a.Y - b.Y, z = a.Z - b.Z; return Math.Sqrt(x * x + y * y + z * z); }
         static Vec V(Vector3 v) { return new Vec(v.x, v.y, v.z); }
         static double[] A(Vec v) { return new[] { v.X, v.Y, v.Z }; }
+        static double[] A(Vector3 v) { return new[] { (double)v.x, v.y, v.z }; }
+        static double[] A(Vector3d v) { return new[] { v.x, v.y, v.z }; }
+        static double[] A(Quaternion q) { return new[] { (double)q.x, q.y, q.z, q.w }; }
         static string F(double value) { return value.ToString("R", CultureInfo.InvariantCulture); }
 
         void Finish(string state, string reason)
@@ -180,12 +196,12 @@ namespace KspContinuum
                 pendingSample.handoffWallMilliseconds = clock.Elapsed.TotalMilliseconds - submittedAt;
                 samples.Add(pendingSample);
             }
-            pending = null; pendingSample = null; pendingNativeIds = null;
+            pending = null; pendingSample = null; pendingPhysical = null;
             report.status = state; report.reason = reason; report.wallSeconds = clock.Elapsed.TotalSeconds;
             report.physicsEpochs = physicsEpoch; report.originEvents = originEvents; report.samples = samples.ToArray();
             clock.Stop(); Status = "Shadow " + state + ": " + report.accepted + " accepted, " + report.stale + " stale.";
             var callback = completion; completion = null;
-            try { callback(report); }
+            try { ShadowPhysicalInput.Validate(report); callback(report); }
             catch (Exception error)
             {
                 Status = "Shadow export failed: " + error.GetType().Name;

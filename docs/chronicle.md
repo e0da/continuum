@@ -26,6 +26,8 @@ Write a small JSON sidecar for the editorial fields. The full attempt ID must be
 
 The generator displays these fields as editorial context. When `mission.txt` contains native `missionId`, `attemptId`, `vehicleDesignId`, or `siteId` fields, each must match the corresponding metadata field. Legacy receipts without those fields remain supported. The generator never invents anomaly claims from telemetry. Measurements, receipt status, and media confirmation appear separately.
 
+Native `interrupted` outcomes remain interrupted in the report, archive index and connected site. Shutdown context and cleanup status appear separately when recorded; interruption is neither a successful landing nor a failed flight criterion. Legacy receipts without shutdown fields show “Not recorded.” The generator never rewrites an older `running` receipt from a closed process or infers cleanup success from completed profiling.
+
 Checkpoint-start receipts provide `parentAttemptId`, `parentCheckpoint`, and `parentCheckpointSha256` together. The generator imports these native fields into the manifest; editorial metadata cannot supply a parent identity or digest. If editorial `parent_checkpoint` is present, it must match the native checkpoint label. Legacy reports containing only an editorial checkpoint description remain supported, but that description does not establish a parent relationship.
 
 ## Generate a report
