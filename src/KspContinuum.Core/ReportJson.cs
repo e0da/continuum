@@ -41,7 +41,7 @@ namespace KspContinuum
                     CultureInfo.InvariantCulture)); return;
             }
             if (value is Array || value is ReadOnlyCollection<ForcePartObservation> ||
-                value is ReadOnlyCollection<ForceAtPositionObservation>)
+                value is ReadOnlyCollection<ForceAtPositionObservation> || value is ReadOnlyCollection<LifecyclePartSample>)
             {
                 output.Append('['); bool first = true;
                 foreach (var item in (IEnumerable)value)
@@ -56,6 +56,8 @@ namespace KspContinuum
                 type != typeof(ProfileFrame) && type != typeof(ProfileDistribution) && type != typeof(ProfileMarkerSummary) &&
                 type != typeof(LoopTimingReport) && type != typeof(LoopTimingScope) && type != typeof(LoopTimingSample) &&
                 type != typeof(ForceObservationReport) && type != typeof(ForceObservationContext) &&
+                type != typeof(LifecycleTraceReport) && type != typeof(LifecycleTraceEvent) &&
+                type != typeof(LifecycleTraceContext) && type != typeof(LifecyclePartSample) &&
                 type != typeof(ForceObservationBatch) && type != typeof(ForcePartObservation) &&
                 type != typeof(ForceAtPositionObservation) && type != typeof(Vec) &&
                 type != typeof(ShadowReport) && type != typeof(ShadowSample) && type != typeof(ShadowBody))
