@@ -13,7 +13,7 @@ namespace KspContinuum.Mission
     [KSPAddon(KSPAddon.Startup.MainMenu, true)]
     public sealed class MissionAddon : MonoBehaviour
     {
-        enum Phase { Dormant, SpaceCenter, Flight, Replay, Attach, Armed, Ascent, Transfer, Correction, Coast, Capture, WaitForSite, Landing, Settling, Done }
+        enum Phase { Dormant, SpaceCenter, Flight, CheckpointFlight, CheckpointReady, Replay, Attach, Armed, Ascent, Transfer, Correction, Coast, Capture, WaitForSite, Landing, Settling, Done }
         Phase phase;
         readonly LandingAcceptance acceptance = new LandingAcceptance();
         readonly MissionCleanup cleanup = new MissionCleanup();
@@ -29,6 +29,8 @@ namespace KspContinuum.Mission
         uint commandId;
         bool active, survey, siteWaitStarted, disableThrottleFloor;
         string attemptId;
+        CheckpointSource checkpointSource;
+        CheckpointRestore checkpointRestore;
         SurveyFootprint footprint;
         double daylightWindowEnd;
         double[] arrivalForecast;
@@ -56,6 +58,14 @@ namespace KspContinuum.Mission
                 string fileVersion = fileVersionAttribute == null ? null : fileVersionAttribute.Version;
                 if (!MissionCompatibility.IsSupported(assemblyVersion, fileVersion))
                     throw new InvalidOperationException("Mission requires MechJeb 2.15.3.0.");
+                string checkpointSave = Argument(arguments, "--continuum-checkpoint-save");
+                string checkpoint = Argument(arguments, "--continuum-checkpoint");
+                string checkpointHash = Argument(arguments, "--continuum-checkpoint-sha256");
+                if (checkpointSave != null || checkpoint != null || checkpointHash != null)
+                {
+                    if (!survey) throw new InvalidOperationException("Checkpoint start requires --continuum-survey.");
+                    checkpointSource = CheckpointSource.Inspect(KSPUtil.ApplicationRootPath, checkpointSave, checkpoint, checkpointHash);
+                }
                 string id = DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N");
                 string outputRoot = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData");
                 if (survey)
@@ -81,10 +91,12 @@ namespace KspContinuum.Mission
                 {
                     File.AppendAllText(Path.Combine(directory, "mission.txt"), SurveyReceipt());
                     surveyTelemetry = new StreamWriter(Path.Combine(directory, "survey.csv")) { AutoFlush = true };
-                    surveyTelemetry.WriteLine("wall_s,ut_s,phase,phase_wall_s,phase_ut_s,latitude_deg,longitude_deg,distance_m,sun_elevation_deg,eclipsed,radial_tilt_deg,terrain_tilt_deg,angular_speed_rad_s,attitude_error_deg,landing_step,warp_rate,packed,node_autowarp,min_throttle_enabled,min_throttle_fraction,throttle,root_rotation_x,root_rotation_y,root_rotation_z,root_rotation_w,reference_part,terrain_normal_world_x,terrain_normal_world_y,terrain_normal_world_z,terrain_hit_distance_m,screen_width,screen_height");
+                    surveyTelemetry.WriteLine("wall_s,ut_s,phase,phase_wall_s,phase_ut_s,latitude_deg,longitude_deg,distance_m,sun_elevation_deg,eclipsed,radial_tilt_deg,terrain_tilt_deg,angular_speed_rad_s,attitude_error_deg,landing_step,warp_rate,packed,node_autowarp,min_throttle_enabled,min_throttle_fraction,throttle,root_rotation_x,root_rotation_y,root_rotation_z,root_rotation_w,reference_part,terrain_normal_world_x,terrain_normal_world_y,terrain_normal_world_z,terrain_hit_distance_m,screen_width,screen_height,horizontal_speed_mps,vertical_speed_mps,thrust_mode,translation_speed_active,translation_kill_horizontal");
                 }
                 if (Directory.Exists(Path.Combine(KSPUtil.ApplicationRootPath, "saves", saveName)))
                     throw new InvalidOperationException("Refusing existing save directory.");
+                HashMechJebSettings();
+                if (checkpointSource != null) { LoadCheckpoint(); return; }
                 var parameters = GameParameters.GetDefaultParameters(Game.Modes.SANDBOX, GameParameters.Preset.Normal);
                 HighLogic.CurrentGame = GamePersistence.CreateNewGame(saveName, Game.Modes.SANDBOX, parameters,
                     "Squad/Flags/default", GameScenes.SPACECENTER, EditorFacility.VAB);
@@ -153,6 +165,45 @@ namespace KspContinuum.Mission
                         timeline.BeginReplay(vessel, NeutralTimeline());
                         RequestScreenshot("launchpad");
                         Move(Phase.Replay); break;
+                    case Phase.CheckpointFlight:
+                        if (!HighLogic.LoadedSceneIsFlight || !FlightGlobals.ready || FlightGlobals.ActiveVessel == null ||
+                            FlightGlobals.ActiveVessel.packed || FlightGlobals.ActiveVessel.HoldPhysics || TimeWarp.CurrentRate != 1) return;
+                        if (Time.realtimeSinceStartup - phaseWall < 15) return;
+                        vessel = FlightGlobals.ActiveVessel;
+                        core = vessel.GetMasterMechJeb();
+                        CheckpointRestore.RequireIdle(vessel, core, Path.Combine(directory, "checkpoint-idle-owners.txt"));
+                        minmus = FlightGlobals.Bodies.Single(body => body.bodyName == "Minmus");
+                        checkpointRestore.Verify(vessel, Path.Combine(directory, "checkpoint-load-resources.csv"));
+                        if (!core.Thrust.LimiterMinThrottle || Math.Abs(core.Thrust.MinThrottle.Val - 0.05) > 1e-12)
+                            throw new InvalidOperationException("Checkpoint local throttle-floor baseline was not restored.");
+                        commandId = vessel.rootPart.flightID;
+                        foreach (Part part in vessel.parts) landerParts.Add(part.flightID);
+                        Move(Phase.CheckpointReady); break;
+                    case Phase.CheckpointReady:
+                        if (FlightGlobals.ActiveVessel != vessel || !vessel.loaded || vessel.packed || vessel.HoldPhysics || TimeWarp.CurrentRate != 1 || FlightDriver.Pause)
+                            throw new InvalidOperationException("Checkpoint idle interval lost its normal, focused physics boundary.");
+                        CheckpointRestore.RequireIdle(vessel, core, Path.Combine(directory, "checkpoint-idle-owners.txt"));
+                        double checkpointNow = Planetarium.GetUniversalTime();
+                        if (checkpointNow > checkpointRestore.Epoch + 1) throw new InvalidOperationException("Checkpoint fixed acquisition epoch missed.");
+                        if (checkpointNow < checkpointRestore.Epoch) return;
+                        if (Screen.width < 1920 || Screen.height < 1080) throw new InvalidOperationException("Rendered survey resolution is below 1920x1080.");
+                        checkpointRestore.Verify(vessel, Path.Combine(directory, "checkpoint-acquisition-resources.csv"));
+                        CheckpointRestore.RequireIdle(vessel, core, Path.Combine(directory, "checkpoint-acquisition-owners.txt"));
+                        checkpointSource.VerifyUnchanged();
+                        timeline = new FlightTimeline();
+                        cleanup.Track("timeline", () => timeline.Dispose());
+                        timeline.BeginRecording(vessel);
+                        File.AppendAllText(Path.Combine(directory, "mission.txt"), "inputDirectory=" + timeline.OutputDirectory +
+                            "\ncheckpointAcquisitionObservedUT=" + F(checkpointNow) + "\nrestoredMinimumThrottleEnabled=" + core.Thrust.LimiterMinThrottle +
+                            "\nrestoredMinimumThrottleFraction=" + F(core.Thrust.MinThrottle.Val) + "\n");
+                        OwnFlightCleanup();
+                        core.Staging.AutoStageLimitRequest(2, this);
+                        var checkpointStaging = core.Staging;
+                        cleanup.Track("staging-limit", () => checkpointStaging.AutoStageLimitRemove(this));
+                        core.Node.Autowarp = true;
+                        PrepareSite(checkpointRestore.Epoch);
+                        SaveMilestone("checkpoint-restored");
+                        Move(Phase.WaitForSite); break;
                     case Phase.Replay:
                         if (Planetarium.GetUniversalTime() - phaseUT < 3) return;
                         if (timeline.IsReplaying || timeline.Status != "Replay complete.")
@@ -184,14 +235,7 @@ namespace KspContinuum.Mission
                         Move(Phase.Armed); break;
                     case Phase.Armed:
                         if (Planetarium.GetUniversalTime() - phaseUT < 0.5) return;
-                        Vessel controlledVessel = vessel;
-                        cleanup.Track("throttle", () =>
-                        {
-                            if (controlledVessel != null) controlledVessel.ctrlState.mainThrottle = 0;
-                            if (FlightGlobals.ActiveVessel == controlledVessel) FlightInputHandler.state.mainThrottle = 0;
-                        });
-                        var warp = core.Warp;
-                        cleanup.Track("warp", () => { if (FlightGlobals.ActiveVessel == controlledVessel) warp.MinimumWarp(true); });
+                        OwnFlightCleanup();
                         TrackController("ascent", core.Ascent);
                         core.Ascent.Users.Add(this);
                         StageManager.ActivateNextStage(); Move(Phase.Ascent); break;
@@ -264,6 +308,69 @@ namespace KspContinuum.Mission
             catch (Exception ex) { Fail(ex); }
         }
 
+        static string Argument(string[] arguments, string name)
+        {
+            int index = Array.IndexOf(arguments, name);
+            if (index < 0) return null;
+            if (index + 1 >= arguments.Length || arguments[index + 1].StartsWith("--") || Array.LastIndexOf(arguments, name) != index)
+                throw new InvalidOperationException("Missing or duplicate argument: " + name);
+            return arguments[index + 1];
+        }
+
+        void HashMechJebSettings()
+        {
+            string settings = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "MechJeb2", "Plugins", "PluginData", "MechJeb2");
+            using (var hashes = new StreamWriter(Path.Combine(directory, "mechjeb-settings.csv")))
+            {
+                hashes.WriteLine("filename,sha256");
+                if (!Directory.Exists(settings))
+                {
+                    hashes.WriteLine("missing-directory,");
+                    if (checkpointSource != null) throw new InvalidOperationException("Checkpoint requires existing MechJeb settings inputs.");
+                    return;
+                }
+                foreach (string path in Directory.GetFiles(settings, "mechjeb_settings_*.cfg").OrderBy(path => path, StringComparer.Ordinal))
+                    hashes.WriteLine("\"" + Path.GetFileName(path).Replace("\"", "\"\"") + "\"," + CheckpointSource.FileDigest(path));
+            }
+        }
+
+        void LoadCheckpoint()
+        {
+            cleanup.Track("checkpoint-source", () =>
+            {
+                checkpointSource.VerifyUnchanged();
+                File.AppendAllText(Path.Combine(directory, "mission.txt"), "parentCheckpointVerifiedAfterRun=True\n");
+            });
+            checkpointSource.CopyTo(Path.Combine(KSPUtil.ApplicationRootPath, "saves", saveName));
+            string copy = Path.Combine(KSPUtil.ApplicationRootPath, "saves", saveName, "checkpoint-source.sfs");
+            File.AppendAllText(Path.Combine(directory, "mission.txt"), "parentAttemptId=" + checkpointSource.ParentAttemptId +
+                "\nparentCheckpoint=" + checkpointSource.Checkpoint + "\nparentCheckpointSha256=" + checkpointSource.Sha256 +
+                "\ncheckpointCopySha256=" + CheckpointSource.FileDigest(copy) + "\ncheckpointSourceUT=" + F(checkpointSource.UniversalTime) +
+                "\ncheckpointAcquisitionEpochUT=" + F(checkpointSource.UniversalTime + 60) +
+                "\ncheckpointMode=native reconstructed orbit and resources; controller reinitialized, no saved angular-velocity or complete control-state replay\n" +
+                "neutralReplay=NOT RUN: installed MechJeb owns checkpoint controls.\n");
+            Game game = GamePersistence.LoadGame("checkpoint-source", saveName, true, true);
+            checkpointRestore = new CheckpointRestore(game, checkpointSource.UniversalTime);
+            HighLogic.SaveFolder = saveName;
+            HighLogic.CurrentGame = game;
+            game.Title = saveName + " (SANDBOX)";
+            game.startScene = GameScenes.FLIGHT;
+            Move(Phase.CheckpointFlight);
+            game.Start();
+        }
+
+        void OwnFlightCleanup()
+        {
+            Vessel controlledVessel = vessel;
+            cleanup.Track("throttle", () =>
+            {
+                if (controlledVessel != null) controlledVessel.ctrlState.mainThrottle = 0;
+                if (FlightGlobals.ActiveVessel == controlledVessel) FlightInputHandler.state.mainThrottle = 0;
+            });
+            var warp = core.Warp;
+            cleanup.Track("warp", () => { if (FlightGlobals.ActiveVessel == controlledVessel) warp.MinimumWarp(true); });
+        }
+
         void StartLanding()
         {
             if (vessel.packed || vessel.HoldPhysics || TimeWarp.CurrentRate != 1 || vessel.ctrlState.mainThrottle != 0 ||
@@ -293,7 +400,7 @@ namespace KspContinuum.Mission
             SaveMilestone("descent-start");
         }
 
-        void PrepareSite()
+        void PrepareSite(double? planningEpoch = null)
         {
             if (minmus.pqsController == null) throw new InvalidOperationException("Minmus PQS terrain unavailable.");
             if (Math.Abs(minmus.pqsController.radius - minmus.Radius) > 0.01)
@@ -309,7 +416,7 @@ namespace KspContinuum.Mission
                 throw new InvalidOperationException("Site rejected: sampled footprint exceeds slope limit.");
             double duration = 2 * vessel.orbit.period + 1800;
             var model = new SurveySunModel(minmus);
-            nextAction = SurveyPolicy.FindWindow(Planetarium.GetUniversalTime(), Math.Abs(minmus.rotationPeriod), duration, ut =>
+            nextAction = SurveyPolicy.FindWindow(planningEpoch ?? Planetarium.GetUniversalTime(), Math.Abs(minmus.rotationPeriod), duration, ut =>
             {
                 double elevation; bool eclipsed;
                 model.Evaluate(ut, SurveyPolicy.Latitude, SurveyPolicy.Longitude, footprint.CenterHeight, out elevation, out eclipsed);
@@ -440,7 +547,7 @@ namespace KspContinuum.Mission
 
         double PhaseTimeout()
         {
-            if (phase == Phase.SpaceCenter || phase == Phase.Flight) return 300;
+            if (phase == Phase.SpaceCenter || phase == Phase.Flight || phase == Phase.CheckpointFlight || phase == Phase.CheckpointReady) return 300;
             if (phase == Phase.Replay || phase == Phase.Attach || phase == Phase.Armed || phase == Phase.Settling) return 180;
             return 3600;
         }
@@ -481,7 +588,9 @@ namespace KspContinuum.Mission
                 core.Landing.CurrentStep == null ? "" : core.Landing.CurrentStep.GetType().Name, F(TimeWarp.CurrentRate), current.packed.ToString(),
                 core.Node.Autowarp.ToString(), core.Thrust.LimiterMinThrottle.ToString(), F(core.Thrust.MinThrottle), F(current.ctrlState.mainThrottle),
                 F(rotation.x), F(rotation.y), F(rotation.z), F(rotation.w), current.GetReferenceTransformPart() == null ? "" : current.GetReferenceTransformPart().flightID.ToString(CultureInfo.InvariantCulture),
-                F(terrain.x), F(terrain.y), F(terrain.z), F(current.heightFromTerrain), Screen.width.ToString(CultureInfo.InvariantCulture), Screen.height.ToString(CultureInfo.InvariantCulture)));
+                F(terrain.x), F(terrain.y), F(terrain.z), F(current.heightFromTerrain), Screen.width.ToString(CultureInfo.InvariantCulture), Screen.height.ToString(CultureInfo.InvariantCulture),
+                F(core.VesselState.speedSurfaceHorizontal), F(core.VesselState.speedVertical), core.Thrust.Tmode.ToString(),
+                F(core.Thrust.TransSpdAct), core.Thrust.TransKillH.ToString()));
         }
 
         static string F(double value) { return value.ToString("R", CultureInfo.InvariantCulture); }

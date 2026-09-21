@@ -52,3 +52,21 @@ In addition to the Pathfinder intact-touchdown conditions, survey acceptance req
 Add `--continuum-survey-disable-throttle-floor` to test the same craft and target with MechJeb's minimum-throttle limiter disabled during owned landing control. The option requires survey mode; it does not change the engine's thrust limiter. The runner records the previous/applied setting, releases landing ownership before restoring it, and preserves a setting changed externally. This is an explicit experiment rather than a global MechJeb configuration patch.
 
 MechJeb's minimum throttle is a fraction: `0.05` means 5%. Survey A001's original telemetry named this column `min_throttle_percent` incorrectly; interpret its raw values as fractions. Later output corrects the header to `min_throttle_fraction`. Preserve the original A001 file and its hash.
+
+### Start a survey from a checkpoint
+
+The checkpoint path is an explicit survey experiment for the stock Kerbal X's safe Minmus-orbit milestone. It reconstructs native saved state in a new attempt sandbox and initializes a new landing controller. It does not continue the original in-memory autopilot or replay the original inputs.
+
+Add these options to the rendered survey command, using an unused attempt ID:
+
+```sh
+--continuum-checkpoint-save SOURCE_SAVE_FOLDER \
+--continuum-checkpoint minmus-orbit-CHECKPOINT_SUFFIX \
+--continuum-checkpoint-sha256 EXPECTED_64_HEX_SHA256
+```
+
+Use leaf names from the same owned instance, not absolute paths. The checkpoint name omits `.sfs`. The source must have a matching native mission receipt and recorded capture milestone. Its exact bytes are checked against the supplied digest and copied into the new attempt; the source save is not the running destination. The child receipt records the parent attempt, checkpoint name and digest for the [chronicle](chronicle.md).
+
+Checkpoint qualification checks the reconstructed vessel before acquiring control. Keep external MechJeb settings fixed between comparison runs and retain their hashes: the native save overlays local settings on separate global and craft-type configuration files. A save alone does not capture that whole environment. Original and child attempts retain their own outcomes, even when they share a checkpoint.
+
+Use two unchanged-setting trials to measure reconstruction and landing variation before comparing controller variants. Record load and control-acquisition timing, resources, orbit and actual touchdown. The existing survey acceptance remains unchanged; a successful restore is not a successful landing.

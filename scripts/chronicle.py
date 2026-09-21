@@ -595,7 +595,8 @@ def generate(mission, inputs, output, metadata_path):
         "mission.txt", "mission.csv", "events.txt", "screenshots.csv", "milestones.csv",
         "survey.csv", "terrain.csv", "checkpoint-load-resources.csv",
         "checkpoint-load-resources.txt", "checkpoint-acquisition-resources.csv",
-        "checkpoint-acquisition-resources.txt", "mechjeb-settings.csv",
+        "checkpoint-acquisition-resources.txt", "checkpoint-idle-owners.txt",
+        "checkpoint-acquisition-owners.txt", "mechjeb-settings.csv",
     ):
         path = mission / name
         if path.is_file():

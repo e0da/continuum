@@ -26,6 +26,14 @@ The current vehicle is stock Kerbal X, catalog design `CV-0001-R01`. The next cr
 
 Keep the same craft initially to reduce the number of changes. It is still a crewed test vehicle, not a stand-in claim that our probe carrier exists.
 
+## Checkpoint experiment
+
+The next comparison branches from A002's saved Minmus orbit, before landing control was acquired. Two trials keep the throttle floor disabled and use the same checkpoint and external MechJeb settings. This separates the landing workload from launch and transfer, while measuring how much native reconstruction and controller scheduling vary between runs.
+
+Before each trial, verify the checkpoint digest and the reconstructed vessel's identity, parts, resources and orbit. Record the controller settings and acquisition time. A source save is an input to the experiment, not a complete snapshot of running physics or autopilot memory. The resulting attempts keep separate saves, receipts and chronicles, with links back to A002.
+
+Judge the outcome against the existing 100 m, upright, daylight and settling requirements. Compare where target error develops during braking, horizontal correction and final descent before adjusting guidance. Similar outcomes would support repeatability for this workload; they would not prove exact deterministic replay.
+
 ## Simulation development
 
 Use recorded mission states and inputs to test candidate models alongside stock behavior before giving them authority. Compare conservation, contact, trajectory error and measured computational cost at the actual integration boundary. Add fidelity where a stated experiment needs it; more computation or agreement with stock alone does not establish physical accuracy.

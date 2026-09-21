@@ -44,6 +44,8 @@ FinalDescent took about 38 seconds versus A001's 296 seconds, with no recorded t
 
 Both survey attempts have six confirmed 1920×1080 screenshots. Their connected local website links attempts, missions, vehicle, site and experiment records, including a comparison chart. Its 14 pages and 245 local links/media references were checked after the A002 rebuild; browser navigation and actual image loading were verified. The maintained catalog and derived site can be rebuilt without modifying the original reports. The Python suite has 30 passing tests.
 
+Subsequent analysis locates A002's distance miss during final descent. The first recorded FinalDescent sample was 15.912 m from target at approximately 202 m above sea level. Latitude/longitude differences estimate about 4.1 m/s of lateral motion relative to Minmus's rotating surface. During the following 26.18 seconds before appreciable braking resumed, the ground track moved approximately 107.32 m east and 34.64 m south. It crossed the 100 m radius at approximately 55 m altitude, still at zero recorded throttle. These are sampled ground-track estimates with interpolated altitude, not direct center-of-mass velocity or proof of the cause of the controller handoff. The trace does not support attributing the observed displacement simply to viewing the moon in an inertial frame.
+
 ## Earlier isolated benchmark qualification
 
 The isolated benchmark ran in an independent stock-derived KSP 1.12.5 Mac test copy on 2026-09-20, on Apple M4 Max (arm64 host, x86_64 game executable), using Unity 2019.4.18f1 and `-batchmode -nographics --continuum-bench`. Existing playable and mod-pack verification copies were preserved. The test copy was prepared only after KSP, CKAN and Steam were closed; installation used CKAN.

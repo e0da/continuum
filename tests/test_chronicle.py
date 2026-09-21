@@ -187,6 +187,8 @@ class ChronicleTests(unittest.TestCase):
             "checkpoint-load-resources.txt": b"PRIVATE_RESOURCE_VALUE load receipt\n",
             "checkpoint-acquisition-resources.csv": b"resource,amount\nLiquidFuel,12\n",
             "checkpoint-acquisition-resources.txt": b"acquisition receipt\n",
+            "checkpoint-idle-owners.txt": b"idle ownership receipt\n",
+            "checkpoint-acquisition-owners.txt": b"acquisition ownership receipt\n",
             "mechjeb-settings.csv": b"setting,value\nlandingTolerance,1\n",
         }
         for name, content in evidence.items():
