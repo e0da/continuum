@@ -383,6 +383,75 @@ class ChronicleTests(unittest.TestCase):
         self.assertIn("invalid mission session directory name", result.stderr)
         self.assertFalse(output.exists())
 
+    def test_imports_complete_native_checkpoint_lineage(self):
+        digest = "A1" * 32
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n" % digest
+            )
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual("CSP-0001-A002", manifest["parentAttemptId"])
+        self.assertEqual("minmus-orbit", manifest["parentCheckpoint"])
+        self.assertEqual(digest.lower(), manifest["parentCheckpointSha256"])
+        page = (output / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Parent attempt", page)
+        self.assertIn("CSP-0001-A002", page)
+        self.assertIn("minmus-orbit", page)
+        self.assertIn("Checkpoint SHA-256", page)
+        self.assertIn(digest.lower(), page)
+        self.assertEqual(1, page.count("does not establish deterministic replay"))
+
+    def test_rejects_incomplete_or_invalid_native_checkpoint_lineage(self):
+        original = (self.mission / "mission.txt").read_text(encoding="utf-8")
+        cases = (
+            ("parentAttemptId=CSP-0001-A002\n", "incomplete checkpoint lineage"),
+            ("parentAttemptId=CSP-0001-A003\nparentCheckpoint=minmus-orbit\nparentCheckpointSha256=%s\n" % ("a" * 64),
+             "may not parent itself"),
+            ("parentAttemptId=CSP-0001-A002\nparentCheckpoint=../orbit\nparentCheckpointSha256=%s\n" % ("a" * 64),
+             "invalid parentCheckpoint"),
+            ("parentAttemptId=CSP-0001-A002\nparentCheckpoint=minmus-orbit\nparentCheckpointSha256=not-a-digest\n",
+             "invalid parentCheckpointSha256"),
+        )
+        for index, (receipt, message) in enumerate(cases):
+            with self.subTest(message=message):
+                (self.mission / "mission.txt").write_text(original + receipt, encoding="utf-8")
+                output = self.root / ("lineage-invalid-%d" % index)
+                result = self.run_generator(output)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_rejects_native_checkpoint_label_that_disagrees_with_metadata(self):
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n" % ("b" * 64)
+            )
+        output = self.root / "chronicle"
+        result = self.run_generator(
+            output, self.metadata(parent_checkpoint="different-checkpoint")
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("parent_checkpoint does not match mission receipt", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_preserves_legacy_free_checkpoint_without_claiming_structured_lineage(self):
+        output = self.root / "chronicle"
+        result = self.run_generator(
+            output, self.metadata(parent_checkpoint="legacy-checkpoint.v1")
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual("legacy-checkpoint.v1", manifest["parentCheckpoint"])
+        self.assertIsNone(manifest["parentAttemptId"])
+        self.assertIsNone(manifest["parentCheckpointSha256"])
+
 
 if __name__ == "__main__":
     unittest.main()

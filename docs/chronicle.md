@@ -26,6 +26,8 @@ Write a small JSON sidecar for the editorial fields. The full attempt ID must be
 
 The generator displays these fields as editorial context. When `mission.txt` contains native `missionId`, `attemptId`, `vehicleDesignId`, or `siteId` fields, each must match the corresponding metadata field. Legacy receipts without those fields remain supported. The generator never invents anomaly claims from telemetry. Measurements, receipt status, and media confirmation appear separately.
 
+Checkpoint-start receipts provide `parentAttemptId`, `parentCheckpoint`, and `parentCheckpointSha256` together. The generator imports these native fields into the manifest; editorial metadata cannot supply a parent identity or digest. If editorial `parent_checkpoint` is present, it must match the native checkpoint label. Legacy reports containing only an editorial checkpoint description remain supported, but that description does not establish a parent relationship.
+
 ## Generate a report
 
 Create the archive parent first, then choose a new attempt directory. The destination must not exist.
@@ -103,6 +105,8 @@ Keep the local catalog beside the reports under the ignored archive. This small 
 ```
 
 Catalog media paths are relative to the archive. Every mission, vehicle, and non-null site referenced by a report manifest must have a catalog record, and every experiment attempt link must resolve to a report. Status and narrative come from the maintained catalog; the generator does not turn a `LANDED` observation or a report outcome into a broader mission claim.
+
+An attempt with native checkpoint provenance links to its parent attempt and displays the checkpoint label and full SHA-256 digest. The parent links back to its descendants. Parent attempts must exist in the archive, repeated renderings must agree about lineage, and self-links or cycles are rejected. These links describe recorded history; they do not certify deterministic replay.
 
 One command builds or safely refreshes the derived site:
 

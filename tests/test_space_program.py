@@ -25,7 +25,7 @@ class SpaceProgramTests(unittest.TestCase):
         self.catalog = self.archive / "catalog.json"
         self.write_catalog()
 
-    def write_report(self, folder_name, generated, body):
+    def write_report(self, folder_name, generated, body, attempt_id="CSP-0002-A001", lineage=None):
         folder = self.archive / folder_name
         folder.mkdir()
         (folder / "media").mkdir()
@@ -36,11 +36,11 @@ class SpaceProgramTests(unittest.TestCase):
             '</body></html>' % body,
             encoding="utf-8",
         )
-        (folder / "manifest.json").write_text(json.dumps({
+        manifest = {
             "schema": "ksp-continuum-chronicle-manifest/v1",
             "generatedUtc": generated,
             "missionId": "CSP-0002",
-            "attemptId": "CSP-0002-A001",
+            "attemptId": attempt_id,
             "vehicleDesignId": "CV-0001-R01",
             "siteId": "SITE-MIN-001",
             "title": "Minmus Survey 1",
@@ -49,7 +49,10 @@ class SpaceProgramTests(unittest.TestCase):
             "media": [{
                 "filename": "landing.png", "status": "confirmed", "width": 1920, "height": 1080,
             }],
-        }), encoding="utf-8")
+        }
+        if lineage is not None:
+            manifest.update(lineage)
+        (folder / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     def catalog_data(self):
         return {
@@ -227,6 +230,116 @@ class SpaceProgramTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("report page contains a private absolute path", result.stderr)
         self.assertFalse((self.archive / "site").exists())
+
+    def test_links_checkpoint_child_to_parent_and_parent_to_descendant(self):
+        digest = "6993575ee97eb6f9529d6f91187e63909dc2aad424e477905a4a86a063445240"
+        self.write_report(
+            "child-render", "2026-09-21T01:00:00Z", "CHILD REPORT",
+            attempt_id="CSP-0002-A002",
+            lineage={
+                "parentAttemptId": "CSP-0002-A001",
+                "parentCheckpoint": "minmus-orbit-e05676be2e38432caf5eac0b1baf79b3",
+                "parentCheckpointSha256": digest,
+            },
+        )
+        result = self.run_generator()
+        self.assertEqual(0, result.returncode, result.stderr)
+        site = self.archive / "site" / "attempts"
+        child = (site / "CSP-0002-A002" / "index.html").read_text(encoding="utf-8")
+        parent = (site / "CSP-0002-A001" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('href="../CSP-0002-A001/index.html"', child)
+        self.assertIn("Started from", child)
+        self.assertIn("minmus-orbit-e05676be2e38432caf5eac0b1baf79b3", child)
+        self.assertIn(digest, child)
+        self.assertIn("does not establish deterministic replay", child)
+        self.assertIn('href="../CSP-0002-A002/index.html"', parent)
+        self.assertIn("Checkpoint descendants", parent)
+        self.assertIn(digest, parent)
+        marker = json.loads((self.archive / "site" / "site-manifest.json").read_text())
+        child_record = next(item for item in marker["reports"] if item["attemptId"] == "CSP-0002-A002")
+        self.assertEqual("CSP-0002-A001", child_record["parentAttemptId"])
+
+    def test_preserves_legacy_parent_checkpoint_without_lineage_link(self):
+        for folder in ("render-old", "render-latest"):
+            path = self.archive / folder / "manifest.json"
+            data = json.loads(path.read_text())
+            data["parentCheckpoint"] = "legacy-free-label"
+            path.write_text(json.dumps(data))
+        result = self.run_generator()
+        self.assertEqual(0, result.returncode, result.stderr)
+        attempt = (self.archive / "site" / "attempts" / "CSP-0002-A001" / "index.html").read_text()
+        self.assertNotIn("Started from", attempt)
+        self.assertNotIn("Checkpoint descendants", attempt)
+
+    def test_rejects_incomplete_or_missing_checkpoint_lineage(self):
+        digest = "c" * 64
+        cases = (
+            ({"parentAttemptId": "CSP-0002-A999"}, "incomplete checkpoint lineage"),
+            ({
+                "parentAttemptId": "CSP-0002-A999", "parentCheckpoint": "minmus-orbit",
+                "parentCheckpointSha256": digest,
+            }, "references missing parent attempt"),
+            ({
+                "parentAttemptId": "CSP-0002-A001", "parentCheckpoint": "minmus-orbit",
+                "parentCheckpointSha256": digest,
+            }, "may not parent itself"),
+        )
+        latest_path = self.archive / "render-latest" / "manifest.json"
+        old_path = self.archive / "render-old" / "manifest.json"
+        original_latest = json.loads(latest_path.read_text())
+        original_old = json.loads(old_path.read_text())
+        for index, (lineage, message) in enumerate(cases):
+            with self.subTest(message=message):
+                latest_path.write_text(json.dumps(original_latest))
+                old_path.write_text(json.dumps(original_old))
+                data = dict(original_latest)
+                data.update(lineage)
+                latest_path.write_text(json.dumps(data))
+                if message == "references missing parent attempt":
+                    old_data = dict(original_old)
+                    old_data.update(lineage)
+                    old_path.write_text(json.dumps(old_data))
+                result = self.run_generator(self.archive / ("site-%d" % index))
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(message, result.stderr)
+
+    def test_rejects_lineage_disagreement_between_renderings(self):
+        digest = "d" * 64
+        path = self.archive / "render-old" / "manifest.json"
+        data = json.loads(path.read_text())
+        data.update({
+            "parentAttemptId": "CSP-0002-A000",
+            "parentCheckpoint": "minmus-orbit",
+            "parentCheckpointSha256": digest,
+        })
+        path.write_text(json.dumps(data))
+        result = self.run_generator()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("renderings disagree on lineage", result.stderr)
+
+    def test_rejects_checkpoint_lineage_cycle(self):
+        digest = "e" * 64
+        for folder in ("render-old", "render-latest"):
+            path = self.archive / folder / "manifest.json"
+            data = json.loads(path.read_text())
+            data.update({
+                "parentAttemptId": "CSP-0002-A002",
+                "parentCheckpoint": "minmus-orbit",
+                "parentCheckpointSha256": digest,
+            })
+            path.write_text(json.dumps(data))
+        self.write_report(
+            "child-render", "2026-09-21T01:00:00Z", "CHILD REPORT",
+            attempt_id="CSP-0002-A002",
+            lineage={
+                "parentAttemptId": "CSP-0002-A001",
+                "parentCheckpoint": "minmus-orbit",
+                "parentCheckpointSha256": digest,
+            },
+        )
+        result = self.run_generator()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("checkpoint lineage cycle", result.stderr)
 
 
 if __name__ == "__main__":
