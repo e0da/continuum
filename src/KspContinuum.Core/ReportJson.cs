@@ -45,7 +45,8 @@ namespace KspContinuum
                 value is ReadOnlyCollection<ForceAtPositionObservation> || value is ReadOnlyCollection<LifecyclePartSample> ||
                 value is ReadOnlyCollection<AeroPatchTarget> || value is ReadOnlyCollection<AeroPatchEntry> ||
                 value is ReadOnlyCollection<AeroCaptureSample> || value is ReadOnlyCollection<AeroBodyPublication> ||
-                value is ReadOnlyCollection<AeroDragCubeState> || value is ReadOnlyCollection<double>)
+                value is ReadOnlyCollection<AeroDragCubeState> || value is ReadOnlyCollection<double> ||
+                value is ReadOnlyCollection<string>)
             {
                 output.Append('['); bool first = true;
                 foreach (var item in (IEnumerable)value)

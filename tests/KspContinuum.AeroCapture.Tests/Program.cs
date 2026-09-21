@@ -14,9 +14,12 @@ static class Program
     static AeroPatchProvenance Provenance() => new AeroPatchProvenance(Provider(), "continuum.capture", new[] {
         Target("FlightIntegrator.UpdateAerodynamics", new[] {
             new AeroPatchEntry("foreign.owner", "Foreign.Prefix", "prefix", 0, Hash),
-            new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.UpdateFinalizer", "finalizer", 1, Hash) }),
-        Target("FlightIntegrator.ApplyAeroDrag", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.DragPostfix", "postfix", 0, Hash) }),
-        Target("FlightIntegrator.ApplyAeroLift", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.LiftPostfix", "postfix", 0, Hash) }) });
+            new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.UpdatePrefix", "prefix", 1, Hash),
+            new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.UpdatePostfix", "postfix", 2, Hash,
+                AeroPatchEntry.PriorityLast, null, new[] { "foreign.owner" }),
+            new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.UpdateFinalizer", "finalizer", 3, Hash) }),
+        Target("FlightIntegrator.ApplyAeroDrag", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.DragPrefix", "prefix", 0, Hash) }),
+        Target("FlightIntegrator.ApplyAeroLift", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.LiftPrefix", "prefix", 0, Hash) }) });
     static AeroCaptureContext Step(int ordinal = 0, long epoch = 1) => new AeroCaptureContext("{00000000-0000-0000-0000-000000000001}",
         "00000000-0000-0000-0000-000000000002", "frame-1", epoch, 1, 1, 7, 1, ordinal, 100, 2, .02);
     static AeroPartContext Part(AeroCaptureContext step, long flightId = 1, double density = 1.2, AeroDragCubeState[] cubes = null) => new AeroPartContext(step, flightId,
@@ -59,13 +62,26 @@ static class Program
         Check(Reject(() => new AeroProviderFingerprint("stock", "1", "assembly", Hash, Guid.Empty.ToString())));
         Check(Reject(() => new AeroCaptureContext(Guid.Empty.ToString(), Guid.NewGuid().ToString(), "frame", 1, 1, 1, 1, 1, 0, 0, 0, .02)));
         Check(Reject(() => new AeroPatchEntry("owner", "method", "around", 0, Hash)));
+        var ordering = new[] { "other.owner" };
+        var orderedPatch = new AeroPatchEntry("owner", "method", "prefix", 0, Hash, 200, ordering, new[] { "last.owner" }); ordering[0] = "mutated";
+        Check(orderedPatch.harmonyPriority == 200 && orderedPatch.beforeOwners[0] == "other.owner" && orderedPatch.afterOwners[0] == "last.owner");
+        Check(Reject(() => new AeroPatchEntry("owner", "method", "prefix", 0, Hash, 400, new[] { "duplicate", "duplicate" })));
         Check(Reject(() => new AeroPatchTarget("method", new[] { new AeroPatchEntry("owner", "method", "prefix", 1, Hash) })));
         Check(Reject(() => new AeroPatchProvenance(Provider(), "continuum.capture", new[] { Target("FlightIntegrator.ApplyAeroDrag"), Target("FlightIntegrator.ApplyAeroLift"), Target("Other") })));
         var missingOwnedPatch = new AeroPatchProvenance(Provider(), "continuum.capture", new[] {
             Target("FlightIntegrator.UpdateAerodynamics", new[] { new AeroPatchEntry("foreign.owner", "Foreign.Finalizer", "finalizer", 0, Hash) }),
-            Target("FlightIntegrator.ApplyAeroDrag", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.DragPostfix", "postfix", 0, Hash) }),
-            Target("FlightIntegrator.ApplyAeroLift", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.LiftPostfix", "postfix", 0, Hash) }) });
+            Target("FlightIntegrator.ApplyAeroDrag", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.DragPrefix", "prefix", 0, Hash) }),
+            Target("FlightIntegrator.ApplyAeroLift", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.LiftPrefix", "prefix", 0, Hash) }) });
         Check(Reject(() => new AeroCaptureReport(missingOwnedPatch, AeroCaptureDisposition.Valid, AeroCaptureReason.None,
+            AeroCleanupOutcome.RemovedOwnedPatches, new[] { sample })));
+        var wrongPriority = new AeroPatchProvenance(Provider(), "continuum.capture", new[] {
+            Target("FlightIntegrator.UpdateAerodynamics", new[] {
+                new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.UpdatePrefix", "prefix", 0, Hash),
+                new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.UpdatePostfix", "postfix", 1, Hash),
+                new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.UpdateFinalizer", "finalizer", 2, Hash) }),
+            Target("FlightIntegrator.ApplyAeroDrag", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.DragPrefix", "prefix", 0, Hash) }),
+            Target("FlightIntegrator.ApplyAeroLift", new[] { new AeroPatchEntry("continuum.capture", "KspContinuum.AeroCapture.LiftPrefix", "prefix", 0, Hash) }) });
+        Check(Reject(() => new AeroCaptureReport(wrongPriority, AeroCaptureDisposition.Valid, AeroCaptureReason.None,
             AeroCleanupOutcome.RemovedOwnedPatches, new[] { sample })));
         Check(Reject(() => Step(AeroCaptureReport.MaximumPartsPerSample * 2)));
         Check(Reject(() => Part(step, density: double.NaN)));

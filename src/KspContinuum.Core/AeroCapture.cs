@@ -53,13 +53,18 @@ namespace KspContinuum
         {
             foreach (var target in targets)
             {
-                string method = target.targetMethod == "FlightIntegrator.UpdateAerodynamics" ? "KspContinuum.AeroCapture.UpdateFinalizer" :
-                    target.targetMethod == "FlightIntegrator.ApplyAeroDrag" ? "KspContinuum.AeroCapture.DragPostfix" : "KspContinuum.AeroCapture.LiftPostfix";
-                string kind = target.targetMethod == "FlightIntegrator.UpdateAerodynamics" ? "finalizer" : "postfix";
-                bool found = false;
-                foreach (var patch in target.orderedPatches)
-                    if (patch.owner == captureOwner && patch.patchMethod == method && patch.patchKind == kind) { found = true; break; }
-                if (!found) return false;
+                if (target.targetMethod == "FlightIntegrator.UpdateAerodynamics")
+                {
+                    if (!target.HasPatch(captureOwner, "KspContinuum.AeroCapture.UpdatePrefix", "prefix") ||
+                        !target.HasPatch(captureOwner, "KspContinuum.AeroCapture.UpdatePostfix", "postfix", AeroPatchEntry.PriorityLast) ||
+                        !target.HasPatch(captureOwner, "KspContinuum.AeroCapture.UpdateFinalizer", "finalizer")) return false;
+                }
+                else
+                {
+                    string method = target.targetMethod == "FlightIntegrator.ApplyAeroDrag" ?
+                        "KspContinuum.AeroCapture.DragPrefix" : "KspContinuum.AeroCapture.LiftPrefix";
+                    if (!target.HasPatch(captureOwner, method, "prefix")) return false;
+                }
             }
             return true;
         }
@@ -83,21 +88,41 @@ namespace KspContinuum
             targetMethod = target;
             orderedPatches = Array.AsReadOnly((AeroPatchEntry[])patches.Clone());
         }
+        internal bool HasPatch(string owner, string method, string kind, int? priority = null)
+        {
+            foreach (var patch in orderedPatches)
+                if (patch.owner == owner && patch.patchMethod == method && patch.patchKind == kind &&
+                    (!priority.HasValue || patch.harmonyPriority == priority.Value)) return true;
+            return false;
+        }
     }
 
     public sealed class AeroPatchEntry
     {
+        public const int PriorityLast = 0, DefaultPriority = 400, MaximumOrderingOwners = 16;
         public readonly string owner, patchMethod, patchKind, assemblySha256;
-        public readonly int executionIndex;
-        public AeroPatchEntry(string owner, string method, string kind, int index, string sha256)
+        public readonly int executionIndex, harmonyPriority;
+        public readonly ReadOnlyCollection<string> beforeOwners, afterOwners;
+        public AeroPatchEntry(string owner, string method, string kind, int index, string sha256,
+            int priority = DefaultPriority, string[] before = null, string[] after = null)
         {
             AeroCaptureValidation.Text(owner, 256); AeroCaptureValidation.Text(method, 512);
             if (kind != "prefix" && kind != "postfix" && kind != "transpiler" && kind != "finalizer")
                 throw new ArgumentException("Unknown patch kind.");
             if (index < 0 || index >= AeroPatchProvenance.MaximumPatches) throw new ArgumentException("Invalid patch order.");
             AeroCaptureValidation.Sha256(sha256);
+            if (priority == int.MinValue || priority == int.MaxValue) throw new ArgumentException("Invalid Harmony priority.");
             this.owner = owner; patchMethod = method; patchKind = kind; executionIndex = index;
-            assemblySha256 = sha256.ToLowerInvariant();
+            harmonyPriority = priority; assemblySha256 = sha256.ToLowerInvariant();
+            beforeOwners = Owners(before); afterOwners = Owners(after);
+        }
+        static ReadOnlyCollection<string> Owners(string[] owners)
+        {
+            owners = owners ?? new string[0];
+            if (owners.Length > MaximumOrderingOwners) throw new ArgumentException("Too many Harmony ordering constraints.");
+            var copy = (string[])owners.Clone(); var unique = new HashSet<string>();
+            foreach (string owner in copy) { AeroCaptureValidation.Text(owner, 256); if (!unique.Add(owner)) throw new ArgumentException("Duplicate Harmony ordering owner."); }
+            return Array.AsReadOnly(copy);
         }
     }
 
