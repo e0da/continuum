@@ -46,6 +46,50 @@ Both survey attempts have six confirmed 1920×1080 screenshots. Their connected 
 
 Subsequent analysis locates A002's distance miss during final descent. The first recorded FinalDescent sample was 15.912 m from target at approximately 202 m above sea level. Latitude/longitude differences estimate about 4.1 m/s of lateral motion relative to Minmus's rotating surface. During the following 26.18 seconds before appreciable braking resumed, the ground track moved approximately 107.32 m east and 34.64 m south. It crossed the 100 m radius at approximately 55 m altitude, still at zero recorded throttle. These are sampled ground-track estimates with interpolated altitude, not direct center-of-mass velocity or proof of the cause of the controller handoff. The trace does not support attributing the observed displacement simply to viewing the moon in an inertial frame.
 
+### A003: first checkpoint reconstruction
+
+A003 started from A002's saved Minmus orbit, using package `0.1.0-checkpoint.0DA8AE4348FB`. All 15 installed files and both pinned external MechJeb configuration hashes were verified before launch. At the fixed acquisition epoch, the reconstructed orbit differed by 0.053742 m in position and 8.843e-6 m/s in velocity; topology and resource checks passed. The parent checkpoint's SHA-256 remained unchanged after completion.
+
+The flight landed upright with 17 parts, terrain-relative tilt 0.995°, Sun elevation 43.774° and target distance 119.512 m. Final descent took 38.20 simulation seconds. Native horizontal speed was 4.199 m/s at entry, when the ground track was only 14.034 m from target. Thrust mode remained OFF until the first braking-mode observation at 26.12 seconds; positive throttle first appears at 26.24 seconds, approximately 111.0 m from target at 34.8 m altitude. This directly supports the observed late-drift explanation. It does not establish a universal landing-controller defect or an upstream promise of 100 m accuracy.
+
+A003 exposed two loader integration defects. Entering flight before the delayed Main Menu GUI-ready event finished initialized the maneuver panel twice; the preserved log contains 62,848 exceptions with `AppUIInputPanel.RefreshUI` as their first stack frame, including post-terminal time. The initial empty-vessel telemetry row also used UT 0 before the saved clock loaded, falsely suggesting a large simulated interval if naively summed. Original evidence is preserved. The corrected runner waits for the native readiness event and a later frame, and begins telemetry only once the native saved clock is ready. A003 is diagnostic qualification evidence, not a clean repeatability trial.
+
+### A004: startup corrections qualified; telemetry aborted descent
+
+A004 used package `0.1.0-checkpoint.E57B6B144BDA` from the same A002 orbit checkpoint and pinned MechJeb settings. At the fixed acquisition epoch, topology and resource checks passed; orbital residuals were 0.053784 m and 9.861e-6 m/s. The source checkpoint remained unchanged after cleanup.
+
+The preserved log contains one maneuver-tool initialization and no `AppUIInputPanel.RefreshUI` exceptions. The first telemetry row contains the restored Minmus vessel at UT 268881.45886477333, and the loading event uses the source epoch. This run verifies the narrow startup-order and telemetry-clock corrections. It does not establish an exception-free game session: transient stock MessageSystem and AlarmClock initialization exceptions, and a MechJeb shutdown exception, remain in the log.
+
+The attempt **failed** at 122.084 wall seconds, immediately after the landing controller changed from DeorbitBurn to CourseCorrection. The new MechJeb step's status text was still null; the runner's CSV escaping called `Replace` on it and aborted the mission. Installed donor code confirms that a newly constructed step need not have status text before its first control update. Cleanup released the owned controller, set throttle to zero and restored the minimum-throttle setting. The vessel remained suborbital at approximately 27.1 km altitude with all 17 parts; the trial did not reach touchdown and does not qualify repeatability.
+
+Three 1920×1080 screenshots, the failed-state checkpoint, input recording and telemetry were preserved. The corrected runner records `(status unavailable)` for a null observational status, without catching unrelated exceptions or changing control guards. A subsequent native run must cross this transition and complete the landing before that correction or repeatability can be qualified.
+
+### A005: first completed corrected trial
+
+A005 installed package `0.1.0-checkpoint.B627559E9FE0`, with all 15 owned files compared to archive bytes and the external MechJeb settings restored from the pinned baseline. Acquisition occurred at the same source-relative epoch; position residual was 0.053737 m and velocity residual 9.161e-6 m/s. The run traversed DeorbitBurn, CourseCorrection and the remaining landing stages without the telemetry abort. No null-status fallback was sampled, so this proves completion through the transition, not direct execution of the fallback branch. The recurring maneuver-panel exception loop was absent; transient stock UI and MechJeb shutdown exceptions remain.
+
+The vehicle landed upright with 17 parts, target distance 120.049 m, tilt 0.995° and Sun elevation 43.775°. Final descent lasted 38.22 simulation seconds; entry horizontal speed was 4.205 m/s at 13.936 m from target. No settling sample met the unchanged 100 m distance criterion, so the receipt remains failed after the 180-second settling timeout. The throttle-floor setting was restored and the parent source hash remained unchanged. Closed-instance preservation copied and verified 76 evidence/save/configuration files. A006 uses the identical installed package and the same restored settings for the paired comparison.
+
+### A005/A006 paired outcome
+
+A006 used the same installed package, source checkpoint, acquisition epoch and pinned settings as A005. Both acquisition resource and settings CSV files are byte-identical. A006 acquisition residuals were 0.053756 m and 8.859e-6 m/s. Both attempts preserved the parent checkpoint hash and restored the throttle-floor setting after control release.
+
+| Measurement | A005 | A006 |
+| --- | ---: | ---: |
+| Terminal target distance | 120.049 m | 119.736 m |
+| Terrain-relative tilt | 0.995° | 0.994° |
+| Surviving parts | 17 | 17 |
+| Final-descent duration | 38.22 s | 38.22 s |
+| Horizontal speed at final-descent entry | 4.205 m/s | 4.200 m/s |
+| Target distance at final-descent entry | 13.936 m | 13.965 m |
+| Sun elevation at terminal observation | 43.775° | 43.774° |
+
+Both attempts completed upright daylight touchdowns and failed the unchanged 100 m target-distance criterion. Neither had a qualifying settling sample inside that radius. The target-distance difference is 0.312 m; this is a two-run observed difference, not a statistical accuracy bound. Both first positive braking-throttle observations occurred 26.22 simulation seconds after final-descent entry, already more than 111 m from target. This supports the same late-drift behavior under the reconstructed-state protocol; it does not prove deterministic replay or validate another vehicle or checkpoint.
+
+Each attempt has three confirmed 1920×1080 images and a linked chronicle. A006's terminal mission/input evidence and game-log snapshot were copied and hash-verified (64 files), while the landed game was left open. This is not a closed-instance snapshot of its live save directory. The recurring maneuver-panel exception loop is absent in both corrected trials; the logs still contain unrelated startup exceptions.
+
+The final automated suite passes 123 core assertions, 85 portable mission assertions and 44 Python tests. Native Release compilation has zero warnings/errors. Independent review covered restoration boundaries, saved-clock normalization and actual paired-flight measurements. These checks qualify this checkpoint-start workload, not arbitrary native save restoration or replacement physics.
+
 ## Earlier isolated benchmark qualification
 
 The isolated benchmark ran in an independent stock-derived KSP 1.12.5 Mac test copy on 2026-09-20, on Apple M4 Max (arm64 host, x86_64 game executable), using Unity 2019.4.18f1 and `-batchmode -nographics --continuum-bench`. Existing playable and mod-pack verification copies were preserved. The test copy was prepared only after KSP, CKAN and Steam were closed; installation used CKAN.
