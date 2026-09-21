@@ -11,7 +11,7 @@ from string import Template
 import tempfile
 from urllib.parse import quote
 
-from chronicle import bounded_text, ChronicleError, MANIFEST_SCHEMA, safe_text
+from chronicle import bounded_text, ChronicleError, MANIFEST_SCHEMA, parse_telemetry_playback, safe_text
 
 
 def generate(archive, filename, refresh=False):
@@ -35,6 +35,7 @@ def generate(archive, filename, refresh=False):
         report = folder / "index.html"
         if not report.is_file() or report.is_symlink():
             raise ChronicleError("report page is missing or is a symbolic link")
+        playback = parse_telemetry_playback(data, folder)
         title, attempt, outcome = [html.escape(safe_text(data.get(key), key, 500))
                                    for key in ("title", "attemptId", "outcome")]
         link = quote(folder.name, safe="") + "/index.html"
@@ -42,19 +43,25 @@ def generate(archive, filename, refresh=False):
         stamp = datetime.fromisoformat(generated.replace("Z", "+00:00"))
         if stamp.tzinfo is None:
             raise ChronicleError("report generation time must include timezone")
-        attempts.setdefault(attempt, []).append((stamp, link, title, outcome))
+        playback_link = (quote(folder.name, safe="") + "/" + playback["report"]
+                         if playback is not None else None)
+        attempts.setdefault(attempt, []).append((stamp, link, title, outcome, playback_link))
     cards = []
     for attempt, versions in sorted(attempts.items(), reverse=True):
         versions.sort(reverse=True)
-        stamp, link, title, outcome = versions[0]
+        stamp, link, title, outcome, playback_link = versions[0]
         history = ""
         if len(versions) > 1:
             history = '<details><summary>Earlier renderings</summary><ul>' + "".join(
-                '<li><a href="{}">{}</a> · {}</li>'.format(url, name, date.isoformat())
-                for date, url, name, _ in versions[1:]) + '</ul></details>'
+                '<li><a href="{}">{}</a> · {}{}</li>'.format(
+                    url, name, date.isoformat(),
+                    ' · <a href="{}">telemetry</a>'.format(player) if player else "")
+                for date, url, name, _, player in versions[1:]) + '</ul></details>'
+        playback_html = ('<p><a href="{}">Recorded telemetry playback</a></p>'.format(playback_link)
+                         if playback_link else "")
         cards.append('<article><p class="identity">{}</p><h2><a href="{}">{}</a></h2>'
-                     '<p>Recorded outcome: <strong>{}</strong></p>{}</article>'.format(
-                         attempt, link, title, outcome, history))
+                     '<p>Recorded outcome: <strong>{}</strong></p>{}{}</article>'.format(
+                         attempt, link, title, outcome, playback_html, history))
     if not cards:
         raise ChronicleError("archive has no generated reports")
     template = Path(__file__).resolve().parents[1] / "templates/space-program-v1.html"

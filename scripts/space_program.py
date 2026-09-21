@@ -16,7 +16,8 @@ import sys
 import tempfile
 from urllib.parse import quote
 
-from chronicle import bounded_text, ChronicleError, MANIFEST_SCHEMA, safe_text
+from chronicle import (bounded_bytes, bounded_text, ChronicleError, MANIFEST_SCHEMA, MAX_PLAYBACK_BYTES,
+                       parse_telemetry_playback, safe_text, sha256)
 
 
 CATALOG_SCHEMA = "ksp-continuum-space-program/v1"
@@ -298,6 +299,9 @@ def load_reports(archive, output):
         report_text = bounded_text(report_path, MAX_REPORT_BYTES)
         if html_has_absolute_path(report_text):
             raise ChronicleError("report page contains a private absolute path")
+        playback = parse_telemetry_playback(data, folder)
+        if playback is not None and html_has_absolute_path(bounded_text(playback["path"], MAX_PLAYBACK_BYTES)):
+            raise ChronicleError("telemetry playback contains a private absolute path")
         attempt_id = id_field(data, "attemptId", "report manifest")
         report = {
             "folder": folder,
@@ -313,6 +317,7 @@ def load_reports(archive, output):
             "title": text_field(data, "title", "report manifest", 160),
             "outcome": text_field(data, "outcome", "report manifest", 80),
             "media": parse_report_media(data),
+            "telemetry": playback,
         }
         report.update(parse_report_lineage(data, attempt_id))
         if report["site_id"] is not None and (not isinstance(report["site_id"], str) or not SAFE_ID.fullmatch(report["site_id"])):
@@ -390,9 +395,9 @@ def entity_url(kind, identifier, prefix=""):
 
 
 def card(url, identifier, name, status, summary):
-    return ('<article class="card"><div class="identity">{}</div><h2><a href="{}">{}</a></h2>'
+    return ('<article class="card"><div class="identity">{}</div><h2><a href="{}" aria-label="{} ({})">{}</a></h2>'
             '<span class="status">{}</span><p>{}</p></article>').format(
-                esc(identifier), url, esc(name), esc(status), esc(summary))
+                esc(identifier), url, esc(name), esc(identifier), esc(name), esc(status), esc(summary))
 
 
 def relation_cards(title, items, kind):
@@ -444,9 +449,12 @@ def attempt_view(attempt_id, versions, catalog, attempts, descendants):
                   item["name"] + " (" + item["id"] + ")")
                  for item in experiments)
     source = "../../../" + quote(latest["folder_name"], safe="") + "/index.html"
+    report_links = " ".join('<a href="{}">{}</a>'.format(url, esc(label)) for url, label in links)
+    report_links += ' <a href="{}">Original report</a>'.format(source)
+    if latest["telemetry"] is not None:
+        report_links += ' <a href="telemetry.html">Telemetry playback</a>'
     context = ('<aside class="program-context"><div>Recorded outcome: <strong>{}</strong></div>'
-               '<div class="program-links">{} <a href="{}">Original report</a></div>').format(
-                   esc(latest["outcome"]), " ".join('<a href="{}">{}</a>'.format(url, esc(label)) for url, label in links), source)
+               '<div class="program-links">{}</div>').format(esc(latest["outcome"]), report_links)
     if latest["parent_attempt_id"] is not None:
         parent = attempts[latest["parent_attempt_id"]][0]
         context += ('<section class="program-lineage"><h2>Checkpoint start</h2><p>Started from '
@@ -496,6 +504,24 @@ def attempt_view(attempt_id, versions, catalog, attempts, descendants):
     shell = nav("../../", catalog["program"]["name"]) + context
     page = re.sub(r"(<body(?:\s[^>]*)?>)", r"\1" + shell, page, count=1, flags=re.IGNORECASE)
     return re.sub(r"</body\s*>", copy_footer + "</body>", page, count=1, flags=re.IGNORECASE)
+
+
+def playback_view(playback, catalog):
+    content = bounded_bytes(playback["path"], MAX_PLAYBACK_BYTES)
+    if hashlib.sha256(content).hexdigest() != playback["sha256"]:
+        raise ChronicleError("telemetry playback changed before navigation was added")
+    try:
+        page = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ChronicleError("telemetry playback is not valid UTF-8") from error
+    if not re.search(r"</head\s*>", page, re.IGNORECASE) or not re.search(r"<body(?:\s[^>]*)?>", page, re.IGNORECASE):
+        raise ChronicleError("telemetry playback cannot accept shared navigation")
+    shell_css = ('<style id="space-program-playback-shell">.site-nav{display:flex;flex-wrap:wrap;gap:8px 18px;'
+                 'padding:14px;border:1px solid #50636b;border-radius:10px;background:#091216}'
+                 '.site-nav a{color:#a9ddff}.site-nav a:first-child{color:#f0c35a;font-weight:800}</style>')
+    page = re.sub(r"</head\s*>", shell_css + "</head>", page, count=1, flags=re.IGNORECASE)
+    return re.sub(r"(<body(?:\s[^>]*)?>)", r"\1" + nav("../../", catalog["program"]["name"]),
+                  page, count=1, flags=re.IGNORECASE)
 
 
 def copy_file(source, destination, maximum, state, source_root):
@@ -550,6 +576,17 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
         (destination / "index.html").write_text(
             attempt_view(attempt_id, versions, catalog, attempts, descendants), encoding="utf-8")
         shutil.copyfile(latest["manifest_path"], destination / "manifest.json")
+        if latest["telemetry"] is not None:
+            playback_page = playback_view(latest["telemetry"], catalog)
+            playback_bytes = playback_page.encode("utf-8")
+            if len(playback_bytes) > MAX_PLAYBACK_BYTES:
+                raise ChronicleError("connected telemetry playback exceeds size limit")
+            media_state["bytes"] += len(playback_bytes)
+            media_state["files"] += 1
+            if (media_state["bytes"] > MAX_TOTAL_MEDIA_BYTES
+                    or media_state["files"] > MAX_TOTAL_MEDIA_FILES):
+                raise ChronicleError("site media exceeds total limit")
+            (destination / "telemetry.html").write_bytes(playback_bytes)
         for item in latest["media"]:
             if item["status"] not in ("confirmed", "below-required-resolution"):
                 continue
@@ -607,10 +644,19 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
             (staging / group / (entity["id"] + ".html")).write_text(render_page(
                 program, entity["name"], heading, entity["name"], entity["summary"], content, "../"), encoding="utf-8")
 
-    reports = [{"attemptId": attempt_id, "sourceFolder": versions[0]["folder_name"],
-                "generatedUtc": versions[0]["generated"].isoformat(),
-                "parentAttemptId": versions[0]["parent_attempt_id"]}
-               for attempt_id, versions in sorted(attempts.items())]
+    reports = []
+    for attempt_id, versions in sorted(attempts.items()):
+        latest = versions[0]
+        report = {"attemptId": attempt_id, "sourceFolder": latest["folder_name"],
+                  "generatedUtc": latest["generated"].isoformat(),
+                  "parentAttemptId": latest["parent_attempt_id"]}
+        if latest["telemetry"] is not None:
+            report["telemetryPlayback"] = {
+                "report": "attempts/" + attempt_id + "/telemetry.html",
+                "sourceSha256": latest["telemetry"]["sha256"],
+                "generatedSha256": sha256(staging / "attempts" / attempt_id / "telemetry.html"),
+            }
+        reports.append(report)
     marker = {
         "schema": SITE_SCHEMA,
         "generatedUtc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

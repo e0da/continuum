@@ -46,11 +46,11 @@
   <nav aria-label="Report sections">
     <a href="#objective">Objective</a><a href="#configuration">Configuration</a><a href="#timeline">Timeline</a>
     <a href="#media">Media</a><a href="#measurements">Measurements</a><a href="#outcome">Outcome</a>
-    <a href="#anomalies">Anomalies</a><a href="#next-experiment">Next experiment</a>
+    <a href="telemetry.html">Telemetry playback</a><a href="#anomalies">Anomalies</a><a href="#next-experiment">Next experiment</a>
   </nav>
   <section id="objective"><h2>Objective</h2><div class="editorial"><div class="label">Editorial context</div><p>$objective</p></div></section>
   <section id="configuration"><h2>Configuration</h2><div class="editorial"><div class="label">Editorial context</div><p>$configuration_context</p></div><div class="measured"><p>Recorded configuration</p></div><div class="grid">$configuration_rows</div></section>
-  <section id="timeline"><h2>Timeline</h2><p class="measured">Observed phase boundaries and spans from mission telemetry. Telemetry cadence limits wall-span precision.</p><table><thead><tr><th>Phase</th><th>Start UT</th><th>Wall span</th><th>UT span</th></tr></thead><tbody>$timeline_rows</tbody></table></section>
+  <section id="timeline"><h2>Timeline</h2><p class="measured">Observed phase boundaries and spans from mission telemetry. Telemetry cadence limits wall-span precision.</p><p><a href="telemetry.html">Open the interactive recorded telemetry</a></p><table><thead><tr><th>Phase</th><th>Start UT</th><th>Wall span</th><th>UT span</th></tr></thead><tbody>$timeline_rows</tbody></table></section>
   <section id="media"><h2>Media</h2><p class="measured">Captures with completed PNG receipts and valid source files are copied. Resolution-qualified and below-requirement evidence are labeled separately. Open an image to view its source resolution.</p><div class="grid media-grid">$media_cards</div></section>
   <section id="measurements"><h2>Measurements</h2><p class="measured">Derived from the bounded source artifacts; these are observations, not deterministic replay claims.</p><div class="grid">$measurement_cards</div></section>
   <section id="outcome"><h2>Outcome</h2><div class="measured">$outcome</div></section>

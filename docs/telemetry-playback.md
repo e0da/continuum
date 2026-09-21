@@ -10,6 +10,8 @@ python3 scripts/telemetry_player.py artifacts/mission/mission.csv \
 
 The output must be a new file in an existing directory. Open it in a browser or serve the containing directory. It embeds its observations, styles, script and source SHA-256; no server API or game connection is needed. Input and existing output files remain unchanged.
 
+New [chronicle reports](chronicle.md) also include this player and link it from the mission report. Rebuilding the connected space-program site adds playback to those attempt pages, with navigation back to the report and program. Older reports remain readable; regenerate a new report from its original evidence to add playback without modifying the old rendering.
+
 The slider and previous/next controls select exact observations. The phase selector jumps to each recorded phase boundary. Play advances using elapsed recorded wall time at 1×, 10× or 100× and holds the last available observation. Universal time remains a separately displayed recorded value: stock warp can advance it much faster. Hidden pages pause playback. Restarting playback at the end returns to the first observation.
 
 The altitude chart connects recorded samples only as a visual guide. Missing altitudes and body changes break its line. The displayed metrics use rounded formatting while the embedded dataset retains the parsed numeric values. Missing readings show `Unavailable`. This is telemetry playback, not video, a reconstructed vessel, deterministic resimulation, or a live-control handoff. Original screenshots and game saves remain separate artifacts.

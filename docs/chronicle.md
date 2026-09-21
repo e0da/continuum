@@ -1,6 +1,6 @@
 # Mission chronicles
 
-The chronicle generator turns one explicit mission artifact directory and an optional input-recording directory into a self-contained local flight report. It copies confirmed screenshots, summarizes telemetry and input evidence, and records hashes without copying saves, raw timelines, or private source paths. Generated reports belong under ignored `artifacts/`; the public repository contains the generator, template, tests, and this contract.
+The chronicle generator turns one explicit mission artifact directory and an optional input-recording directory into a self-contained local flight report. It copies confirmed screenshots, summarizes telemetry and input evidence, and embeds a bounded playback of validated mission observations without copying saves, raw CSV files, input timelines, or private source paths. Generated reports belong under ignored `artifacts/`; the public repository contains the generator, template, tests, and this contract.
 
 Mission and attempt identities follow the [naming conventions](naming.md). The chronicle is the generated mission-report member of the maintained [wiki template set](wiki-templates.md) and contributes a report to the local [Continuum Space Program](space-program.md) archive.
 
@@ -44,14 +44,15 @@ python3 scripts/chronicle.py \
 When `--inputs` is supplied, its directory basename must match the mission receipt's `inputDirectory` basename. This preserves the native association while allowing a session directory to be relocated. Omit `--inputs` when input evidence is unavailable; the page and manifest explicitly record that omission instead of displaying zeroes as a complete recording. The output contains:
 
 - `index.html`, a relocatable report with objective, configuration, timeline, media, measurements, outcome, anomalies, and next experiment;
-- `manifest.json`, schema `ksp-continuum-chronicle-manifest/v1`, with stable IDs, title, outcome, report entrypoint, template and generator hashes, input-evidence status, source-session basenames, logical source paths, byte sizes, SHA-256 hashes, and media status;
+- `telemetry.html`, a self-contained player generated through the same bounded telemetry parser as the standalone player, with exact selected observations, phase navigation, a source digest, and a relative link back to the mission report;
+- `manifest.json`, schema `ksp-continuum-chronicle-manifest/v1`, with stable IDs, title, outcome, report entrypoint, template and generator hashes, input-evidence status, source-session basenames, logical source paths, byte sizes, SHA-256 hashes, media status, and an optional hash-bound telemetry-playback descriptor;
 - `media/`, containing source PNGs that have a `png-written` or `png-below-required-resolution` receipt, pass bounded PNG checks, and remain inside the mission directory. Below-resolution captures remain viewable but are marked as failing the 1920 × 1080 survey-evidence requirement.
 
 The `mission-v1` HTML template lives at `templates/chronicle/mission-v1.html`. Its placeholder set is a strict generator contract. Improve or add a versioned template in Git, then generate a new report directory so an earlier report remains immutable.
 
 ## Build the connected program site
 
-`space_program.py` turns the immutable report archive and a maintained catalog into one browsable local website. It creates shared navigation and pages for missions, attempts, vehicles, sites, and experiments. Each attempt route uses the newest rendering for that stable attempt ID, lists earlier renderings as history, copies its confirmed report media, and adds links back to the immutable source report and its related catalog records. The source reports are never edited, and multiple renderings do not become multiple attempts.
+`space_program.py` turns the immutable report archive and a maintained catalog into one browsable local website. It creates shared navigation and pages for missions, attempts, vehicles, sites, and experiments. Each attempt route uses the newest rendering for that stable attempt ID, lists earlier renderings as history, copies its confirmed report media and declared telemetry player, and adds links back to the immutable source report and its related catalog records. The source reports are never edited, and multiple renderings do not become multiple attempts.
 
 Keep the local catalog beside the reports under the ignored archive. This small example shows the complete schema; arrays may contain more records and facts or media may be empty.
 
@@ -119,6 +120,8 @@ python3 scripts/space_program.py \
 
 Serve the archive root and open `/site/index.html`; attempt pages link back to immutable reports alongside `site/`. For example, `python3 -m http.server 18762 --bind 127.0.0.1 --directory artifacts/space-program` keeps both the connected routes and original-report links available on the local machine. Serving only the `site/` directory leaves those original-report links outside the server root.
 
+New chronicle manifests bind `telemetry.html` to the hashed `mission/mission.csv` source and record the generated player hash and row count. Archive and connected-site generators validate that descriptor before linking or copying it. Older manifests without the additive descriptor remain valid and simply have no playback link. The connected site adds its shared navigation to a derived player copy; `site-manifest.json` records both the immutable source-player hash and the navigation-enhanced output hash.
+
 A rebuild replaces only a direct child of the archive that already carries the `ksp-continuum-space-program-site/v1` marker. It refuses unmarked destinations, unsafe media paths, missing relationships, symbolic sources, private absolute paths in catalog or report material, and output outside the archive. Generated pages and copied media use relative links; no machine-specific source directory is written into the site.
 
 ## Browse the archive
@@ -135,7 +138,7 @@ The index shows the most recent rendering of each attempt and keeps links to ear
 
 ## Evidence and limits
 
-The generator accepts UTF-8 source text up to 16 MiB per file, metadata up to 32 KiB, 100,000 telemetry rows, 256 mission events, 512 input files totaling 256 MiB, 2,000 samples per input segment, and 64 screenshots up to 16 MiB each. It rejects nonfinite or backward telemetry time, malformed schemas, unsafe screenshot names, unsafe `mission-*` or `inputs-*` session names, symbolic-link sources, output inside a source directory, and an existing destination. It displays craft receipts only when they match the bounded relative `Ships/VAB/*.craft` or `Ships/SPH/*.craft` form.
+The generator accepts UTF-8 source text up to 16 MiB per file, metadata up to 32 KiB, 100,000 telemetry rows, 256 mission events, 512 input files totaling 256 MiB, 2,000 samples per input segment, 64 screenshots up to 16 MiB each, and a generated telemetry player up to 128 MiB. It rejects nonfinite or backward telemetry time, malformed schemas, unsafe screenshot names, unsafe `mission-*` or `inputs-*` session names, symbolic-link sources, output inside a source directory, and an existing destination. It displays craft receipts only when they match the bounded relative `Ships/VAB/*.craft` or `Ships/SPH/*.craft` form.
 
 Phase spans use left-sample attribution: each telemetry interval belongs to the phase on its first row. The final phase has no displayed span unless a later row closes it. This makes boundaries approximate at the telemetry cadence. Screenshot dimensions come from each confirmed PNG header; the historical Pathfinder captures are 1280 × 720 observations, not a promise for later missions.
 

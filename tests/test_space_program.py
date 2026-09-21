@@ -21,11 +21,12 @@ class SpaceProgramTests(unittest.TestCase):
         (self.archive / "experiments").mkdir()
         (self.archive / "experiments" / "descent.png").write_bytes(b"chart")
         self.write_report("render-old", "2026-09-20T20:00:00Z", "OLD REPORT")
-        self.write_report("render-latest", "2026-09-20T21:00:00Z", "NEW REPORT")
+        self.write_report("render-latest", "2026-09-20T21:00:00Z", "NEW REPORT", playback=True)
         self.catalog = self.archive / "catalog.json"
         self.write_catalog()
 
-    def write_report(self, folder_name, generated, body, attempt_id="CSP-0002-A001", lineage=None):
+    def write_report(self, folder_name, generated, body, attempt_id="CSP-0002-A001", lineage=None,
+                     playback=False):
         folder = self.archive / folder_name
         folder.mkdir()
         (folder / "media").mkdir()
@@ -52,6 +53,24 @@ class SpaceProgramTests(unittest.TestCase):
         }
         if lineage is not None:
             manifest.update(lineage)
+        if playback:
+            player = folder / "telemetry.html"
+            player.write_text(
+                '<!doctype html><html><head><title>Playback</title></head><body>'
+                '<a href="index.html">Mission report</a><p>SELECTED TELEMETRY</p></body></html>',
+                encoding="utf-8",
+            )
+            source_sha = "a" * 64
+            manifest["sources"] = [{
+                "path": "mission/mission.csv", "bytes": 123, "sha256": source_sha,
+            }]
+            manifest["telemetryPlayback"] = {
+                "schema": "ksp-continuum-telemetry-playback/v1",
+                "report": "telemetry.html",
+                "rows": 42,
+                "sourceSha256": source_sha,
+                "sha256": hashlib.sha256(player.read_bytes()).hexdigest(),
+            }
         (folder / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     def catalog_data(self):
@@ -102,12 +121,13 @@ class SpaceProgramTests(unittest.TestCase):
 
     def test_builds_connected_site_and_enhanced_latest_attempt(self):
         old_hash = hashlib.sha256((self.archive / "render-latest" / "index.html").read_bytes()).hexdigest()
+        old_player_hash = hashlib.sha256((self.archive / "render-latest" / "telemetry.html").read_bytes()).hexdigest()
         result = self.run_generator()
         self.assertEqual(0, result.returncode, result.stderr)
         site = self.archive / "site"
 
         html_files = sorted(site.glob("**/*.html"))
-        self.assertEqual(11, len(html_files))
+        self.assertEqual(12, len(html_files))
         for path in html_files:
             self.assertIn('class="site-nav"', path.read_text(encoding="utf-8"), str(path))
 
@@ -115,6 +135,7 @@ class SpaceProgramTests(unittest.TestCase):
         self.assertIn("Continuum &lt;Space&gt; Program", home)
         self.assertIn('href="missions/CSP-0002.html"', home)
         self.assertIn('href="attempts/CSP-0002-A001/index.html"', home)
+        self.assertIn('aria-label="Minmus Survey 1 (CSP-0002-A001)"', home)
         self.assertNotIn(str(self.root), home)
 
         mission = (site / "missions" / "CSP-0002.html").read_text(encoding="utf-8")
@@ -136,9 +157,18 @@ class SpaceProgramTests(unittest.TestCase):
         self.assertIn("Minmus Survey 1 (CSP-0002)", attempt)
         self.assertIn("Kerbal X / stock (CV-0001-R01)", attempt)
         self.assertIn(">Original report</a>", attempt)
+        self.assertIn('href="telemetry.html"', attempt)
         self.assertIn('alt="Landing screenshot"', attempt)
         self.assertIn("landing.png · confirmed · 1920 × 1080", attempt)
         self.assertTrue((site / "attempts" / "CSP-0002-A001" / "media" / "landing.png").is_file())
+        player = site / "attempts" / "CSP-0002-A001" / "telemetry.html"
+        self.assertIn("SELECTED TELEMETRY", player.read_text(encoding="utf-8"))
+        self.assertIn('href="index.html"', player.read_text(encoding="utf-8"))
+        self.assertIn('class="site-nav"', player.read_text(encoding="utf-8"))
+        self.assertEqual(
+            old_player_hash,
+            hashlib.sha256((self.archive / "render-latest" / "telemetry.html").read_bytes()).hexdigest(),
+        )
         self.assertEqual(
             old_hash,
             hashlib.sha256((self.archive / "render-latest" / "index.html").read_bytes()).hexdigest(),
@@ -155,9 +185,30 @@ class SpaceProgramTests(unittest.TestCase):
         self.assertEqual("ksp-continuum-space-program-site/v1", marker["schema"])
         self.assertEqual(1, marker["attempts"])
         self.assertEqual("render-latest", marker["reports"][0]["sourceFolder"])
+        self.assertEqual(
+            {
+                "report": "attempts/CSP-0002-A001/telemetry.html",
+                "sourceSha256": old_player_hash,
+                "generatedSha256": hashlib.sha256(player.read_bytes()).hexdigest(),
+            },
+            marker["reports"][0]["telemetryPlayback"],
+        )
         self.assertEqual(64, len(marker["generatorSha256"]))
         self.assertEqual(64, len(marker["templateSha256"]))
         self.assertEqual(64, len(marker["catalogSha256"]))
+
+    def test_legacy_reports_without_playback_remain_valid(self):
+        latest = self.archive / "render-latest"
+        data = json.loads((latest / "manifest.json").read_text())
+        data.pop("telemetryPlayback")
+        (latest / "manifest.json").write_text(json.dumps(data))
+        (latest / "telemetry.html").unlink()
+
+        result = self.run_generator()
+        self.assertEqual(0, result.returncode, result.stderr)
+        attempt = self.archive / "site" / "attempts" / "CSP-0002-A001"
+        self.assertFalse((attempt / "telemetry.html").exists())
+        self.assertNotIn('href="telemetry.html"', (attempt / "index.html").read_text())
 
     def test_rebuild_updates_only_marked_derived_site(self):
         self.assertEqual(0, self.run_generator().returncode)

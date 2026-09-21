@@ -10,6 +10,18 @@
 
 `SimulationBatch(WorkStamp stamp, double stepSeconds, IEnumerable<SimulationBody> bodies)` copies its collection, rejects duplicate IDs and null entries, and accepts 1–4096 bodies. Its timestep is finite and positive. The collection is read-only and the contained bodies and stamp are sealed immutable objects. Construct batches on the capture side; enumeration and validation occur synchronously. The caller must not mutate its source collection concurrently with capture.
 
+### Opt-in column capture
+
+`SimulationBatch.FromColumns(stamp, stepSeconds, ids, masses, positions, velocities, forces)` accepts an `int[]`, `double[]`, and three `Vec[]` arrays of equal length. It defensively captures their values into privately owned arrays, with separate position, velocity and force component arrays. The same 1–4096 body bound, unique nonnegative IDs, finite values, positive masses/timestep and nonnull stamp requirements apply. The caller must not mutate the source arrays during capture; changes afterward cannot alter the batch.
+
+Use `Count`, `GetId(index)`, `GetMass(index)`, `GetPosition(index)`, `GetVelocity(index)` and `GetForce(index)` for reads without creating body objects. Vector reads return copies. `UsesColumnStorage` identifies this opt-in representation. Existing constructors and backends remain supported, and the original object constructor keeps its original representation.
+
+`Bodies` remains a compatibility view. On a column batch, its first access creates a complete immutable `SimulationBody` view, cached with thread-safe lazy initialization. Even reading `Bodies.Count` triggers that materialization; use `Count` when it is unnecessary. A backend that reads `Bodies` remains correct but pays for this view, so the column representation is not a promise that every existing backend will allocate less.
+
+`ConstantForceBackend` has a column path that allocates new motion arrays, validates all computed values, and checks cancellation. Output can share its input's private immutable ID, mass and force arrays; it does not retain or mutate the input's motion arrays. These arrays are never exposed or pooled. Worker validation uses indexed reads and preserves the same stamp, ID/order, mass, force and timestep checks without creating compatibility views. Custom backends can return either representation, subject to that envelope.
+
+This adds a sealed capture and result representation, not a reusable mutable buffer lease, native bridge, SIMD kernel or game-state owner. The separate [handoff comparison](worker-benchmark.md#compare-handoff-layouts) measures the actual worker boundary before any default storage change.
+
 `ISimulationBackend.Compute(SimulationBatch batch, CancellationToken cancellation)` returns a new batch representing the end of that interval. The output retains the **input stamp**, exact timestep, body count, ordering, IDs, masses, and forces. Positions and velocities may change. The worker validates this envelope before publishing. A null result, changed envelope, backend exception, or invalid/nonfinite output construction faults the worker permanently. `Fault` retains the exception for diagnosis; it is not thrown on the submitting thread.
 
 Backends may access only captured data and their own thread-safe state. No Unity objects, KSP callbacks, or main-thread API calls belong inside `Compute`. The worker does not own or dispose the supplied backend. A caller that shares one backend across workers must supply its own backend synchronization.

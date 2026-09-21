@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -54,6 +55,49 @@ class ChronicleIndexTests(unittest.TestCase):
         self.assertIn('href="CSP-0001-A003/index.html"', page)
         self.assertIn("Pathfinder &lt;first&gt;", page)
         self.assertNotIn(str(self.root), page)
+
+    def test_links_hash_bound_telemetry_playback_when_present(self):
+        report = self.manifest.parent
+        playback = report / "telemetry.html"
+        playback.write_text('<a href="index.html">Mission report</a>')
+        data = json.loads(self.manifest.read_text())
+        source_sha = "a" * 64
+        data["sources"] = [{"path": "mission/mission.csv", "bytes": 10, "sha256": source_sha}]
+        data["telemetryPlayback"] = {
+            "schema": "ksp-continuum-telemetry-playback/v1",
+            "report": "telemetry.html",
+            "rows": 3,
+            "sourceSha256": source_sha,
+            "sha256": hashlib.sha256(playback.read_bytes()).hexdigest(),
+        }
+        self.manifest.write_text(json.dumps(data))
+
+        result = self.run_index()
+        self.assertEqual(0, result.returncode, result.stderr)
+        page = (self.archive / "index.html").read_text()
+        self.assertIn('href="CSP-0001-A003/index.html"', page)
+        self.assertIn('href="CSP-0001-A003/telemetry.html"', page)
+        self.assertNotIn(str(self.root), page)
+
+    def test_rejects_telemetry_descriptor_with_wrong_output_hash(self):
+        report = self.manifest.parent
+        (report / "telemetry.html").write_text("player")
+        data = json.loads(self.manifest.read_text())
+        source_sha = "a" * 64
+        data["sources"] = [{"path": "mission/mission.csv", "bytes": 10, "sha256": source_sha}]
+        data["telemetryPlayback"] = {
+            "schema": "ksp-continuum-telemetry-playback/v1",
+            "report": "telemetry.html",
+            "rows": 3,
+            "sourceSha256": source_sha,
+            "sha256": "b" * 64,
+        }
+        self.manifest.write_text(json.dumps(data))
+
+        result = self.run_index()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("telemetry playback hash", result.stderr)
+        self.assertFalse((self.archive / "index.html").exists())
 
     def test_refuses_to_replace_existing_index(self):
         output = self.archive / "index.html"
