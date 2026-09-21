@@ -65,3 +65,30 @@ An installed KSP 1.12.5 qualification run used package `0.1.3-shadow.9EB8D17FD68
 Across 1,190 body comparisons, the largest raw-coordinate position discrepancy was `0.000117479 m` and the body-weighted RMS was `0.0000790755 m`. The largest velocity discrepancy was `0.000240641 m/s` and the body-weighted RMS was `0.0000829615 m/s`. Median capture time was `0.08535 ms`, median submission was `0.00820 ms`, and median observed handoff was `0.89175 ms`. These measurements qualify the installed capture, worker, next-observation comparison and export path for this coast workload. They do not isolate gravity, stock force integration, constraints or Krakensbane adjustment, and they do not qualify active publication or a replacement solver.
 
 Two preceding installed attempts retained zero comparisons because routine Krakensbane velocity changes and floating-origin events were initially treated as discontinuities. In ordinary orbit both vary continuously. The final contract keeps those signals at both endpoints and includes their effect in raw-coordinate discrepancy, while topology, scene, eligibility, step duration and exactly-one-boundary requirements remain gates.
+
+
+## Paired central-field counterfactual
+
+The zero-force worker and its receipt fields remain unchanged. A second, synchronous main-thread calculation captures `FlightGlobals.getGeeForceAtPosition(position, mainBody)` independently for every sampled body, then freezes that acceleration for one step: `v1 = v0 + a0 dt`, `x1 = x0 + v0 dt + a0 dt² / 2`. This is a bounded counterfactual to choose the next model; it is not a new worker backend or a performance improvement. Capture/prediction and comparison overhead have separate gravity timing fields.
+
+The native central-field routine uses `mainBody.gMagnitudeAtCenter`; the receipt calls that coefficient `gravityMu` and records the separate orbital `gravParameter` as `gravityOrbitalMu`. The captured center, mean acceleration, model/source identity and prediction duration accompany the aggregates. Prediction uses each body's acceleration, not the mean. Invalid coefficients, singular positions or nonfinite acceleration make this strategy unavailable while preserving the zero baseline.
+
+This does **not** reproduce stock integration. The stock integrator applies a shared vessel `precalc.integrationAccel`, which can include global/vessel gravity multipliers, rotating-frame terms and orbit-drift corrections. Thrust, aerodynamic and contact/constraint effects are also omitted. The fixture's closed-form position update may differ from stock integration convention, so velocity is the primary paired diagnostic and raw position is secondary.
+
+Both predictions use the same observed arrays and the same comparison eligibility. `gravityComparisonAvailable` gates the central-field max/RMS metrics. `gravityVelocityRmsDeltaFromZero` is central minus zero RMS: positive means the central counterfactual fits worse. `gravityVelocityRmsRatioToZero` is null when the zero denominator is zero or the ratio is unrepresentable. A worse fit is retained as evidence, not treated as a failed capture.
+
+### Observed-frame-adjusted velocity diagnostic
+
+There is a second matched comparison in which **both** zero and central-field predicted velocities subtract the measured end-minus-start Krakensbane frame velocity. Native `Krakensbane.AddExcess` increments its frame velocity and passes the opposite offset into `Vessel.ChangeWorldVelocity`, which adds that offset to part rigidbody velocities. This establishes the translational sign; it does not establish a complete inertial or rotating-frame transform.
+
+The adjustment uses future observed frame state and is explicitly a post-observation diagnostic, not a forecast. The receipt retains the endpoint delta, adjusted zero and adjusted central max/RMS velocity discrepancies, and central-minus-zero adjusted RMS. Both availability flags must be true for the adjusted pair. No corresponding origin-shift position correction is attempted, and adjusted central results must not be compared against the unadjusted zero baseline as an improvement claim.
+
+A synthetic accelerating-frame control proves the distinction: with `a = -1 m/s²`, `dt = 0.2 s`, observed raw velocity unchanged and frame delta `-0.2 m/s`, raw zero has RMS 0 and raw central has RMS 0.2. After the identical frame correction, zero has RMS 0.2 and central has RMS 0. The exported fixture is labeled `portable-helper-fixture`; it proves arithmetic and matched comparison behavior, not observed KSP physics.
+
+### Installed central-field observation
+
+An installed KSP 1.12.5 run used CKAN package `0.1.4-gravity.CA501F739415` from source commit `878ecc38d20e6694a58ae9f03a02e877e5045cd8`. The bounded Minmus-orbit coast completed 120 submissions in 5.028 seconds. It produced 118 matched comparisons over 1,180 body comparisons; two samples explicitly skipped a missed observation boundary.
+
+In raw Unity coordinates, central-field velocity RMS was `0.00465526 m/s` versus `0.0000799288 m/s` for zero force, a ratio of `58.24`. After applying the same observed endpoint Krakensbane velocity delta to both predictions, central-field RMS was `0.000841748 m/s` versus `0.00381787 m/s` for zero force, a reduction of `0.00297613 m/s` or about 78%. Every matched sample favored central gravity in the adjusted pair. Median synchronous gravity prediction cost was `0.0192 ms`; median paired comparison cost was `0.0536 ms`.
+
+The opposing raw and adjusted results confirm that coordinate treatment dominates this one-step orbital workload. They support central gravity as a useful model and make prediction of the frame transition the next experiment. The adjusted result remains conditioned on the observed future frame delta; it is not yet an independently runnable forecast, stock-integrator equivalence, or evidence for active state publication.

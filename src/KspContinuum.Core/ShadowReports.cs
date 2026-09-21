@@ -8,7 +8,7 @@ namespace KspContinuum
         public string referenceFrameSchema = ShadowPhysicalInput.ReferenceFrameSchema;
         public string aggregateForceStatus = ShadowPhysicalInput.AggregateForceUnavailable;
         public string scope =
-            "Read-only transport probe: one accepted batch retains captured Unity rigidbody pose, velocity, center-of-mass and principal-inertia inputs. Force is synthetic zero for a constant-velocity arithmetic check, not a native force measurement. Accepted predictions are compared against the next matching one-step stock observation when available. Differences include omitted forces; no vessel writes, validated stock trajectory model, gravity model, or speedup claim.";
+            "Read-only transport probe: one accepted batch retains captured Unity rigidbody pose, velocity, center-of-mass and principal-inertia inputs. Force is synthetic zero for a constant-velocity arithmetic check, not a native force measurement. Accepted predictions are compared against the next matching one-step stock observation when available. Differences include omitted forces; no vessel writes, validated stock trajectory model, or speedup claim. An additive central-field counterfactual preserves the original zero-force worker baseline.";
         public string framePolicy =
             "Unity world coordinates; raw Rigidbody.velocity. Every observed physics epoch and floating-origin event invalidates pending worker results; exact Krakensbane frame-velocity changes also invalidate worker publication. Historical comparisons separately require exactly one observed host boundary, matching topology and scene, and a resolvable fixed-time interval. Both endpoint origin counters and frame velocities are retained because raw residuals include routine KSP frame adjustment. This is a conservative guard, not a complete KSP frame model.";
         public string status = "waiting",
@@ -21,6 +21,13 @@ namespace KspContinuum
             "position and centers m; velocity m/s; angular velocity rad/s; quaternion [x,y,z,w]; native Rigidbody.mass and inertia tensor retained without unit conversion; timings ms; dt s";
         public string comparisonScope =
             "Zero-force baseline versus observed raw-coordinate KSP motion: discrepancy telemetry including gravity, thrust, contacts, constraints and Krakensbane frame adjustment; not solver accuracy or native-force validation.";
+        public string gravityStrategy = CentralGravityShadow.ModelId;
+        public string gravityExecution =
+            "synchronous bounded main-thread counterfactual; observer overhead, not worker acceleration";
+        public string gravityFrameAdjustedScope =
+            "Velocity-only post-observation diagnostic subtracts measured endpoint Krakensbane frame-velocity delta; conditioned on future frame state, not an inertial forecast or rotating-frame model; no origin position correction.";
+        public string gravityInterpretation =
+            "Captured per-body central-field acceleration frozen for one step in raw Unity coordinates; not stock shared vessel integrationAccel, gravity multipliers, rotating-frame terms, or orbit-drift correction. Omitted forces and moving-frame adjustment remain in residuals. A larger residual than zero is a valid negative result.";
         public int compared,
             comparisonSkipped;
         public int maxBodies = 512,
@@ -68,6 +75,32 @@ namespace KspContinuum
         public double[] comparisonRawKrakensbaneFrameVelocity = new double[0];
         public long physicsEpoch,
             floatingOriginEventCount;
+        public string gravityModelStatus = "not-captured",
+            gravityComparisonStatus = "not-accepted";
+        public double gravityMu,
+            gravityOrbitalMu,
+            gravityPredictionMilliseconds,
+            gravityComparisonMilliseconds;
+        public string gravityAccelerationSource = "not-captured";
+        public string gravityFrameAdjustedStatus = "not-accepted";
+        public bool gravityFrameAdjustedVelocityAvailable,
+            zeroFrameAdjustedVelocityAvailable;
+        public double zeroFrameAdjustedVelocityMaxMetersPerSecond,
+            zeroFrameAdjustedVelocityRmsMetersPerSecond,
+            gravityFrameAdjustedVelocityRmsDeltaFromZero;
+        public double gravityFrameAdjustedVelocityMaxMetersPerSecond,
+            gravityFrameAdjustedVelocityRmsMetersPerSecond;
+        public double[] gravityCenterUnityWorld = new double[0],
+            gravityMeanAcceleration = new double[0],
+            gravityEndpointFrameVelocityDelta = new double[0];
+        public bool gravityComparisonAvailable;
+        public int gravityComparedBodies;
+        public double gravityPositionMaxMeters,
+            gravityPositionRmsMeters,
+            gravityVelocityMaxMetersPerSecond,
+            gravityVelocityRmsMetersPerSecond;
+        public double gravityVelocityRmsDeltaFromZero;
+        public double? gravityVelocityRmsRatioToZero;
         public bool observedComparisonAvailable;
         public string comparisonStatus = "not-accepted";
         public int comparedBodies,
