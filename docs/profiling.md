@@ -23,4 +23,45 @@ Only one Continuum probe can run at a time. Unity recorders are shared engine ob
 
 Portable tests cover raw-marker availability, no-block observations, distribution arithmetic, invalid readings, partial-prefix trimming and nested JSON export. Native compilation checks the installed KSP 1.12.5 / Unity 2019.4 API surface. Neither establishes marker availability or capture behavior in a release player.
 
-Installed qualification remains open for this version: collect a normal 300-frame report, inspect missing markers explicitly, compare packed/unpacked and warp contexts, and interrupt a capture through a scene transition to verify partial export and recorder cleanup. A release player may provide no usable physics markers. That result identifies an instrumentation gap; it does not establish zero physics cost or PhysX dominance. No game-profile measurement from this implementation is claimed yet.
+A007 completed three normal 300-frame captures with no physics/update marker samples, as recorded below. Installed qualification remains open for packed/warp transitions and interruption through a scene transition, including partial export and recorder cleanup. Missing samples identify an instrumentation gap; they do not establish zero physics cost or PhysX dominance.
+
+## Controlled qualification workload
+
+The opt-in `--continuum-qualify` flight addon observes an externally launched
+flight. It starts a 300-frame marker capture and a separate shadow-worker capture
+at each of three sequential conditions: airborne with throttle command below
+0.01, airborne with throttle command above 0.05, and landed or splashed. The
+flight mission or player supplies those states; this addon does not steer the
+vessel. Each frame now includes nullable `throttleCommand` so the report can
+show whether the window remained in its starting context. A throttle command
+is not proof of thrust, and a landed situation is not collision-cost attribution.
+
+Receipts are written beneath a new `PluginData/qualification-*` directory. Each
+window has a start-context text receipt, marker JSON and the completed shadow
+JSON. The addon exits the process after all windows or a 600-second flight
+limit. Use it only in a disposable test launch: it is intentionally an automatic
+exit harness. `complete` means the three receipt windows completed, not that
+all shadow samples were accepted, markers were available, or physics matched.
+Marker timing includes the running shadow observer and other addons; it is not
+an instrumentation-free baseline. Inspect source frames and shadow acceptance
+before drawing conclusions.
+
+## Native qualification observation: CSP-0002-A007
+
+An isolated KSP 1.12.5 instance ran the installed qualification package from the preserved Minmus-orbit checkpoint at 1920 × 1080. The harness completed all three windows, exited with code 0, and the closed-instance receipts were preserved. This is a collection result, not a replacement-physics qualification.
+
+| Start-classified window | Profiler frames | Accepted / submitted shadow batches | First accepted dynamic bodies | Frame-interval median / p95 (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Coast | 300 | 120 / 120 | 10 | 4.500 / 8.396 |
+| Powered | 300 | 120 / 120 | 10 | 4.347 / 10.332 |
+| Contact | 300 | 120 / 120 | 10 | 7.894 / 13.279 |
+
+The four physics/update markers were `available-no-samples` in all three windows: 300 available frames and zero observed blocks per marker per window. `GC.Collect` was observed in two powered frames (three blocks) and two contact frames (two blocks), with median observed durations 2.654 and 2.475 ms; coast had no GC samples. These observations did not measure physics cost. The callback intervals include the instrumented workload and are not an uninstrumented FPS benchmark or a causal attribution. The powered window contained 143 frames with positive throttle command and 157 near-zero frames; its start label does not imply continuous thrust.
+
+The worker reported no stale results in these windows. It used zero force and a constant-velocity oracle, proving live capture/transport and freshness checks under this workload, not captured stock forces or trajectory agreement. Stale-result rejection has separate synthetic epoch-transition tests. Median capture cost was 0.102, 0.090 and 0.111 ms; median handoff latency was 0.621, 0.652 and 0.939 ms. Those scopes overlap and must not be added as a total simulation cost.
+
+Qualification quit after the landed capture, before the mission's settling acceptance completed. The preserved mission receipt still says `running`; it is an interrupted mission attempt with no terminal pass/fail verdict. The independent qualification receipt says `complete`. Neither should overwrite the other. On application teardown, the pre-existing mission cleanup logged two `FlightGlobals.ActiveVessel` null-reference failures after the flight singleton was destroyed. Capture receipts were already complete, but this run does not prove graceful mission cleanup or complete settings restoration.
+
+Package SHA-256: `bd2680ab2e17fdc1c6a9f7c905658cfa316bf1c7ddc8055fb5837b5ae295b64c`. Parent checkpoint SHA-256: `6993575ee97eb6f9529d6f91187e63909dc2aad424e477905a4a86a063445240`, verified unchanged after exit. Native receipts do not themselves bind the package or attempt; a separate local capture/install record preserves that association. The [qualification report tool](qualification-report.md) renders the raw window receipts without promoting collection completion into a physics claim.
+
+Next: qualify a supported timing source for actual force callbacks and native solving before selecting a replacement bottleneck. More landing precision tuning is not a prerequisite.

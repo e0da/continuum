@@ -13,9 +13,19 @@ jobs:
       - run: dotnet run --project tests/KspContinuum.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.Worker.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.Profiling.Tests -c Release
+      - run: dotnet run --project tests/KspContinuum.Shadow.Tests -c Release
       - run: dotnet run --project src/KspContinuum.Mission/Tests/Mission.Tests.csproj -c Release
       - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - run: python3 -m unittest discover -s tools/orbit-fixture -p 'test_*.py' -v
+  field-gravity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r tools/field-gravity/requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_field_gravity.py' -v
   structural:
     runs-on: ubuntu-latest
     steps:
