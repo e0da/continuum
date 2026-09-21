@@ -515,6 +515,22 @@ class QualificationReportTests(unittest.TestCase):
         self.assertNotIn("physics percentage", page.lower())
         self.assertNotIn(str(self.root), page)
 
+    def test_qualification_consumer_accepts_v2_shadow_without_claiming_residuals(self):
+        report = self.shadow_report(0)
+        report.update({"schema": "ksp-continuum-flight-shadow/v2", "compared": 1,
+                       "comparisonSkipped": 0})
+        report["samples"][0].update({"comparisonStatus": "compared",
+                                      "observedComparisonAvailable": True})
+        report["samples"][1].update({"comparisonStatus": "not-accepted",
+                                      "observedComparisonAvailable": False})
+        (self.source / "coast-shadow.json").write_text(json.dumps(report), encoding="utf-8")
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        shadow = json.loads((self.output / "summary.json").read_text())["phases"][0]["shadow"]
+        self.assertEqual("ksp-continuum-flight-shadow/v2", shadow["schema"])
+        self.assertEqual(1, shadow["compared"])
+        self.assertNotIn("residuals", shadow)
+
     def test_reports_terminal_partial_capture_without_inventing_missing_phases(self):
         (self.source / "status.txt").write_text("timeout\ncompletedWindows=1\n", encoding="utf-8")
         for phase in ("powered", "contact"):
