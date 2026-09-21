@@ -4,7 +4,9 @@ The portable encounter fixture implements the first step of the [interaction-reg
 
 ## Input contract
 
-Each immutable `EncounterMotion` contains a stable ID, generation, common epoch and frame name, initial center/velocity, enclosing radius, validity duration, lookahead deadline, position/velocity error and a nullable residual-acceleration bound. Explicit zero acceleration means the caller guarantees the linear trajectory. Missing acceleration means unknown, not zero.
+Each immutable `EncounterMotion` contains a stable ID, generation, common epoch and frame name, initial center/velocity, enclosing radius, validity duration, lookahead deadline, position/velocity error and a nullable residual-acceleration bound. The optional `nominalAcceleration` vector defaults to zero and declares the center curve `p(t) = p₀ + v₀t + ½at²`. `AccelerationBound` bounds residual acceleration relative to that curve: explicit zero guarantees the declared nominal trajectory; a missing residual bound means unknown, even with a supplied nominal acceleration.
+
+This is a constant-acceleration polynomial, not a Kepler orbit propagator. An orbit adapter would need to bound its deviation from the polynomial over its validity duration; sampling an orbit and fitting a curve alone does not supply that guarantee.
 
 All predictions must use the same epoch and nonrotating coordinate frame. A frame name is a caller declaration, not a verified coordinate transform. The enclosing sphere must cover rotating geometry. Residual acceleration and uncertainty bounds must remain valid throughout the screening interval, including permitted changes of input. The planner cannot infer these guarantees from an arbitrary mod callback.
 
@@ -20,7 +22,7 @@ Unknown bounds, unresolved numerical conditions and exhausted screening capacity
 
 ## Numerical and work limits
 
-The broad phase sweeps enclosing boxes along the axis with the largest global swept extent, breaking ties X/Y/Z. This heuristic avoids the measured fixed-X degeneracy; it does not guarantee subquadratic work. Pair screening uses outward interval arithmetic and subdivides time from left to right until it can exclude an interval or reaches the requested tolerance.
+The broad phase sweeps enclosing boxes along the axis with the largest global swept extent, breaking ties X/Y/Z. This heuristic avoids the measured fixed-X degeneracy; it does not guarantee subquadratic work. Both swept boxes and pair screening include the quadratic term over the entire time interval, including interior turns. Pair screening uses outward interval arithmetic and subdivides time from left to right until it can exclude an interval or reaches the requested tolerance.
 
 Each arithmetic operation pads outward by one binary64 representable step, assuming ordinary IEEE-754 operations with subnormal values. This is not a certified interval library or a proof across platforms. Precision lost before input capture must be covered by the caller's error bounds. Arithmetic overflow or an unrepresentable requested time resolution produces `NumericalUncertainty` and zero advance.
 
@@ -44,14 +46,28 @@ A second sparse scene rotates the separation onto a different axis to prevent a 
 
 ## Qualification boundary
 
-The independent oracle uses analytic translating-sphere cases, including narrow contact that uniform coarse sampling misses. Curved orbital segments, terrain/atmosphere, rotating frame transforms, contact/joint dynamics, dissipative replay, concurrent scheduling and multiplayer authority remain separate work. No momentum or energy conservation claim follows from planning alone because the fixture performs no state transfer or physical integration.
+The independent oracle uses analytic translating and accelerating sphere cases, including narrow contact that uniform coarse sampling misses and an interior curved encounter that endpoint chords miss. Actual orbital prediction adapters, terrain/atmosphere, rotating frame transforms, contact/joint dynamics, dissipative replay, concurrent scheduling and multiplayer authority remain separate work. No momentum or energy conservation claim follows from planning alone because the fixture performs no state transfer or physical integration.
 
 Sparse candidate work is the intended advantage. Dense swept envelopes can still expose quadratic pair work and connect all objects into one group. Bounds prevent unlimited work but do not make those cases cheap. The important mixed-workload question is whether one encounter forces unrelated quiet objects to shorten their horizons; the fixture measures that separately from elapsed runtime.
 
-## First measured experiment
+See [trajectory representations and the exact-rational ASC experiment](trajectory-representations.md) for the next enclosure comparison.
+
+## Curved-path fixture
+
+The runner also places a radius-1 sphere at `(0,100,0)` with velocity `(0,-20,0)` and nominal acceleration `(0,2,0)`, alongside a stationary radius-1 sphere at the origin. Its center follows `y=(t−10)²` over 20 seconds. The start and end are both 100 m away; their connecting chord never approaches the origin. The actual curve reaches first contact at `10−√2` seconds and then separates again. The fixture requires a conservative stop before contact while unrelated quiet objects keep their full 20 seconds. Moving the stationary sphere to x=3 gives a clear curved near miss.
+
+The serialized receipt includes each nominal acceleration vector. Older v1 receipts without that field were produced for the earlier linear-only fixture and imply zero nominal acceleration. The semantic plan hash describes output; it is not an input fingerprint or a replay identity.
+
+Interval arithmetic can conservatively overestimate the curve's extent because repeated occurrences of time lose correlation. A localized possible-contact interval can occur before actual contact; its width does not bound that early-stop error. This favors safety over progress. Tighter polynomial envelopes and orbit adapters need their own measured qualification.
+
+## First measured experiment (linear-only implementation)
 
 The local seven-sample fixtures passed with 32, 256, 1,024 and 4,094 quiet objects plus the approaching pair. In the 4,096-object mixed scene, all 4,094 quiet objects retained 20 s of advance. The approaching pair stopped at 9.997940063476562 s, before analytic contact at 9.998 s. Screening required one pair test and 33 interval tests. Median full-plan time on that local run was 7.8038 ms; this is a single-machine diagnostic, not a stock-physics speedup.
 
 An initial fixed-X implementation examined all 496 pairs in a 32-object scene separated only along Y. The adaptive-axis implementation examined zero pairs in that scene and also in the 4,094-object sparse scenes. A dense 64-object scene deliberately exhausted its 64-candidate budget on the 65th pair test and withheld advancement for every object.
 
 The local experiment manifest binds source hashes and four immutable JSON receipts. The first failed orientation receipt is retained separately as evidence from the earlier implementation. Focused tests pass 44 assertions and an independent analytic oracle passes 224 assertions. The external console consumer tests the serialized output, exit behavior and exclusive receipt creation. These are standalone planner results; KSP remained closed and nothing was installed.
+
+## Curved fixture result
+
+The seven-sample 4,096-object fixture retained the full 20 seconds for all 4,094 quiet objects and stopped the curved pair at 8.585281372070312 seconds, before analytic contact at 8.585786437626904 seconds. It performed one pair test and 167 interval tests. Median full-plan time was 8.9650 ms on this local run; the earlier linear result is not a controlled performance baseline. Focused tests pass 55 assertions and the independent analytic oracle passes 282. Native Plugin and Mission compilation succeeds; nothing was installed.

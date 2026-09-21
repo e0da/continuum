@@ -12,6 +12,7 @@ namespace KspContinuum
         public string Frame { get; private set; }
         public Vec Position { get; private set; }
         public Vec Velocity { get; private set; }
+        public Vec NominalAcceleration { get; private set; }
         public double Radius { get; private set; }
         public double ValidForSeconds { get; private set; }
         public double LookaheadSeconds { get; private set; }
@@ -19,17 +20,21 @@ namespace KspContinuum
         public double VelocityError { get; private set; }
         public double? AccelerationBound { get; private set; }
         public EncounterMotion(int id, long generation, double epoch, string frame, Vec position, Vec velocity, double radius,
-            double validForSeconds, double lookaheadSeconds, double positionError = 0, double velocityError = 0, double? accelerationBound = null)
+            double validForSeconds, double lookaheadSeconds, double positionError, double velocityError, double? accelerationBound)
+            : this(id,generation,epoch,frame,position,velocity,radius,validForSeconds,lookaheadSeconds,positionError,velocityError,accelerationBound,null) { }
+        public EncounterMotion(int id, long generation, double epoch, string frame, Vec position, Vec velocity, double radius,
+            double validForSeconds, double lookaheadSeconds, double positionError = 0, double velocityError = 0, double? accelerationBound = null, Vec? nominalAcceleration = null)
         {
             if(id<0||generation<0||string.IsNullOrEmpty(frame)||frame.Length>256) throw new ArgumentException("Invalid encounter identity.");
             AssemblyModel.Finite(epoch);
             Validate(position); Validate(velocity);
+            if(nominalAcceleration.HasValue) Validate(nominalAcceleration.Value);
             Nonnegative(radius); Nonnegative(validForSeconds); Nonnegative(lookaheadSeconds);
             Nonnegative(positionError); Nonnegative(velocityError);
             if(accelerationBound.HasValue) Nonnegative(accelerationBound.Value);
             Id=id; Generation=generation; Epoch=epoch; Frame=frame; Position=position; Velocity=velocity; Radius=radius;
             ValidForSeconds=validForSeconds; LookaheadSeconds=lookaheadSeconds; PositionError=positionError;
-            VelocityError=velocityError; AccelerationBound=accelerationBound;
+            VelocityError=velocityError; AccelerationBound=accelerationBound; NominalAcceleration=nominalAcceleration ?? new Vec();
         }
         static void Validate(Vec v) { AssemblyModel.Finite(v.X); AssemblyModel.Finite(v.Y); AssemblyModel.Finite(v.Z); }
         static void Nonnegative(double value) { AssemblyModel.Finite(value); if(value<0) throw new ArgumentException("Bounds must be nonnegative."); }

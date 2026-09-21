@@ -13,9 +13,9 @@ static class Program
     const double Horizon = 20;
     static readonly JsonSerializerOptions Json = new JsonSerializerOptions { WriteIndented = true };
     static EncounterMotion Motion(int id, Vec position, Vec velocity, double radius = 1,
-        double lookahead = Horizon, double? acceleration = 0, long generation = 1, string frame = "inertial-fixture")
+        double lookahead = Horizon, double? acceleration = 0, long generation = 1, string frame = "inertial-fixture", Vec? nominalAcceleration = null)
     {
-        return new EncounterMotion(id, generation, 0, frame, position, velocity, radius, Horizon, lookahead, 0, 0, acceleration);
+        return new EncounterMotion(id, generation, 0, frame, position, velocity, radius, Horizon, lookahead, 0, 0, acceleration, nominalAcceleration);
     }
     static EncounterMotion[] Quiet(int count)
     {
@@ -57,6 +57,7 @@ static class Program
         return new { name, status = Status(plan), bodyCount = plan.Advances.Count,
             inputs = inputs.Select(m => new { id = m.Id, generation = m.Generation, epoch = m.Epoch, frame = m.Frame,
                 position = new[] { m.Position.X, m.Position.Y, m.Position.Z }, velocity = new[] { m.Velocity.X, m.Velocity.Y, m.Velocity.Z },
+                nominalAcceleration = new[] { m.NominalAcceleration.X, m.NominalAcceleration.Y, m.NominalAcceleration.Z },
                 radius = m.Radius, validForSeconds = m.ValidForSeconds, lookaheadSeconds = m.LookaheadSeconds,
                 positionError = m.PositionError, velocityError = m.VelocityError, accelerationBound = m.AccelerationBound }).ToArray(),
             fullHorizonBodies = plan.Advances.Count(a => a.SafeAdvanceSeconds == Horizon),
@@ -117,11 +118,16 @@ static class Program
             var unknown = new[] { Motion(1, new Vec(), new Vec(), acceleration: null), Motion(2, new Vec(1000, 0, 0), new Vec()) };
             var dense = Enumerable.Range(1, 64).Select(id => Motion(id, new Vec(), new Vec())).ToArray();
             var smallBudget = new EncounterBudget(maxPairTests: 128, maxCandidates: 64, maxIntervalTests: 2048);
+            var curved = new[] { Motion(1, new Vec(0, 100, 0), new Vec(0, -20, 0), nominalAcceleration: new Vec(0, 2, 0)),
+                Motion(2, new Vec(), new Vec()) }.Concat(sparse).ToArray();
+            var curvedClear = new[] { Motion(1, new Vec(0, 100, 0), new Vec(0, -20, 0), nominalAcceleration: new Vec(0, 2, 0)),
+                Motion(2, new Vec(3, 0, 0), new Vec()) };
+            var pCurved = Plan(curved); var pCurvedClear = Plan(curvedClear);
             var pCrossAxis = Plan(crossAxis);
             var pSparse = Plan(sparse); var pMixed = Plan(mixed); var pTangent = Plan(tangent); var pMiss = Plan(miss);
             var pAcceleration = Plan(accelerating); var pBlocked = Plan(blocked); var pUnknown = Plan(unknown);
             var pDense = Plan(dense, smallBudget);
-            bool permutationStable = Hash(pMixed) == Hash(Plan(mixed.Reverse().ToArray())) && Hash(pDense) == Hash(Plan(dense.Reverse().ToArray(), smallBudget));
+            bool permutationStable = Hash(pCurved) == Hash(Plan(curved.Reverse().ToArray())) && Hash(pMixed) == Hash(Plan(mixed.Reverse().ToArray())) && Hash(pDense) == Hash(Plan(dense.Reverse().ToArray(), smallBudget));
             var scheduler = new EncounterScheduler(); scheduler.Replace(mixed);
             var before = scheduler.Plan(Horizon, new EncounterBudget());
             bool initiallyCurrent = scheduler.IsCurrent(before);
@@ -143,6 +149,9 @@ static class Program
             try { Plan(new[] { Motion(1, new Vec(), new Vec()), Motion(2, new Vec(), new Vec(), frame: "another-frame") }); }
             catch (ArgumentException) { frameMismatchRejected = true; }
             var checks = new SortedDictionary<string, bool> {
+                ["curvedInteriorEncounterFound"] = Status(pCurved) == "complete" && pCurved.Candidates.Count == 1 && pCurved.Advances.Where(a => a.ObjectId <= 2).All(a => a.SafeAdvanceSeconds <= 10 - Math.Sqrt(2) && a.SafeAdvanceSeconds > 8.58),
+                ["curvedQuietBodiesKeepFullHorizon"] = pCurved.Advances.Where(a => a.ObjectId > 2).All(a => a.SafeAdvanceSeconds == Horizon),
+                ["curvedClearIsClear"] = Status(pCurvedClear) == "complete" && pCurvedClear.Candidates.Count == 0 && pCurvedClear.Advances.All(a => a.SafeAdvanceSeconds == Horizon),
                 ["sparseOrientationPruned"] = Status(pCrossAxis) == "complete" && pCrossAxis.Advances.All(a => a.SafeAdvanceSeconds == Horizon) && pCrossAxis.WorkUsed.PairTests < quiet * 4L,
                 ["sparseIsClear"] = Status(pSparse) == "complete" && pSparse.Advances.All(a => a.SafeAdvanceSeconds == Horizon),
                 ["crossingStopsBeforeAnalyticContact"] = Status(pMixed) == "complete" && pMixed.Advances.Where(a => a.ObjectId <= 2).All(a => a.SafeAdvanceSeconds <= 9.998 && a.SafeAdvanceSeconds >= 9.9979),
@@ -160,13 +169,13 @@ static class Program
                 createdUtc = DateTime.UtcNow.ToString("o"), quietBodies = quiet, horizonSeconds = Horizon,
                 physicsIntegrated = false, parallelExecutionQualified = false, stockPhysicsSpeedupMeasured = false,
                 permutationStable, stalePlanRejected, foreignPlanRejected, checks,
-                model = "Prescribed linear centers, spherical bounds and declared residual acceleration; plans only, no integration or contact response.",
+                model = "Prescribed linear or constant-acceleration centers, spherical bounds and declared residual acceleration; plans only, no integration or contact response.",
                 measurement = "One warmup per scene; fixed scene order; full synchronous Plan call including validation and allocation; excludes input construction, hashing, serialization and startup. Single-process wall times, not a stock-game speedup.",
                 runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
                 architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(), logicalProcessors = Environment.ProcessorCount,
-                cases = new[] { Row("sparse", pSparse, sparse), Row("sparse-cross-axis", pCrossAxis, crossAxis), Row("mixed-fast-crossing", pMixed, mixed), Row("tangent", pTangent, tangent), Row("near-miss", pMiss, miss),
+                cases = new[] { Row("curved-interior-crossing", pCurved, curved), Row("curved-clear", pCurvedClear, curvedClear), Row("sparse", pSparse, sparse), Row("sparse-cross-axis", pCrossAxis, crossAxis), Row("mixed-fast-crossing", pMixed, mixed), Row("tangent", pTangent, tangent), Row("near-miss", pMiss, miss),
                     Row("acceleration-uncertainty", pAcceleration, accelerating), Row("zero-lookahead", pBlocked, blocked), Row("unknown-bounds", pUnknown, unknown), Row("dense-budget-exhaustion", pDense, dense), Row("inserted-debris", afterDebris, debris) },
-                measurements = new[] { Measure("sparse", sparse, samples), Measure("sparse-cross-axis", crossAxis, samples), Measure("mixed-fast-crossing", mixed, samples), Measure("dense-budget-exhaustion", dense, samples, smallBudget) }
+                measurements = new[] { Measure("curved-interior-crossing", curved, samples), Measure("sparse", sparse, samples), Measure("sparse-cross-axis", crossAxis, samples), Measure("mixed-fast-crossing", mixed, samples), Measure("dense-budget-exhaustion", dense, samples, smallBudget) }
             };
             using (var stream = new FileStream(output, FileMode.CreateNew, FileAccess.Write)) JsonSerializer.Serialize(stream, report, Json);
             Console.WriteLine(JsonSerializer.Serialize(new { report.qualified, output }));

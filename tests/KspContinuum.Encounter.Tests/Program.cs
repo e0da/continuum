@@ -11,6 +11,40 @@ static class Program
     static double Advance(EncounterPlan p,int id)=>p.Advances.Single(a=>a.ObjectId==id).SafeAdvanceSeconds;
     static EncounterPlan P(params EncounterMotion[] motions)=>EncounterPlanner.Plan(motions,20,new EncounterBudget());
     static bool Reject(Action action) {try {action();return false;}catch(ArgumentException){return true;}}
+    static void CurvedTests()
+    {
+        var legacyConstructor=typeof(EncounterMotion).GetConstructor(new[]{typeof(int),typeof(long),typeof(double),typeof(string),typeof(Vec),typeof(Vec),
+            typeof(double),typeof(double),typeof(double),typeof(double),typeof(double),typeof(double?)});
+        Check(legacyConstructor!=null,"legacy twelve-parameter CLR constructor remains available");
+        var legacy=(EncounterMotion)legacyConstructor.Invoke(new object[]{1,0L,0d,"inertial",new Vec(),new Vec(),1d,20d,20d,0d,0d,(double?)0});
+        Check(legacy.NominalAcceleration.X==0 && legacy.NominalAcceleration.Y==0 && legacy.NominalAcceleration.Z==0,"legacy constructor forwards to zero nominal acceleration");
+        var anchor=M(1,new Vec(),new Vec());
+        var curved=new EncounterMotion(2,4,0,"inertial",new Vec(-10,100,0),new Vec(1,-20,0),1,20,20,
+            accelerationBound:0,nominalAcceleration:new Vec(0,2,0));
+        var plan=P(anchor,curved);
+        double entry=10-Math.Sqrt((Math.Sqrt(17)-1)*.5);
+        Check(plan.Status==EncounterPlanStatus.Complete && plan.Candidates.Count==1,"curved interior approach survives separated endpoints and missed linear path");
+        Check(Advance(plan,1)<=entry && Advance(plan,1)>entry-.002,"curved first approach localized without late stop");
+        Check(plan.Candidates[0].UpperSeconds-plan.Candidates[0].LowerSeconds<=.0001,"curved localization width");
+        var miss=new EncounterMotion(2,4,0,"inertial",new Vec(-10,103,0),new Vec(1,-20,0),1,20,20,
+            accelerationBound:0,nominalAcceleration:new Vec(0,2,0));
+        plan=P(anchor,miss);
+        Check(plan.Status==EncounterPlanStatus.Complete && plan.Candidates.Count==0,"curved positive-clearance miss");
+        var unknown=new EncounterMotion(2,4,0,"inertial",new Vec(-10,100,0),new Vec(1,-20,0),1,20,20,
+            nominalAcceleration:new Vec(0,2,0));
+        plan=P(anchor,unknown);
+        Check(plan.Status==EncounterPlanStatus.UnknownBounds && plan.Advances.All(x=>x.SafeAdvanceSeconds==0),"known nominal term does not supply missing residual bound");
+        var common=new Vec(2,-4,6);
+        plan=P(new EncounterMotion(1,0,0,"inertial",new Vec(),new Vec(),1,20,20,accelerationBound:0,nominalAcceleration:common),
+            new EncounterMotion(2,0,0,"inertial",new Vec(3,0,0),new Vec(),1,20,20,accelerationBound:0,nominalAcceleration:common));
+        Check(plan.Status==EncounterPlanStatus.Complete && plan.Candidates.Count==0,"common acceleration cancels in relative motion");
+        var linear=P(anchor,M(2,new Vec(10,0,0),new Vec(-1,0,0)));
+        var zero=P(anchor,new EncounterMotion(2,0,0,"inertial",new Vec(10,0,0),new Vec(-1,0,0),1,20,20,accelerationBound:0,nominalAcceleration:new Vec()));
+        Check(linear.Candidates[0].LowerSeconds==zero.Candidates[0].LowerSeconds && linear.WorkUsed.IntervalTests==zero.WorkUsed.IntervalTests,"explicit zero preserves linear path");
+        Check(Reject(()=>new EncounterMotion(2,0,0,"inertial",new Vec(),new Vec(),1,20,20,accelerationBound:0,nominalAcceleration:new Vec(0,double.NaN,0))),"nonfinite nominal acceleration rejected");
+        var scheduler=new EncounterScheduler();scheduler.Replace(new[]{anchor,curved});var previous=scheduler.Plan(20,new EncounterBudget());
+        scheduler.Replace(new[]{anchor,miss});Check(!scheduler.IsCurrent(previous),"edited curved prediction invalidates prior plan");
+    }
     static void Main()
     {
         var a=M(1,new Vec(-25000,0,0),new Vec(5000,0,0));
@@ -94,6 +128,7 @@ static class Program
         Check(!scheduler.IsCurrent(previous),"identical publication also invalidates prior recommendations");
         immutable=false;try{((IList<int>)previous.Groups[0].ObjectIds)[0]=999;}catch(NotSupportedException){immutable=true;}
         Check(immutable,"group membership immutable");
+        CurvedTests();
         Console.WriteLine("Encounter: "+assertions+" assertions passed.");
     }
 }

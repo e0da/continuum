@@ -32,6 +32,15 @@ class EncounterBenchTests(unittest.TestCase):
             self.assertTrue(report['qualified'])
             cases = {row['name']: row for row in report['cases']}
             self.assertIn('mixed-fast-crossing', cases)
+            self.assertIn('curved-interior-crossing', cases)
+            curved = cases['curved-interior-crossing']
+            self.assertEqual('complete', curved['status'])
+            self.assertEqual(32, curved['fullHorizonBodies'])
+            self.assertEqual(2, curved['refinedBodies'])
+            self.assertLessEqual(curved['minimumAdvanceSeconds'], 10 - 2 ** .5)
+            self.assertGreater(curved['minimumAdvanceSeconds'], 8.58)
+            self.assertEqual([0, 2, 0], curved['inputs'][0]['nominalAcceleration'])
+            self.assertEqual(20, cases['curved-clear']['minimumAdvanceSeconds'])
             cross_axis = cases["sparse-cross-axis"]
             self.assertEqual(32, cross_axis["fullHorizonBodies"])
             self.assertLess(cross_axis["plan"]["work"]["pairTests"], 32 * 4)
