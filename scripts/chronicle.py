@@ -407,9 +407,8 @@ def sha256(path):
 
 
 def source_entry(path, logical):
-    if path.is_symlink():
-        raise ChronicleError("source file may not be a symbolic link: " + path.name)
-    return {"path": logical, "bytes": path.stat().st_size, "sha256": sha256(path)}
+    content = bounded_bytes(path)
+    return {"path": logical, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
 
 
 def collect_input_summary(inputs, sources):
@@ -592,7 +591,12 @@ def generate(mission, inputs, output, metadata_path):
     events = parse_events(mission / "events.txt")
     captures = parse_screenshots(mission)
     sources = []
-    for name in ("mission.txt", "mission.csv", "events.txt", "screenshots.csv", "milestones.csv", "survey.csv", "terrain.csv"):
+    for name in (
+        "mission.txt", "mission.csv", "events.txt", "screenshots.csv", "milestones.csv",
+        "survey.csv", "terrain.csv", "checkpoint-load-resources.csv",
+        "checkpoint-load-resources.txt", "checkpoint-acquisition-resources.csv",
+        "checkpoint-acquisition-resources.txt", "mechjeb-settings.csv",
+    ):
         path = mission / name
         if path.is_file():
             sources.append(source_entry(path, "mission/" + name))

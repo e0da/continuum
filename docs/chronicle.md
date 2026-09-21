@@ -141,4 +141,6 @@ Phase spans use left-sample attribution: each telemetry interval belongs to the 
 
 Legacy three-column screenshot receipts remain supported. New five-column completion rows include width and height; nonzero reported dimensions must match the copied PNG header. If present, `survey.csv` and `terrain.csv` are included in the source hash manifest so a later site report can cite their exact bytes. The mission chronicle does not interpret those files into a site qualification by itself.
 
+Checkpoint trials also hash `checkpoint-load-resources.csv` and `.txt`, `checkpoint-acquisition-resources.csv` and `.txt`, and `mechjeb-settings.csv` when present. These retain provenance for restoration observations and external configuration hashes without copying their raw contents into the site. File presence alone does not establish that a restoration check passed.
+
 The report is a human-readable record of observed telemetry and receipts. It does not render video, restore a save, prove deterministic world replay, certify a landing site, or infer that a screenshot request succeeded. Source-session directory basenames are retained for provenance, while private absolute paths and save contents are excluded from generated pages and manifests. A receipt reason containing a Unix, Windows-drive, or UNC absolute path is replaced with a safe pointer to the hashed local receipt.

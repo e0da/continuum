@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import struct
@@ -179,6 +180,39 @@ class ChronicleTests(unittest.TestCase):
             {"filename": "survey.png", "status": "below-required-resolution", "width": 1280, "height": 720},
             manifest["media"][1],
         )
+
+    def test_hashes_optional_checkpoint_and_mechjeb_evidence_without_copying_it(self):
+        evidence = {
+            "checkpoint-load-resources.csv": b"resource,amount\nElectricCharge,98\n",
+            "checkpoint-load-resources.txt": b"PRIVATE_RESOURCE_VALUE load receipt\n",
+            "checkpoint-acquisition-resources.csv": b"resource,amount\nLiquidFuel,12\n",
+            "checkpoint-acquisition-resources.txt": b"acquisition receipt\n",
+            "mechjeb-settings.csv": b"setting,value\nlandingTolerance,1\n",
+        }
+        for name, content in evidence.items():
+            (self.mission / name).write_bytes(content)
+
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        sources = {item["path"]: item for item in manifest["sources"]}
+        for name, content in evidence.items():
+            item = sources["mission/" + name]
+            self.assertEqual(len(content), item["bytes"])
+            self.assertEqual(hashlib.sha256(content).hexdigest(), item["sha256"])
+            self.assertFalse((output / name).exists())
+        self.assertNotIn("PRIVATE_RESOURCE_VALUE", (output / "index.html").read_text(encoding="utf-8"))
+        self.assertNotIn("PRIVATE_RESOURCE_VALUE", json.dumps(manifest))
+
+    def test_rejects_oversized_optional_checkpoint_evidence(self):
+        with (self.mission / "checkpoint-load-resources.csv").open("wb") as stream:
+            stream.truncate(16 * 1024 * 1024 + 1)
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("file exceeds size limit", result.stderr)
+        self.assertFalse(output.exists())
 
     def test_rejects_unsafe_media_path_without_creating_output(self):
         (self.mission / "screenshots.csv").write_text(
