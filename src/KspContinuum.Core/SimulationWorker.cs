@@ -42,6 +42,32 @@ namespace KspContinuum
     public sealed class SimulationBatch
     {
         public const int MaxBodies = 4096;
+        readonly IReadOnlyList<SimulationBody> objectBodies;
+        readonly SimulationColumns columns;
+        readonly Lazy<IReadOnlyList<SimulationBody>> compatibilityBodies;
+        public static SimulationBatch FromColumns(WorkStamp stamp, double stepSeconds, int[] ids, double[] masses,
+            Vec[] positions, Vec[] velocities, Vec[] forces)
+        {
+            if (stamp == null) throw new ArgumentException("Stamp is required.", "stamp");
+            AssemblyModel.Positive(stepSeconds);
+            return new SimulationBatch(new SimulationColumns(ids, masses, positions, velocities, forces), stamp, stepSeconds);
+        }
+        SimulationBatch(SimulationColumns columns, WorkStamp stamp, double stepSeconds)
+        {
+            this.columns = columns; Stamp = stamp; StepSeconds = stepSeconds;
+            compatibilityBodies = new Lazy<IReadOnlyList<SimulationBody>>(columns.MaterializeBodies);
+        }
+        public int Count { get { return columns == null ? objectBodies.Count : columns.Count; } }
+        public bool UsesColumnStorage { get { return columns != null; } }
+        public int GetId(int index) { return columns == null ? objectBodies[index].Id : columns.GetId(index); }
+        public double GetMass(int index) { return columns == null ? objectBodies[index].Mass : columns.GetMass(index); }
+        public Vec GetPosition(int index) { return columns == null ? objectBodies[index].Position : columns.GetPosition(index); }
+        public Vec GetVelocity(int index) { return columns == null ? objectBodies[index].Velocity : columns.GetVelocity(index); }
+        public Vec GetForce(int index) { return columns == null ? objectBodies[index].Force : columns.GetForce(index); }
+        internal SimulationBatch IntegrateColumns(CancellationToken cancellation)
+        {
+            return new SimulationBatch(columns.Integrate(StepSeconds, cancellation), Stamp, StepSeconds);
+        }
         public SimulationBatch(WorkStamp stamp, double stepSeconds, IEnumerable<SimulationBody> bodies)
         {
             if (stamp == null || bodies == null) throw new ArgumentException("Stamp and bodies are required.");
@@ -54,11 +80,11 @@ namespace KspContinuum
                 copy.Add(body);
             }
             if (copy.Count == 0) throw new ArgumentException("At least one body is required.", "bodies");
-            Stamp = stamp; StepSeconds = stepSeconds; Bodies = new ReadOnlyCollection<SimulationBody>(copy);
+            Stamp = stamp; StepSeconds = stepSeconds; objectBodies = new ReadOnlyCollection<SimulationBody>(copy);
         }
         public WorkStamp Stamp { get; private set; }
         public double StepSeconds { get; private set; }
-        public IReadOnlyList<SimulationBody> Bodies { get; private set; }
+        public IReadOnlyList<SimulationBody> Bodies { get { return columns == null ? objectBodies : compatibilityBodies.Value; } }
     }
     public interface ISimulationBackend { SimulationBatch Compute(SimulationBatch batch, CancellationToken cancellation); }
     public sealed class ConstantForceBackend : ISimulationBackend
@@ -66,6 +92,7 @@ namespace KspContinuum
         public SimulationBatch Compute(SimulationBatch batch, CancellationToken cancellation)
         {
             if (batch == null) throw new ArgumentException("Batch is required.", "batch");
+            if (batch.UsesColumnStorage) return batch.IntegrateColumns(cancellation);
             var result = new SimulationBody[batch.Bodies.Count];
             double dt = batch.StepSeconds;
             for (int i = 0; i < result.Length; i++)
@@ -163,12 +190,12 @@ namespace KspContinuum
         }
         static void ValidateResult(SimulationBatch input, SimulationBatch result)
         {
-            if (result == null || !input.Stamp.Matches(result.Stamp) || input.StepSeconds != result.StepSeconds || input.Bodies.Count != result.Bodies.Count)
+            if (result == null || !input.Stamp.Matches(result.Stamp) || input.StepSeconds != result.StepSeconds || input.Count != result.Count)
                 throw new InvalidOperationException("Backend changed the batch contract.");
-            for (int i = 0; i < input.Bodies.Count; i++)
+            for (int i = 0; i < input.Count; i++)
             {
-                var a = input.Bodies[i]; var b = result.Bodies[i];
-                if (a.Id != b.Id || a.Mass != b.Mass || a.Force.X != b.Force.X || a.Force.Y != b.Force.Y || a.Force.Z != b.Force.Z)
+                var a = input.GetForce(i); var b = result.GetForce(i);
+                if (input.GetId(i) != result.GetId(i) || input.GetMass(i) != result.GetMass(i) || a.X != b.X || a.Y != b.Y || a.Z != b.Z)
                     throw new InvalidOperationException("Backend changed body identity, ordering, mass, or force.");
             }
         }

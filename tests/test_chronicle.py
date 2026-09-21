@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import subprocess
 import struct
 import sys
@@ -149,6 +150,7 @@ class ChronicleTests(unittest.TestCase):
         self.assertIn('href="media/survey.png"', page)
         self.assertIn("Below required 1920 × 1080 capture resolution · 1280 × 720", page)
         self.assertIn('class="grid media-grid"', page)
+        self.assertIn('href="telemetry.html"', page)
         self.assertIn(".media figcaption { padding-top: 10px; overflow-wrap: anywhere; }", page)
         self.assertIn("1280 × 720", page)
         self.assertEqual((self.mission / "launch.png").read_bytes(), (output / "media" / "launch.png").read_bytes())
@@ -181,6 +183,33 @@ class ChronicleTests(unittest.TestCase):
             manifest["media"][1],
         )
 
+        playback = output / "telemetry.html"
+        playback_text = playback.read_text(encoding="utf-8")
+        embedded = re.search(
+            r'<script id="recording" type="application/json">(.*?)</script>',
+            playback_text,
+            re.S,
+        )
+        self.assertIsNotNone(embedded)
+        observations = json.loads(embedded.group(1))
+        mission_sha = hashlib.sha256((self.mission / "mission.csv").read_bytes()).hexdigest()
+        self.assertEqual(mission_sha, observations["sourceSha256"])
+        self.assertEqual(["SpaceCenter", "Ascent", "Done"],
+                         [row["phase"] for row in observations["rows"]])
+        self.assertEqual(250, observations["rows"][1]["speed"])
+        self.assertIn('href="index.html"', playback_text)
+        self.assertNotIn(str(self.root), playback_text)
+        self.assertEqual(
+            {
+                "schema": "ksp-continuum-telemetry-playback/v1",
+                "report": "telemetry.html",
+                "rows": 3,
+                "sourceSha256": mission_sha,
+                "sha256": hashlib.sha256(playback.read_bytes()).hexdigest(),
+            },
+            manifest["telemetryPlayback"],
+        )
+
     def test_hashes_optional_checkpoint_and_mechjeb_evidence_without_copying_it(self):
         evidence = {
             "checkpoint-load-resources.csv": b"resource,amount\nElectricCharge,98\n",
@@ -206,6 +235,25 @@ class ChronicleTests(unittest.TestCase):
             self.assertFalse((output / name).exists())
         self.assertNotIn("PRIVATE_RESOURCE_VALUE", (output / "index.html").read_text(encoding="utf-8"))
         self.assertNotIn("PRIVATE_RESOURCE_VALUE", json.dumps(manifest))
+
+    def test_rejects_private_path_in_telemetry_playback_text(self):
+        path = self.mission / "mission.csv"
+        path.write_text(path.read_text().replace('"IDLE"', '"/Users/example/private/save.sfs"'))
+        output = self.root / "chronicle"
+
+        result = self.run_generator(output)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("telemetry playback contains a private absolute path", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_long_valid_mission_name_still_generates_playback(self):
+        output = self.root / "chronicle"
+        result = self.run_generator(output, self.metadata(name="N" * 160))
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((output / "telemetry.html").is_file())
+        self.assertIn("N" * 160, (output / "telemetry.html").read_text())
 
     def test_rejects_oversized_optional_checkpoint_evidence(self):
         with (self.mission / "checkpoint-load-resources.csv").open("wb") as stream:

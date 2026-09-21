@@ -34,13 +34,26 @@ static class Program
         try
         {
             int bodies = 1024, samples = 100;
+            string mode = "compute";
             for (int i = 0; i < args.Length; i += 2)
             {
+                if (i + 1 < args.Length && args[i] == "--mode")
+                {
+                    mode = args[i + 1];
+                    if (mode != "compute" && mode != "handoff-layout") throw new ArgumentException("Unknown worker benchmark mode.");
+                    continue;
+                }
                 if (i + 1 == args.Length || !int.TryParse(args[i + 1], out int value))
                     throw new ArgumentException("Use --bodies 1..4096 and --samples 1..10000.");
                 if (args[i] == "--bodies" && value >= 1 && value <= SimulationBatch.MaxBodies) bodies = value;
                 else if (args[i] == "--samples" && value >= 1 && value <= 10000) samples = value;
                 else throw new ArgumentException("Invalid bodies/samples option or bound.");
+            }
+            if (mode == "handoff-layout")
+            {
+                Console.WriteLine(JsonSerializer.Serialize(HandoffComparison.Measure(bodies, samples),
+                    new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+                return 0;
             }
             var results = new List<object>();
             var serial = new ConstantForceBackend();

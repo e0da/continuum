@@ -21,6 +21,8 @@ from string import Template
 TEMPLATE_VERSION = "mission-v1"
 METADATA_SCHEMA = "ksp-continuum-chronicle-metadata/v1"
 MANIFEST_SCHEMA = "ksp-continuum-chronicle-manifest/v1"
+PLAYBACK_SCHEMA = "ksp-continuum-telemetry-playback/v1"
+PLAYBACK_REPORT = "telemetry.html"
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_PATH = ROOT / "templates" / "chronicle" / (TEMPLATE_VERSION + ".html")
 MAX_TEXT_BYTES = 16 * 1024 * 1024
@@ -31,6 +33,7 @@ MAX_INPUT_BYTES = 256 * 1024 * 1024
 MAX_SEGMENT_SAMPLES = 2000
 MAX_SCREENSHOTS = 64
 MAX_MEDIA_BYTES = 16 * 1024 * 1024
+MAX_PLAYBACK_BYTES = 128 * 1024 * 1024
 SAFE_ID = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$")
 SAFE_ATTEMPT_ID = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*-A[0-9]{3,6}$")
 SAFE_CHECKPOINT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
@@ -82,6 +85,15 @@ def finite_number(value, label):
     if not math.isfinite(number):
         raise ChronicleError("nonfinite number in " + label)
     return number
+
+
+def contains_private_absolute_path(value):
+    boundary = r"(?:^|[\s'\"(=:,\[])"
+    unix_path = re.search(boundary + r"/(?![/.])[^\s'\"]+", value)
+    windows_drive = re.search(boundary + r"[A-Za-z]:[\\/][^\s'\"]+", value)
+    windows_unc = re.search(boundary + r"\\\\[^\\\s'\"]+\\[^\s'\"]+", value)
+    windows_root = re.search(boundary + r"\\(?!\\)[^\\\s'\"]+\\[^\s'\"]+", value)
+    return bool(unix_path or windows_drive or windows_unc or windows_root or "file://" in value)
 
 
 def safe_text(value, label, maximum):
@@ -451,6 +463,54 @@ def source_entry(path, logical):
     return {"path": logical, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
 
 
+def render_telemetry_playback(source, title):
+    import telemetry_player
+
+    try:
+        data = telemetry_player.capture(source)
+    except (telemetry_player.ChronicleError, UnicodeError, csv.Error) as error:
+        raise ChronicleError("telemetry playback source is invalid: " + str(error)) from error
+    if any(contains_private_absolute_path(row[field])
+           for row in data["rows"] for field in ("phase", "body", "situation", "autopilot")
+           if row[field]):
+        raise ChronicleError("telemetry playback contains a private absolute path")
+    try:
+        return data, telemetry_player.render(data, title, back_to_report=True)
+    except telemetry_player.ChronicleError as error:
+        raise ChronicleError("telemetry playback rendering failed: " + str(error)) from error
+
+
+def parse_telemetry_playback(manifest, report_folder):
+    descriptor = manifest.get("telemetryPlayback")
+    if descriptor is None:
+        return None
+    expected = {"schema", "report", "rows", "sourceSha256", "sha256"}
+    if not isinstance(descriptor, dict) or set(descriptor) != expected:
+        raise ChronicleError("telemetry playback descriptor is invalid")
+    if descriptor["schema"] != PLAYBACK_SCHEMA or descriptor["report"] != PLAYBACK_REPORT:
+        raise ChronicleError("telemetry playback descriptor is unsupported")
+    rows = descriptor["rows"]
+    if not isinstance(rows, int) or isinstance(rows, bool) or rows < 1 or rows > MAX_ROWS:
+        raise ChronicleError("telemetry playback row count is invalid")
+    for key in ("sourceSha256", "sha256"):
+        if not isinstance(descriptor[key], str) or not SAFE_SHA256.fullmatch(descriptor[key]):
+            raise ChronicleError("telemetry playback digest is invalid")
+    sources = manifest.get("sources")
+    if not isinstance(sources, list):
+        raise ChronicleError("telemetry playback has no source manifest")
+    mission_sources = [item for item in sources if isinstance(item, dict)
+                       and item.get("path") == "mission/mission.csv"]
+    if len(mission_sources) != 1 or mission_sources[0].get("sha256") != descriptor["sourceSha256"]:
+        raise ChronicleError("telemetry playback source hash does not match mission telemetry")
+    path = report_folder / PLAYBACK_REPORT
+    content = bounded_bytes(path, MAX_PLAYBACK_BYTES)
+    if hashlib.sha256(content).hexdigest() != descriptor["sha256"]:
+        raise ChronicleError("telemetry playback hash does not match its manifest")
+    result = dict(descriptor)
+    result["path"] = path
+    return result
+
+
 def collect_input_summary(inputs, sources):
     if inputs is None:
         return {"included": False, "segments": 0, "samples": 0, "keys": 0, "bytes": 0, "events": 0, "observations": 0}
@@ -666,6 +726,14 @@ def generate(mission, inputs, output, metadata_path):
         source_sessions["inputs"] = inputs.name
     input_summary = collect_input_summary(inputs, sources)
     generated_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    playback_data, playback_page = render_telemetry_playback(
+        mission / "mission.csv", metadata["attempt_alias"] + " · " + metadata["name"])
+    if len(playback_data["rows"]) != len(rows):
+        raise ChronicleError("telemetry playback row count disagrees with the mission report")
+    mission_csv_sources = [item for item in sources if item["path"] == "mission/mission.csv"]
+    if (len(mission_csv_sources) != 1
+            or playback_data["sourceSha256"] != mission_csv_sources[0]["sha256"]):
+        raise ChronicleError("telemetry playback source changed while generating the report")
     page = render_page(
         metadata, mission_values, lineage, rows, events, clock_view, captures,
         input_summary, source_sessions, generated_utc)
@@ -690,11 +758,19 @@ def generate(mission, inputs, output, metadata_path):
             **({"width": item["width"], "height": item["height"]}
                if item["state"] in ("confirmed", "below-required-resolution") else {})
         ) for item in captures],
+        "telemetryPlayback": {
+            "schema": PLAYBACK_SCHEMA,
+            "report": PLAYBACK_REPORT,
+            "rows": len(playback_data["rows"]),
+            "sourceSha256": playback_data["sourceSha256"],
+            "sha256": hashlib.sha256(playback_page.encode("utf-8")).hexdigest(),
+        },
     }
 
     staging = Path(tempfile.mkdtemp(prefix=".chronicle-", dir=str(output.parent)))
     try:
         (staging / "index.html").write_text(page, encoding="utf-8")
+        (staging / PLAYBACK_REPORT).write_text(playback_page, encoding="utf-8")
         confirmed = [item for item in captures if item["state"] in ("confirmed", "below-required-resolution")]
         if confirmed:
             media = staging / "media"

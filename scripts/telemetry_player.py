@@ -14,6 +14,7 @@ from chronicle import ChronicleError, EXPECTED_TELEMETRY_HEADER, MAX_ROWS, MAX_T
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS = {'wall_s': 'wall', 'ut_s': 'ut', 'altitude_m': 'altitude',
           'surface_speed_mps': 'speed', 'throttle': 'throttle', 'stage': 'stage', 'parts': 'parts'}
+MAX_OUTPUT_BYTES = 128 * 1024 * 1024
 
 
 def capture(path):
@@ -58,6 +59,26 @@ def capture(path):
             'rows': rows, 'scope': 'recorded observations only; no state reconstruction or resimulation'}
 
 
+def render(data, title, back_to_report=False):
+    maximum_title = 227 if back_to_report else 160
+    if not isinstance(title, str) or not title.strip() or len(title) > maximum_title:
+        raise ChronicleError('Title must contain 1..{} characters'.format(maximum_title))
+    encoded = (json.dumps(data, allow_nan=False, separators=(',', ':'))
+               .replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e'))
+    template = (ROOT / 'templates/telemetry-player.html').read_text()
+    if template.count('<!--DATA-->') != 1 or template.count('<!--TITLE-->') < 1:
+        raise ChronicleError('Telemetry player template placeholders are invalid')
+    page = template.replace('<!--TITLE-->', html.escape(title)).replace('<!--DATA-->', encoded)
+    if back_to_report:
+        backlink = '<nav aria-label="Mission navigation"><a href="index.html">Back to mission report</a></nav>'
+        if page.count('<body>') != 1:
+            raise ChronicleError('Telemetry player template has no unique body')
+        page = page.replace('<body>', '<body>' + backlink, 1)
+    if len(page.encode('utf-8')) > MAX_OUTPUT_BYTES:
+        raise ChronicleError('Generated telemetry playback exceeds size limit')
+    return page
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
@@ -65,12 +86,8 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     try:
-        if not args.title.strip() or len(args.title) > 160:
-            raise ChronicleError('Title must contain 1..160 characters')
         data = capture(args.source)
-        encoded = json.dumps(data, allow_nan=False, separators=(',', ':')).replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e')
-        template = (ROOT / 'templates/telemetry-player.html').read_text()
-        page = template.replace('<!--TITLE-->', html.escape(args.title)).replace('<!--DATA-->', encoded)
+        page = render(data, args.title)
         with args.output.open('x', encoding='utf-8') as output:
             output.write(page)
         print('Wrote ' + str(len(data['rows'])) + ' recorded observations to ' + str(args.output))

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using KspContinuum;
 
-static class Program
+static partial class Program
 {
     static int assertions;
     static void Check(bool value, string message) { assertions++; if (!value) throw new Exception(message); }
@@ -61,6 +61,7 @@ static class Program
     }
     static void Main()
     {
+        TestColumns();
         var source = new[] { Body() };
         var batch = new SimulationBatch(Stamp(), 2, source);
         source[0] = Body(99);

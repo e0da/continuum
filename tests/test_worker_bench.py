@@ -36,6 +36,32 @@ class WorkerBenchTests(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertIn('bodies', run.stderr.lower())
 
+    def test_column_handoff_has_real_worker_evidence_and_bounded_allocation(self):
+        run = subprocess.run(
+            ['dotnet', 'run', '--project', str(PROJECT), '-c', 'Release', '--',
+             '--mode', 'handoff-layout', '--bodies', '32', '--samples', '4'],
+            capture_output=True, text=True, cwd=ROOT, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        report = json.loads(run.stdout)
+        self.assertEqual(report['schema'], 'ksp-continuum-handoff-layout/v1')
+        self.assertFalse(report['stockPhysicsSpeedupMeasured'])
+        self.assertEqual(len(report['orders']), 4)
+        self.assertEqual({r['layout'] for r in report['results']}, {'object', 'columns'})
+        for order in report['orders']:
+            self.assertEqual(set(order), {'object', 'columns'})
+        results = {r['layout']: r for r in report['results']}
+        self.assertEqual(results['object']['outputSha256'], results['columns']['outputSha256'])
+        for r in results.values():
+            self.assertEqual(len(r['samples']), 4)
+            for sample in r['samples']:
+                self.assertGreaterEqual(sample['endToEndMilliseconds'], 0)
+                self.assertGreater(sample['callerAllocatedBytes'], 0)
+                self.assertGreater(sample['backendAllocatedBytes'], 0)
+                self.assertEqual(sample['maxPositionError'], 0)
+                self.assertEqual(sample['maxVelocityError'], 0)
+        self.assertLess(results['columns']['samples'][0]['backendAllocatedBytes'],
+                        results['object']['samples'][0]['backendAllocatedBytes'])
+
 
 if __name__ == '__main__':
     unittest.main()
