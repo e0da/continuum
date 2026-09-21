@@ -128,6 +128,11 @@ static class Program
         Check(!scheduler.IsCurrent(previous),"identical publication also invalidates prior recommendations");
         immutable=false;try{((IList<int>)previous.Groups[0].ObjectIds)[0]=999;}catch(NotSupportedException){immutable=true;}
         Check(immutable,"group membership immutable");
+        var identity=new TubeOrientation(0,0,0,1);
+        var expiredUnknown=new WorldlineTube(1,0,0,"inertial",new Vec(),new Vec(),new Vec(),new Vec(1,1,1),identity,0,0,0,null,1,false);
+        var currentKnown=new WorldlineTube(2,0,0,"inertial",new Vec(10,0,0),new Vec(),new Vec(),new Vec(1,1,1),identity,0,0,0,0,10);
+        var tubeScreen=WorldlineTubeScreener.Screen(expiredUnknown,currentKnown,2,new EncounterBudget());
+        Check(tubeScreen.Status==WorldlineTubeStatus.Expired,"expiry takes precedence over unknown bounds and failed predicates");
         CurvedTests();
         Console.WriteLine("Encounter: "+assertions+" assertions passed.");
     }
