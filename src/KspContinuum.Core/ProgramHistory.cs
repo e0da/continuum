@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -91,9 +90,9 @@ namespace KspContinuum
             var bytes = Encoding.UTF8.GetBytes(value); WriteInt32(stream, bytes.Length); stream.Write(bytes, 0, bytes.Length);
         }
         static void WriteInt32(Stream stream, int value)
-        { var bytes = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(bytes, value); stream.Write(bytes, 0, bytes.Length); }
+        { var bytes = new[] { (byte)value, (byte)(value >> 8), (byte)(value >> 16), (byte)(value >> 24) }; stream.Write(bytes, 0, bytes.Length); }
         static void WriteInt64(Stream stream, long value)
-        { var bytes = new byte[8]; BinaryPrimitives.WriteInt64LittleEndian(bytes, value); stream.Write(bytes, 0, bytes.Length); }
+        { var bytes = new byte[8]; for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(value >> (i * 8)); stream.Write(bytes, 0, bytes.Length); }
         static void WriteDouble(Stream stream, double value)
         { WriteInt64(stream, BitConverter.DoubleToInt64Bits(value == 0 ? 0 : value)); }
     }

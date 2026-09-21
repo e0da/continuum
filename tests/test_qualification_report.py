@@ -233,6 +233,27 @@ class QualificationReportTests(unittest.TestCase):
                        for name in ("PhysicsFixedUpdate", "ScriptRunBehaviourFixedUpdate")],
         }
 
+    def loop_report_v2(self):
+        report = self.loop_report()
+        report["schema"] = "ksp-continuum-playerloop/v2"
+        report["scopes"] = []
+        definitions = (
+            ("UnityEngine.PlayerLoop.FixedUpdate", "fixed", "contains-fixed-children"),
+            ("UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate", "fixed", "contained-by-fixed"),
+            ("UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate", "fixed", "contained-by-fixed"),
+            ("UnityEngine.PlayerLoop.Update+ScriptRunBehaviourUpdate", "frame", "separate-frame-phase"),
+            ("UnityEngine.PlayerLoop.PreLateUpdate+ScriptRunBehaviourLateUpdate", "frame", "separate-frame-phase"),
+        )
+        for name, domain, overlap in definitions:
+            report["scopes"].append({
+                "name": name, "timeDomain": domain, "overlap": overlap,
+                "status": "observed", "droppedSamples": 0, "sequenceErrors": 0,
+                "samples": [{"frame": 1, "fixedTimeSeconds": .02,
+                             "fixedDeltaSeconds": .02, "elapsedTicks": 1000}],
+                "milliseconds": None,
+            })
+        return report
+
     def test_playerloop_samples_are_separate_from_frame_intervals(self):
         report = self.marker_report(0)
         report["playerLoop"] = self.loop_report()
@@ -249,6 +270,67 @@ class QualificationReportTests(unittest.TestCase):
         self.assertIn("Elapsed wall time, not exclusive CPU time", page)
         self.assertNotIn("untrusted raw prose", page)
         self.assertNotIn("/private/runtime", page)
+
+    def test_playerloop_v2_requires_named_hierarchy_and_warns_about_overlap(self):
+        report = self.marker_report(0)
+        report["playerLoop"] = self.loop_report_v2()
+        (self.source / "coast-markers.json").write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        loop = json.loads((self.output / "summary.json").read_text())["phases"][0]["profiler"]["playerLoop"]
+        self.assertEqual("ksp-continuum-playerloop/v2", loop["schema"])
+        self.assertEqual(5, len(loop["scopes"]))
+        self.assertTrue(loop["hasOverlappingScopes"])
+        self.assertIn("Overlapping scopes", (self.output / "index.html").read_text())
+
+    def test_playerloop_v2_rejects_wrong_domain_overlap_or_scope_set(self):
+        mutations = (
+            lambda loop: loop["scopes"][0].update(timeDomain="frame"),
+            lambda loop: loop["scopes"][1].update(overlap="separate-frame-phase"),
+            lambda loop: loop["scopes"][4].update(name="UnityEngine.PlayerLoop.Update"),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                self.output = self.root / ("bad-v2-loop-%d" % index)
+                report = self.marker_report(0)
+                report["playerLoop"] = self.loop_report_v2()
+                mutate(report["playerLoop"])
+                (self.source / "coast-markers.json").write_text(json.dumps(report))
+                result = self.run_report()
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(self.output.exists())
+
+    def test_structural_counts_summarize_observed_ranges_and_unavailable_frames(self):
+        report = self.marker_report(0)
+        report["frames"][0].update(rigidbodies=12, joints=11, colliders=30, loadedVessels=3)
+        report["frames"][1].update(rigidbodies=-1, joints=-1, colliders=32, loadedVessels=4)
+        (self.source / "coast-markers.json").write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        counts = json.loads((self.output / "summary.json").read_text())["phases"][0]["profiler"]["frameContexts"]["structuralCounts"]
+        self.assertEqual({"observedFrames": 1, "unavailableFrames": 1, "minimum": 12, "maximum": 12},
+                         counts["rigidbodies"])
+        self.assertEqual(32, counts["colliders"]["maximum"])
+        page = (self.output / "index.html").read_text()
+        self.assertIn("Structural count ranges", page)
+        self.assertIn("rigidbodies: 12-12 (1 observed, 1 unavailable)", page)
+
+    def test_structural_counts_require_complete_bounded_set(self):
+        mutations = (
+            lambda frame: frame.update(rigidbodies=1),
+            lambda frame: frame.update(rigidbodies=-2, joints=1, colliders=1, loadedVessels=1),
+            lambda frame: frame.update(rigidbodies=1.0, joints=1, colliders=1, loadedVessels=1),
+            lambda frame: frame.update(rigidbodies=1, joints=1, colliders=1, loadedVessels=1),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                self.output = self.root / ("bad-structure-%d" % index)
+                report = self.marker_report(0)
+                mutate(report["frames"][0])
+                (self.source / "coast-markers.json").write_text(json.dumps(report))
+                result = self.run_report()
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(self.output.exists())
 
     def test_invalidated_loop_never_exposes_usable_timing_summary(self):
         report = self.marker_report(0)

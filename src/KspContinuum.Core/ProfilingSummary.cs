@@ -17,6 +17,7 @@ namespace KspContinuum
     [Serializable] public sealed class ProfileFrame
     {
         public int contextFrame, markerFrame, observedFrame, parts;
+        public int rigidbodies, joints, colliders, loadedVessels;
         public int renderedFrame, screenWidth, screenHeight;
         public long managedBytes;
         public int gcGeneration0, gcGeneration1, gcGeneration2;

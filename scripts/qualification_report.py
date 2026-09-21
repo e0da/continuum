@@ -201,10 +201,24 @@ def parse_profiler(data, phase):
     throttle = {"nearZero": 0, "positive": 0, "other": 0, "unknown": 0}
     packed = {"true": 0, "false": 0, "unknown": 0}
     bodies, situations = {}, {}
+    structural_names = ("rigidbodies", "joints", "colliders", "loadedVessels")
+    structural = {name: {"values": [], "unavailableFrames": 0} for name in structural_names}
+    structural_frames = 0
     aligned = 0
     for frame in frames:
         if not isinstance(frame, dict):
             raise ReportError("profiler frame is invalid")
+        structural_presence = [name in frame for name in structural_names]
+        if any(structural_presence) and not all(structural_presence):
+            raise ReportError("structural frame fields must be a complete set")
+        if all(structural_presence):
+            structural_frames += 1
+            for name in structural_names:
+                value = integer(frame[name], "frame " + name, -1, 2 ** 31 - 1)
+                if value == -1:
+                    structural[name]["unavailableFrames"] += 1
+                else:
+                    structural[name]["values"].append(value)
         intervals.append(finite(frame.get("wallMilliseconds"), "frame interval", 0, 1e9))
         context_aligned = frame.get("contextAligned")
         if not isinstance(context_aligned, bool):
@@ -228,6 +242,8 @@ def parse_profiler(data, phase):
             if item is not None:
                 output[item] = output.get(item, 0) + 1
     misaligned = integer(data.get("contextMisalignedFrames"), "misaligned profiler frames", 0, completed)
+    if structural_frames not in (0, completed):
+        raise ReportError("structural frame fields must be present for every frame or none")
     if misaligned != completed - aligned:
         raise ReportError("profiler alignment count does not match frames")
     parse_source_distribution(data.get("wallIntervals"), "source frame interval", allow_null=completed == 0)
@@ -283,11 +299,23 @@ def parse_profiler(data, phase):
     player_loop = parse_player_loop(data.get("playerLoop"))
     if player_loop and player_loop["cleanupStatus"] == "cleanup-error" and status != "cleanup-error":
         raise ReportError("player-loop cleanup failure must propagate to profiler cleanup status")
+    structural_summary = None
+    if structural_frames:
+        structural_summary = {}
+        for name in structural_names:
+            values = structural[name]["values"]
+            structural_summary[name] = {
+                "observedFrames": len(values),
+                "unavailableFrames": structural[name]["unavailableFrames"],
+                "minimum": min(values) if values else None,
+                "maximum": max(values) if values else None,
+            }
     return {
         "status": status, "requestedFrames": requested, "completedFrames": completed,
         "contextMisalignedFrames": misaligned, "frameIntervalsMilliseconds": distribution(intervals),
         "frameContexts": {"throttleCommand": throttle, "packed": packed,
-                          "bodies": bodies, "situations": situations},
+                          "bodies": bodies, "situations": situations,
+                          "structuralCounts": structural_summary},
         "markers": markers, "playerLoop": player_loop, "partForces": part_forces,
     }
 
@@ -434,8 +462,10 @@ def part_forces_html(capture):
 def parse_player_loop(data):
     if data is None:
         return None
-    if not isinstance(data, dict) or data.get("schema") != "ksp-continuum-playerloop/v1":
+    if not isinstance(data, dict) or data.get("schema") not in (
+            "ksp-continuum-playerloop/v1", "ksp-continuum-playerloop/v2"):
         raise ReportError("unsupported player-loop contract")
+    schema = data["schema"]
     status, integrity, cleanup = (data.get(key) for key in ("status", "integrityStatus", "cleanupStatus"))
     if (status not in ("unavailable", "observed", "no-samples", "invalid")
             or integrity not in ("verified-at-boundaries", "invalidated", "not-installed")
@@ -446,18 +476,34 @@ def parse_player_loop(data):
         raise ReportError("player-loop timing lacks intact boundary and cleanup evidence")
     frequency = integer(data.get("clockFrequency"), "player-loop clock frequency", 1, 10 ** 12)
     raw_scopes = data.get("scopes")
-    if not isinstance(raw_scopes, list) or len(raw_scopes) != 2:
+    expected = {
+        "ksp-continuum-playerloop/v1": {
+            "UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate": None,
+            "UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate": None,
+        },
+        "ksp-continuum-playerloop/v2": {
+            "UnityEngine.PlayerLoop.FixedUpdate": ("fixed", "contains-fixed-children"),
+            "UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate": ("fixed", "contained-by-fixed"),
+            "UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate": ("fixed", "contained-by-fixed"),
+            "UnityEngine.PlayerLoop.Update+ScriptRunBehaviourUpdate": ("frame", "separate-frame-phase"),
+            "UnityEngine.PlayerLoop.PreLateUpdate+ScriptRunBehaviourLateUpdate": ("frame", "separate-frame-phase"),
+        },
+    }[schema]
+    if not isinstance(raw_scopes, list) or len(raw_scopes) != len(expected):
         raise ReportError("invalid player-loop scope list")
     scopes, names = [], set()
-    allowed_names = {"UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate",
-                     "UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate"}
     for scope in raw_scopes:
         if not isinstance(scope, dict):
             raise ReportError("invalid player-loop scope")
         name = scope.get("name")
-        if name not in allowed_names or name in names:
+        if name not in expected or name in names:
             raise ReportError("unsupported or duplicate player-loop scope")
         names.add(name)
+        time_domain = overlap = None
+        if schema.endswith("/v2"):
+            time_domain, overlap = scope.get("timeDomain"), scope.get("overlap")
+            if (time_domain, overlap) != expected[name]:
+                raise ReportError("player-loop scope time domain or overlap is invalid")
         scope_status = scope.get("status")
         if scope_status not in ("observed", "no-samples", "invalid"):
             raise ReportError("invalid player-loop scope status")
@@ -481,22 +527,26 @@ def parse_player_loop(data):
                 raise ReportError("loop fixed delta must be positive")
             ticks = integer(sample.get("elapsedTicks"), "loop elapsed ticks", 0, 2 ** 63 - 1)
             durations.append(ticks * 1000.0 / frequency)
-        scopes.append({"name": name, "status": scope_status, "sampleCount": len(samples),
+        scopes.append({"name": name, "timeDomain": time_domain, "overlap": overlap,
+                       "status": scope_status, "sampleCount": len(samples),
                        "sampledFrames": len(frames), "droppedSamples": dropped,
                        "sequenceErrors": errors,
                        "milliseconds": distribution(durations) if usable else None})
     invalid_scopes = sum(scope["status"] == "invalid" for scope in scopes)
-    if status == "invalid" and (integrity != "invalidated" or cleanup == "not-installed" or invalid_scopes != 2):
+    if status == "invalid" and (integrity != "invalidated" or cleanup == "not-installed" or invalid_scopes != len(expected)):
         raise ReportError("invalid player-loop capture lacks invalidation evidence")
     if status == "unavailable":
         expected_integrity = "not-installed" if cleanup == "not-installed" else "invalidated"
-        if integrity != expected_integrity or invalid_scopes != 2 or any(scope["sampleCount"] for scope in scopes):
+        if integrity != expected_integrity or invalid_scopes != len(expected) or any(scope["sampleCount"] for scope in scopes):
             raise ReportError("unavailable player-loop capture contradicts lifecycle evidence")
     any_samples = any(scope["sampleCount"] for scope in scopes)
     if (status == "observed" and not any_samples) or (status == "no-samples" and any_samples):
         raise ReportError("player-loop status contradicts observations")
-    return {"status": status, "integrityStatus": integrity, "cleanupStatus": cleanup,
-            "clockFrequency": frequency, "scopes": scopes}
+    if names != set(expected):
+        raise ReportError("player-loop scope set is incomplete")
+    return {"schema": schema, "status": status, "integrityStatus": integrity,
+            "cleanupStatus": cleanup, "clockFrequency": frequency,
+            "hasOverlappingScopes": schema.endswith("/v2"), "scopes": scopes}
 
 
 def player_loop_html(loop):
@@ -508,6 +558,10 @@ def player_loop_html(loop):
     content += ("<p>Elapsed wall time, not exclusive CPU time. These brackets include waits and callback overhead. "
                 "The install-to-cleanup window includes warmup; multiple fixed steps can share one rendered frame. "
                 "Do not sum these with Recorder markers or infer a physics percentage.</p>")
+    if loop.get("hasOverlappingScopes"):
+        content += ("<p><strong>Overlapping scopes:</strong> FixedUpdate contains its measured physics and "
+                    "script children. Do not add parent and child durations. Update and LateUpdate are "
+                    "separate rendered-frame phases.</p>")
     if loop["status"] not in ("observed", "no-samples"):
         content += "<p>Timing summaries withheld: capture integrity or availability is unqualified.</p>"
     content += "<ul>" + "".join(
@@ -769,6 +823,21 @@ def dist_text(value):
         fmt(value["minimum"]), fmt(value["maximum"]))
 
 
+def structural_text(value):
+    if value is None:
+        return "No structural census recorded"
+    labels = (("rigidbodies", "rigidbodies"), ("joints", "joints"),
+              ("colliders", "colliders"), ("loadedVessels", "loaded vessels"))
+    items = []
+    for key, label in labels:
+        item = value[key]
+        observed = ("{}-{}".format(item["minimum"], item["maximum"])
+                    if item["minimum"] is not None else "unavailable")
+        items.append("{}: {} ({} observed, {} unavailable)".format(
+            label, observed, item["observedFrames"], item["unavailableFrames"]))
+    return "; ".join(items)
+
+
 def render(summary):
     shutdown = summary.get("shutdown")
     if shutdown is None:
@@ -817,6 +886,7 @@ def render(summary):
       <dt>Aligned / misaligned</dt><dd>{aligned} / {misaligned}</dd>
       <dt>Throttle near-zero / positive / other / unknown</dt><dd>{tn} / {tp} / {to} / {tu}</dd>
       <dt>Packed true / false / unknown</dt><dd>{pt} / {pf} / {pu}</dd>
+      <dt>Structural count ranges</dt><dd>{structural}</dd>
       <dt>Bodies</dt><dd>{bodies}</dd><dt>Situations</dt><dd>{situations}</dd>
     </dl></article>
     <article><h3>Shadow transport</h3><dl>
@@ -842,6 +912,7 @@ def render(summary):
             tp=contexts["throttleCommand"]["positive"], to=contexts["throttleCommand"]["other"],
             tu=contexts["throttleCommand"]["unknown"], pt=contexts["packed"]["true"],
             pf=contexts["packed"]["false"], pu=contexts["packed"]["unknown"], bodies=bodies,
+            structural=html.escape(structural_text(contexts.get("structuralCounts"))),
             situations=situations, shadow_status=html.escape(shadow["status"].title()),
             submitted=shadow["submitted"], accepted=shadow["accepted"], stale=shadow["stale"],
             abandoned=shadow["abandoned"], wall=fmt(shadow["wallSeconds"]),
