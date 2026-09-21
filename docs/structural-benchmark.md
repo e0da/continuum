@@ -1,5 +1,7 @@
 # Native structural baseline
 
+The same pinned build also runs the [contact checkpoint experiment](contact-checkpoints.md), which compares uninterrupted simulation, full state restoration and cold reconstruction of a contacting assembly.
+
 This standalone experiment calls Jolt's synchronous `PhysicsSystem::Update` on the host CPU. It measures a compliant two-body oscillator against analytic motion and checks a sphere dropping onto a floor. It does not load KSP, implement a native game bridge, or replace stock physics. Box3D, rocket chains, rotational compliance, docking and breakup remain later experiments.
 
 ## Build and run
