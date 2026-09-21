@@ -35,6 +35,62 @@ class FieldGravityTests(unittest.TestCase):
         force, _ = self.model.field([[3.173, 2.291, 4.867]], [3.0], 17, .6)
         self.assertLess(math.sqrt(sum(x*x for x in force[0])), 1e-10*3/.6**2)
 
+    def test_near_pair_replacement_matches_independent_analytic_oracle(self):
+        positions, masses = [[3.173, 3.619, 3.883], [3.351, 3.781, 4.009]], [2, 5]
+        actual, timing = self.model.corrected(positions, masses, 17, .6)
+        separation = math.dist(*positions)
+        for axis in range(3):
+            expected = masses[1]*(positions[1][axis]-positions[0][axis])/(separation**2+.6**2)**1.5
+            self.assertAlmostEqual(actual[0][axis], expected, places=12)
+            self.assertAlmostEqual(actual[1][axis], -masses[0]/masses[1]*expected, places=12)
+        self.assertEqual(timing['correctedPairs'], 1)
+
+    def test_near_correction_leaves_isolated_and_far_mesh_outputs_unchanged(self):
+        for positions, masses in (([[3.173, 2.291, 4.867]], [3]),
+                                   ([[3.173, 3.619, 3.883], [4.431, 4.107, 4.557]], [2, 5])):
+            baseline, _ = self.model.field(positions, masses, 17, .6)
+            corrected, timing = self.model.corrected(positions, masses, 17, .6)
+            self.assertEqual(baseline, corrected)
+            self.assertEqual(timing['correctedPairs'], 0)
+
+    def test_near_correction_mixed_pairs_no_double_count_and_cutoff(self):
+        positions = [[3.173, 3.619, 3.883], [3.351, 3.781, 4.009], [6.5, 6.1, 6.9]]
+        masses = [2, 5, 3]
+        actual, timing = self.model.corrected(positions, masses, 17, .6)
+        full_mesh, _ = self.model.field(positions, masses, 17, .6)
+        near_mesh, _ = self.model.field(positions[:2], masses[:2], 17, .6)
+        near_direct, _ = self.model.direct(positions[:2], masses[:2], .6)
+        for i in range(3):
+            for axis in range(3):
+                expected = full_mesh[i][axis] + (near_direct[i][axis]-near_mesh[i][axis] if i < 2 else 0)
+                self.assertAlmostEqual(actual[i][axis], expected, places=12)
+        self.assertEqual(timing['correctedPairs'], 1)
+        for distance, count in ((1.199999, 1), (1.200001, 0)):
+            _, stats = self.model.corrected([[3, 3, 3], [3+distance, 3, 3]], [1, 1], 17, .6)
+            self.assertEqual(stats['correctedPairs'], count)
+
+    def test_near_field_cli_retains_mesh_failures_and_reports_its_own_decision(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'near.json'
+            result = subprocess.run([sys.executable, str(SCRIPT), '--near-field', '--grids', '17',
+                                     '--samples', '1', '--output', str(path)], capture_output=True, text=True, timeout=90)
+            self.assertIn(result.returncode, (0, 2), result.stderr)
+            report = json.loads(path.read_text())
+            self.assertEqual(report['selectedStrategy'], 'mesh-with-near-pair-replacement')
+            self.assertEqual(report['nearField']['cutoff'], 1.2)
+            self.assertFalse(report['finestGridQualified'])
+            cluster = next(r for r in report['rows'] if r['case'] == 'cluster')
+            self.assertFalse(cluster['qualified'])
+            self.assertTrue(cluster['correctedQualified'])
+            self.assertGreater(cluster['samples'][0]['corrected']['correctedPairs'], 0)
+            self.assertGreater(cluster['samples'][0]['corrected']['totalSeconds'], 0)
+            outside = next(r for r in report['rows'] if r['case'] == 'cutoff_outside')
+            self.assertFalse(outside['correctedQualified'])
+            self.assertFalse(report['correctedAllRequestedGridsQualified'])
+            edge = report['cutoffAdversary'][0]
+            self.assertGreater(edge['correctedAccelerationDifference'], 100*edge['directAccelerationDifference'])
+            self.assertEqual(result.returncode, 0 if report['correctedFinestGridQualified'] else 2)
+
     def test_offgrid_pair_refines_with_fixed_softening(self):
         p, m, epsilon = [[3.173, 3.619, 3.883], [4.431, 4.107, 4.557]], [2, 5], .6
         reference, _ = self.model.direct(p, m, epsilon)

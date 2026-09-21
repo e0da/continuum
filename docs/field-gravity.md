@@ -2,7 +2,7 @@
 
 This runnable experiment compares a padded-grid field candidate against direct softened Newtonian forces. Both use the same normalized units, G=1, Plummer softening ε=0.6, isolated boundary model, masses, and body positions. It measures a single force evaluation, including capture, grid construction, convolution and sampling. It has no trajectory integration or KSP bridge.
 
-The first local run **did not qualify the full fixture**. At the finest 65³ physical grid, the dense cluster had 5.833% normalized RMS acceleration error, exceeding the predeclared 5% gate. Sparse and rotated-pair cases passed at that resolution. This is a retained approximation limit, not a reason to relax the gate.
+The first local mesh-only run **did not qualify the full fixture**. At the finest 65³ physical grid, the dense cluster had 5.833% normalized RMS acceleration error, exceeding the predeclared 5% gate. Sparse and rotated-pair cases passed at that resolution. This is a retained approximation limit, not a reason to relax the gate. The optional near-field experiment below tests a correction alongside this unchanged baseline.
 
 ## Run and reproduce
 
@@ -15,7 +15,7 @@ artifacts/field-gravity-venv/bin/python -B -m unittest tests.test_field_gravity 
 artifacts/field-gravity-venv/bin/python -B tools/field-gravity/run.py --output artifacts/field-gravity-new.json
 ```
 
-The output path must be new. Exit 0 means every case and translation check passes at the finest requested grid; exit 2 means a complete report was written but qualification failed; exit 1 means invalid setup or an output error. All requested resolutions and failures remain in the report. Defaults are grids 17,33,65 and three samples per case; `--grids 17 --samples 1` is a short diagnostic. The CLI accepts only ascending subsets of those grids and 1–5 samples. Six optional tests skip explicitly in environments without NumPy; run them in the pinned environment for actual evidence.
+The output path must be new. Exit 0 means every case and translation check for the selected strategy passes at the finest requested grid; exit 2 means a complete report was written but qualification failed; exit 1 means invalid setup or an output error. All requested resolutions and failures remain in the report. Defaults are grids 17,33,65 and three samples per case; `--grids 17 --samples 1` is a short diagnostic. The CLI accepts only ascending subsets of those grids and 1–5 samples. Ten optional tests skip explicitly in environments without NumPy; run them in the pinned environment for actual evidence.
 
 ## ASC model and physical contract
 
@@ -77,4 +77,39 @@ In the local three-sample macOS arm64 run, the passing sparse 33³ case took med
 
 The largest padded grid is 130³ (2,197,000 real cells). Bodies, grid sizes and repetitions are bounded before allocation. Force components are solved and sampled sequentially rather than retaining three padded fields. A 512 MiB planning budget covers the fixture’s primary arrays and expected FFT workspace on the tested environment; it is not an enforced process RSS limit or a bound on every NumPy implementation’s internal workspace. A separate local macOS `/usr/bin/time -l` run over all seven 65³ cases recorded 143,278,080 bytes maximum resident set size (about 136.6 MiB), retained in ignored `artifacts/field-gravity-memory.txt`. The API is an experiment surface, not a hardened general service.
 
-This slice excludes integration error, orbital conservation over time, close-encounter handling beyond the chosen fixed softening, adaptive mesh/near-field corrections, contacts, joints, and live stock-force capture. The observed cluster failure is the current reversal condition: this candidate is not qualified as a general force replacement. Any next refinement or near-field correction must keep the same physical law and independently chosen accuracy gates, and account for its total cost.
+The mesh-only slice excludes integration error, orbital conservation over time, close-encounter handling beyond the chosen fixed softening, adaptive mesh corrections, contacts, joints, and live stock-force capture. Its observed cluster failure prevents a general force-replacement claim. The follow-on below keeps the same physical law and accuracy gates while accounting for correction cost.
+
+## Follow-on: local pair replacement
+
+```sh
+artifacts/field-gravity-venv/bin/python -B tools/field-gravity/run.py --near-field --output artifacts/field-gravity-next-new.json
+```
+
+`--near-field` adds one strategy and three adversarial scenes; it does not change the mesh or direct implementations, original seven fixtures, ε, or accuracy gates. The correction selects pairs whose physical separation is at most 2ε=1.2, independent of grid resolution. This cutoff was fixed before the first corrected run. It enumerates every unordered body pair, then evaluates 64 stencil-node pairs for each selected pair. This is a bounded scientific implementation, not a scalable neighbor-search structure.
+
+Let D_ij=(x_j−x_i)/(|x_j−x_i|²+ε²)³ᐟ² be the unit-source-mass exact acceleration, and let M_ij=Σ_a,b w_i,a w_j,b K(x_a−x_b) be the unit-mass interaction already included by the mesh. For each selected pair, the candidate adds m_j(D_ij−M_ij) to a_i and subtracts m_i(D_ij−M_ij) from a_j. Thus it **replaces** the mesh pair contribution instead of adding another copy of gravity. Pair force remains equal and opposite. The candidate computes D and M itself; it never reads the direct oracle's output. Self and far-pair contributions remain unchanged.
+
+If all body pairs are selected, the corrected result reduces algebraically to direct softened forces, up to floating-point differences. A dense-cluster success therefore verifies subtraction/replacement and its cost; it is not evidence of a cheaper or novel direct solver. The extra asymmetric eight-body fixture selects only two of 28 pairs, so it tests a genuinely mixed near/far result. Two more fixtures sit 10⁻⁶ inside and outside the cutoff. Existing translated scenes still exercise grid sensitivity.
+
+The corrected timer starts before a complete fresh mesh solve. It includes repeated capture/stencil setup for correction, all-pairs neighbor search, selected pair replacement, finite-output validation and output conversion. It reuses no previously timed baseline result. `meshTotalSeconds`, `correctionCaptureSeconds`, `neighborSearchSeconds` and `pairCorrectionSeconds` expose costs; `totalSeconds` is the complete corrected call. Default three-sample runs rotate direct/mesh/corrected order so each occupies each position once. Single-sample runs cannot balance order and are diagnostic only.
+
+Report compatibility is explicit: `qualified`, `comparisons`, `fieldAcceleration`, `finestGridQualified` and `allRequestedGridsQualified` still describe the **uncorrected mesh**. The new `correctedQualified`, `correctedComparisons`, `correctedAcceleration`, `correctedFinestGridQualified` and `correctedAllRequestedGridsQualified` describe the correction. CLI exit status selects the corrected finest-grid decision only when `--near-field` is present. Neither decision qualifies trajectories. The uncorrected cluster failure remains in every corrected-mode report.
+
+### Follow-on observations
+
+The independent close-pair analytic test first failed when the candidate merely returned the mesh result: x acceleration 1.3313583255659909 versus expected 3.11493994709756. After pair replacement, all ten tests passed, including mixed-pair no-double-counting, isolated/far outputs unchanged, cutoff selection, report decisions, and retained coarse-grid failures. The original capture, stencil, direct, field, assessment and fixture functions were checked structurally identical to baseline `72028a4`.
+
+The first corrected run contains ten cases × three resolutions × three samples. The fixed gates pass for all corrected cases and translation checks at 65³. They do not pass at every requested resolution: the just-outside-cutoff 17³ case retains 8.847% RMS error.
+
+| Scene | Selected pairs | Corrected RMS at 17³ | At 33³ | At 65³ |
+| --- | ---: | ---: | ---: | ---: |
+| Dense cluster | 496 / 496 | 2.39×10⁻¹⁴% | 3.26×10⁻¹⁴% | 3.90×10⁻¹⁴% |
+| Sparse | 13 / 496 | 2.084% | 0.446% | 0.113% |
+| Mixed near/far | 2 / 28 | 0.0419% | 0.0175% | 0.00319% |
+| Just outside cutoff | 0 / 1 | **8.847%, fails** | 2.994% | 0.0567% |
+
+For the local dense cluster at 17³, medians were 7.06 ms corrected, 2.12 ms mesh-only and 0.85 ms scalar direct. At 65³ they were 91.84, 86.87 and 0.84 ms. Correction resolves this force error at additional cost and is slower than direct evaluation on the measured small scenes. Differences between independently timed calls can be smaller than timing noise; do not infer negative correction overhead by subtracting medians from different calls. Use the per-call phase timings instead.
+
+The hard cutoff is an explicit failure of continuity qualification. Moving the cutoff adversary's separation by 2×10⁻⁶ changes the two-body direct acceleration vector by about 6.24×10⁻⁶ in Euclidean norm. The corrected vector changes by 0.2367, 0.0801 and 0.00151 at 17³, 33³ and 65³. This shows an artificial switching jump even where static force gates pass. `cutoffContinuityQualified` and `trajectoryQualification` remain false. No trajectory or orbital-conservation claim is justified without addressing and independently testing this transition.
+
+The raw receipt is retained locally as ignored `artifacts/field-gravity-next-first.json`. It retains actual inputs, all baseline and corrected force arrays, individual samples and failure rows. This follow-on supports a narrow conclusion: exact local pair replacement can fix the selected cluster's force error, while a mixed near/far scene also passes; its small-case cost and switching artifact prevent a production replacement claim. It does not select a new cutoff, larger softening or relaxed gate based on these results.
