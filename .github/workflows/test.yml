@@ -15,3 +15,11 @@ jobs:
       - run: dotnet run --project tests/KspContinuum.Profiling.Tests -c Release
       - run: dotnet run --project src/KspContinuum.Mission/Tests/Mission.Tests.csproj -c Release
       - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - run: python3 -m unittest discover -s tools/orbit-fixture -p 'test_*.py' -v
+  structural:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S tools/structural-bench -B artifacts/structural-ci -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build artifacts/structural-ci --parallel 2
+      - run: ctest --test-dir artifacts/structural-ci --output-on-failure
