@@ -59,7 +59,7 @@ The committed event ledger has a shared time meaning even if computation runs ah
 
 ## First executable experiment
 
-The [portable encounter planner](encounter-scheduler.md) now implements the translating-sphere planning subset. It leaves integration, curved trajectories and actual solver handoff unqualified.
+The [portable encounter planner](encounter-scheduler.md) now implements the translating-sphere planning subset. It also accepts bounded constant-acceleration curves. The [local handoff fixture](local-handoff.md) now tests atomic in-memory publication and a first-contact sphere response. Actual orbital adapters and game-side solver handoff remain unqualified.
 
 Build a standalone encounter scheduler against an always-fine reference before taking over KSP time. Begin with translating spheres and declared acceleration bounds, then add curved orbital segments. Freeze the following cases: opposing 5 km/s craft, a grazing miss, collision entirely between endpoints, acceleration after prediction, staging debris, an orbit/terrain crossing, origin rebasing, quiet resting probes and a dense debris cloud.
 

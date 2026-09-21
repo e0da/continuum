@@ -12,6 +12,8 @@ jobs:
           dotnet-version: '8.0.x'
       - run: dotnet run --project tests/KspContinuum.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.Worker.Tests -c Release
+      - run: dotnet run --project tests/KspContinuum.Handoff.Tests -c Release
+      - run: dotnet run --project tests/KspContinuum.Contact.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.Encounter.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.Encounter.Oracle.Tests -c Release
       - run: dotnet run --project tests/KspContinuum.Profiling.Tests -c Release
