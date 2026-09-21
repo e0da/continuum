@@ -13,7 +13,7 @@ Develop the tools alongside those missions. A physics benchmark answers a narrow
 | Mission | Purpose | Evidence boundary |
 | --- | --- | --- |
 | CSP-0001 — Minmus Pathfinder | Establish a recorded launch-to-landing workload | Three attempts; A003 achieved intact, settled touchdown, approximately sideways. No upright-landing or deterministic replay claim. |
-| CSP-0002 — Minmus Survey 1 | Target a sunny Greater Flats candidate and measure the landing path | A001 landed sideways; A002 landed upright with the throttle floor disabled, but missed the 100 m distance limit at 116 m. Qualification remains open. |
+| CSP-0002 — Minmus Survey 1 | Target a sunny Greater Flats candidate and measure the landing path | A001 landed sideways; A002 landed upright at 116 m. Corrected checkpoint trials A005/A006 landed upright at 120.049/119.736 m. All three miss the unchanged 100 m target criterion. |
 
 The current vehicle is stock Kerbal X, catalog design `CV-0001-R01`. The next craft-design outcome is an uncrewed scout and carrier: deliver several identical probes, deploy and follow them sequentially, and preserve useful measurements from both successful and failed landings. Concurrent autonomous descents require additional control ownership and simulation qualification.
 
@@ -25,6 +25,20 @@ The current vehicle is stock Kerbal X, catalog design `CV-0001-R01`. The next cr
 - Can the report explain the result through synchronized controller, attitude, warp and media evidence?
 
 Keep the same craft initially to reduce the number of changes. It is still a crewed test vehicle, not a stand-in claim that our probe carrier exists.
+
+## Checkpoint experiment
+
+The checkpoint comparison branches from A002's saved Minmus orbit, before landing control was acquired. Two trials keep the throttle floor disabled and use the same checkpoint and external MechJeb settings. This separates the landing workload from launch and transfer, while measuring how much native reconstruction and controller scheduling vary between runs.
+
+Before each trial, verify the checkpoint digest and the reconstructed vessel's identity, parts, resources and orbit. Record the controller settings and acquisition time. A source save is an input to the experiment, not a complete snapshot of running physics or autopilot memory. The resulting attempts keep separate saves, receipts and chronicles, with links back to A002.
+
+Judge the outcome against the existing 100 m, upright, daylight and settling requirements. The initial A003/A004 qualification runs exposed startup and observational telemetry defects; their failed receipts and chronicles remain part of the experiment. A005/A006 completed the same corrected package upright at 120.049/119.736 m, both outside the distance limit. Both final descents lasted 38.22 simulation seconds. Compare where target error develops during braking, horizontal correction and final descent before adjusting guidance. Similar outcomes would support repeatability for this workload; they would not prove exact deterministic replay.
+
+## Next decision after checkpoint qualification
+
+Use the completed pair to bound normal run-to-run variation before testing a guidance intervention. The observed candidate is the transition into final descent with approximately 4.2 m/s of residual horizontal motion. Change one control policy at a time and retain the same source, settings witness and acceptance checks. A separate harness improvement can report a stable out-of-radius touchdown without waiting the entire settling timeout; it must preserve the failed outcome and evidence window.
+
+The checkpoint runner also gives simulation development a repeatable starting workload. Profile the landing phases and capture force, contact and frame-transition inputs before selecting a replacement compute backend. Landing-control tuning alone is not evidence that the physics solver is faster or more accurate.
 
 ## Simulation development
 

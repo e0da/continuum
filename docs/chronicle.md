@@ -26,6 +26,8 @@ Write a small JSON sidecar for the editorial fields. The full attempt ID must be
 
 The generator displays these fields as editorial context. When `mission.txt` contains native `missionId`, `attemptId`, `vehicleDesignId`, or `siteId` fields, each must match the corresponding metadata field. Legacy receipts without those fields remain supported. The generator never invents anomaly claims from telemetry. Measurements, receipt status, and media confirmation appear separately.
 
+Checkpoint-start receipts provide `parentAttemptId`, `parentCheckpoint`, and `parentCheckpointSha256` together. The generator imports these native fields into the manifest; editorial metadata cannot supply a parent identity or digest. If editorial `parent_checkpoint` is present, it must match the native checkpoint label. Legacy reports containing only an editorial checkpoint description remain supported, but that description does not establish a parent relationship.
+
 ## Generate a report
 
 Create the archive parent first, then choose a new attempt directory. The destination must not exist.
@@ -104,6 +106,8 @@ Keep the local catalog beside the reports under the ignored archive. This small 
 
 Catalog media paths are relative to the archive. Every mission, vehicle, and non-null site referenced by a report manifest must have a catalog record, and every experiment attempt link must resolve to a report. Status and narrative come from the maintained catalog; the generator does not turn a `LANDED` observation or a report outcome into a broader mission claim.
 
+An attempt with native checkpoint provenance links to its parent attempt and displays the checkpoint label and full SHA-256 digest. The parent links back to its descendants. Parent attempts must exist in the archive, repeated renderings must agree about lineage, and self-links or cycles are rejected. These links describe recorded history; they do not certify deterministic replay.
+
 One command builds or safely refreshes the derived site:
 
 ```sh
@@ -135,6 +139,10 @@ The generator accepts UTF-8 source text up to 16 MiB per file, metadata up to 32
 
 Phase spans use left-sample attribution: each telemetry interval belongs to the phase on its first row. The final phase has no displayed span unless a later row closes it. This makes boundaries approximate at the telemetry cadence. Screenshot dimensions come from each confirmed PNG header; the historical Pathfinder captures are 1280 × 720 observations, not a promise for later missions.
 
+For a checkpoint-start receipt with complete native lineage and a finite `checkpointSourceUT`, the report may exclude leading pre-epoch `CheckpointFlight` samples from UT-derived summaries only when every vessel field is empty and the first retained phase is still `CheckpointFlight`. The report preserves those raw rows, their source hash, row count, and wall-clock phase attribution; it shows the excluded count and reason, and labels a pre-clock loading event at the source epoch as unobserved UT. Any meaningful vessel telemetry before the source epoch is rejected instead of being hidden.
+
 Legacy three-column screenshot receipts remain supported. New five-column completion rows include width and height; nonzero reported dimensions must match the copied PNG header. If present, `survey.csv` and `terrain.csv` are included in the source hash manifest so a later site report can cite their exact bytes. The mission chronicle does not interpret those files into a site qualification by itself.
+
+Checkpoint trials also hash `checkpoint-load-resources.csv` and `.txt`, `checkpoint-acquisition-resources.csv` and `.txt`, `checkpoint-idle-owners.txt`, `checkpoint-acquisition-owners.txt`, and `mechjeb-settings.csv` when present. These retain provenance for restoration observations, control ownership and external configuration hashes without copying their raw contents into the site. File presence alone does not establish that a restoration check passed.
 
 The report is a human-readable record of observed telemetry and receipts. It does not render video, restore a save, prove deterministic world replay, certify a landing site, or infer that a screenshot request succeeded. Source-session directory basenames are retained for provenance, while private absolute paths and save contents are excluded from generated pages and manifests. A receipt reason containing a Unix, Windows-drive, or UNC absolute path is replaced with a safe pointer to the hashed local receipt.

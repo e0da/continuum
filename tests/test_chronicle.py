@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import struct
@@ -179,6 +180,41 @@ class ChronicleTests(unittest.TestCase):
             {"filename": "survey.png", "status": "below-required-resolution", "width": 1280, "height": 720},
             manifest["media"][1],
         )
+
+    def test_hashes_optional_checkpoint_and_mechjeb_evidence_without_copying_it(self):
+        evidence = {
+            "checkpoint-load-resources.csv": b"resource,amount\nElectricCharge,98\n",
+            "checkpoint-load-resources.txt": b"PRIVATE_RESOURCE_VALUE load receipt\n",
+            "checkpoint-acquisition-resources.csv": b"resource,amount\nLiquidFuel,12\n",
+            "checkpoint-acquisition-resources.txt": b"acquisition receipt\n",
+            "checkpoint-idle-owners.txt": b"idle ownership receipt\n",
+            "checkpoint-acquisition-owners.txt": b"acquisition ownership receipt\n",
+            "mechjeb-settings.csv": b"setting,value\nlandingTolerance,1\n",
+        }
+        for name, content in evidence.items():
+            (self.mission / name).write_bytes(content)
+
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        sources = {item["path"]: item for item in manifest["sources"]}
+        for name, content in evidence.items():
+            item = sources["mission/" + name]
+            self.assertEqual(len(content), item["bytes"])
+            self.assertEqual(hashlib.sha256(content).hexdigest(), item["sha256"])
+            self.assertFalse((output / name).exists())
+        self.assertNotIn("PRIVATE_RESOURCE_VALUE", (output / "index.html").read_text(encoding="utf-8"))
+        self.assertNotIn("PRIVATE_RESOURCE_VALUE", json.dumps(manifest))
+
+    def test_rejects_oversized_optional_checkpoint_evidence(self):
+        with (self.mission / "checkpoint-load-resources.csv").open("wb") as stream:
+            stream.truncate(16 * 1024 * 1024 + 1)
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("file exceeds size limit", result.stderr)
+        self.assertFalse(output.exists())
 
     def test_rejects_unsafe_media_path_without_creating_output(self):
         (self.mission / "screenshots.csv").write_text(
@@ -381,6 +417,166 @@ class ChronicleTests(unittest.TestCase):
         result = self.run_generator(output)
         self.assertNotEqual(0, result.returncode)
         self.assertIn("invalid mission session directory name", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_imports_complete_native_checkpoint_lineage(self):
+        digest = "A1" * 32
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n" % digest
+            )
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual("CSP-0001-A002", manifest["parentAttemptId"])
+        self.assertEqual("minmus-orbit", manifest["parentCheckpoint"])
+        self.assertEqual(digest.lower(), manifest["parentCheckpointSha256"])
+        page = (output / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Parent attempt", page)
+        self.assertIn("CSP-0001-A002", page)
+        self.assertIn("minmus-orbit", page)
+        self.assertIn("Checkpoint SHA-256", page)
+        self.assertIn(digest.lower(), page)
+        self.assertEqual(1, page.count("does not establish deterministic replay"))
+
+    def test_rejects_incomplete_or_invalid_native_checkpoint_lineage(self):
+        original = (self.mission / "mission.txt").read_text(encoding="utf-8")
+        cases = (
+            ("parentAttemptId=CSP-0001-A002\n", "incomplete checkpoint lineage"),
+            ("parentAttemptId=CSP-0001-A003\nparentCheckpoint=minmus-orbit\nparentCheckpointSha256=%s\n" % ("a" * 64),
+             "may not parent itself"),
+            ("parentAttemptId=CSP-0001-A002\nparentCheckpoint=../orbit\nparentCheckpointSha256=%s\n" % ("a" * 64),
+             "invalid parentCheckpoint"),
+            ("parentAttemptId=CSP-0001-A002\nparentCheckpoint=minmus-orbit\nparentCheckpointSha256=not-a-digest\n",
+             "invalid parentCheckpointSha256"),
+        )
+        for index, (receipt, message) in enumerate(cases):
+            with self.subTest(message=message):
+                (self.mission / "mission.txt").write_text(original + receipt, encoding="utf-8")
+                output = self.root / ("lineage-invalid-%d" % index)
+                result = self.run_generator(output)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_rejects_native_checkpoint_label_that_disagrees_with_metadata(self):
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n" % ("b" * 64)
+            )
+        output = self.root / "chronicle"
+        result = self.run_generator(
+            output, self.metadata(parent_checkpoint="different-checkpoint")
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("parent_checkpoint does not match mission receipt", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_preserves_legacy_free_checkpoint_without_claiming_structured_lineage(self):
+        output = self.root / "chronicle"
+        result = self.run_generator(
+            output, self.metadata(parent_checkpoint="legacy-checkpoint.v1")
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual("legacy-checkpoint.v1", manifest["parentCheckpoint"])
+        self.assertIsNone(manifest["parentAttemptId"])
+        self.assertIsNone(manifest["parentCheckpointSha256"])
+
+    def test_excludes_native_checkpoint_clock_initialization_from_derived_timing(self):
+        source_ut = "268881.4188647733"
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit-e05676be2e38432caf5eac0b1baf79b3\n"
+                "parentCheckpointSha256=%s\n"
+                "checkpointSourceUT=%s\n" % ("6" * 64, source_ut)
+            )
+        telemetry = (
+            "wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,"
+            "surface_speed_mps,throttle,stage,parts,packed,autopilot\n"
+            "0.191802978515625,0,CheckpointFlight,,,,,,,,,,,\"\"\n"
+            "1.9796257019042969,268881.4188647733,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,0,0,2,17,True,\"\"\n"
+            "11.979625701904297,268891.4188647733,CheckpointReady,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n"
+            "21.979625701904297,268901.4188647733,WaitForSite,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n"
+        )
+        (self.mission / "mission.csv").write_text(telemetry, encoding="utf-8")
+        (self.mission / "events.txt").write_text(
+            "0 CheckpointFlight\n268891.4188647733 CheckpointReady\n"
+            "268901.4188647733 WaitForSite\n", encoding="utf-8"
+        )
+
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertEqual(0, result.returncode, result.stderr)
+        page = (output / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Excluded initialization clock samples", page)
+        self.assertIn('<div class="value">1</div>', page)
+        self.assertIn("leading empty-body CheckpointFlight sample", page)
+        self.assertIn("268,881.419 (source epoch; loading event UT was not observed)", page)
+        self.assertIn(
+            "CheckpointFlight</td><td>268,881.419 (source epoch; loading event UT was not observed)"
+            "</td><td>11.79 s</td><td>10.00 s</td>",
+            page,
+        )
+        self.assertIn("20.00 s", page)
+        self.assertNotIn("268,881.42 s", page)
+        manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+        source = next(item for item in manifest["sources"] if item["path"] == "mission/mission.csv")
+        self.assertEqual(hashlib.sha256(telemetry.encode("utf-8")).hexdigest(), source["sha256"])
+
+    def test_rejects_meaningful_vessel_telemetry_before_checkpoint_source_epoch(self):
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n"
+                "checkpointSourceUT=268881.4188647733\n" % ("7" * 64)
+            )
+        header = (
+            "wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,"
+            "surface_speed_mps,throttle,stage,parts,packed,autopilot\n"
+        )
+        cases = (
+            "0.2,0,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,128,0,2,17,True,\"\"\n",
+            "0.2,0,CheckpointFlight,,ORBITING,,,,,,,,,\"\"\n",
+            ",".join(["0.2", "0", "CheckpointFlight", "", "", "", "27120", "", "", "", "", "", "", ""]) + "\n",
+            ",".join(["0.2", "0", "CheckpointFlight", "", "", "", "", "27082", "", "", "", "", "", ""]) + "\n",
+        )
+        retained = "2,268881.4188647733,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n"
+        for index, initial in enumerate(cases):
+            with self.subTest(index=index):
+                (self.mission / "mission.csv").write_text(header + initial + retained, encoding="utf-8")
+                output = self.root / ("meaningful-pre-source-%d" % index)
+                result = self.run_generator(output)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("meaningful telemetry before checkpoint source UT", result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_rejects_clock_initialization_handoff_to_another_phase(self):
+        with (self.mission / "mission.txt").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "parentAttemptId=CSP-0001-A002\n"
+                "parentCheckpoint=minmus-orbit\n"
+                "parentCheckpointSha256=%s\n"
+                "checkpointSourceUT=268881.4188647733\n" % ("8" * 64)
+            )
+        (self.mission / "mission.csv").write_text(
+            "wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,"
+            "surface_speed_mps,throttle,stage,parts,packed,autopilot\n"
+            "0.2,0,CheckpointFlight,,,,,,,,,,,\"\"\n"
+            "2,268881.4188647733,Landing,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n",
+            encoding="utf-8",
+        )
+        output = self.root / "chronicle"
+        result = self.run_generator(output)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("first retained phase must be CheckpointFlight", result.stderr)
         self.assertFalse(output.exists())
 
 

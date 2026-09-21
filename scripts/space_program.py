@@ -24,6 +24,9 @@ SITE_SCHEMA = "ksp-continuum-space-program-site/v1"
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "templates" / "site" / "page-v1.html"
 SAFE_ID = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$")
+SAFE_ATTEMPT_ID = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*-A[0-9]{3,6}$")
+SAFE_CHECKPOINT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
+SAFE_SHA256 = re.compile(r"^[0-9A-Fa-f]{64}$")
 SAFE_FOLDER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
 SAFE_MEDIA_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}\.png$")
 MAX_CATALOG_BYTES = 256 * 1024
@@ -251,6 +254,29 @@ def parse_report_media(data):
     return result
 
 
+def parse_report_lineage(data, attempt_id):
+    parent_attempt = data.get("parentAttemptId")
+    checkpoint = data.get("parentCheckpoint")
+    digest = data.get("parentCheckpointSha256")
+    if parent_attempt is None and digest is None:
+        return {"parent_attempt_id": None, "parent_checkpoint": None, "parent_checkpoint_sha256": None}
+    if parent_attempt is None or checkpoint is None or digest is None:
+        raise ChronicleError("incomplete checkpoint lineage for " + attempt_id)
+    if not isinstance(parent_attempt, str) or not SAFE_ATTEMPT_ID.fullmatch(parent_attempt):
+        raise ChronicleError("invalid parent attempt id for " + attempt_id)
+    if parent_attempt == attempt_id:
+        raise ChronicleError("checkpoint lineage may not parent itself: " + attempt_id)
+    if not isinstance(checkpoint, str) or not SAFE_CHECKPOINT.fullmatch(checkpoint):
+        raise ChronicleError("invalid parent checkpoint for " + attempt_id)
+    if not isinstance(digest, str) or not SAFE_SHA256.fullmatch(digest):
+        raise ChronicleError("invalid parent checkpoint digest for " + attempt_id)
+    return {
+        "parent_attempt_id": parent_attempt,
+        "parent_checkpoint": checkpoint,
+        "parent_checkpoint_sha256": digest.lower(),
+    }
+
+
 def load_reports(archive, output):
     attempts = {}
     for manifest_path in sorted(archive.glob("*/manifest.json")):
@@ -272,6 +298,7 @@ def load_reports(archive, output):
         report_text = bounded_text(report_path, MAX_REPORT_BYTES)
         if html_has_absolute_path(report_text):
             raise ChronicleError("report page contains a private absolute path")
+        attempt_id = id_field(data, "attemptId", "report manifest")
         report = {
             "folder": folder,
             "folder_name": folder.name,
@@ -280,13 +307,14 @@ def load_reports(archive, output):
             "manifest": data,
             "generated": parse_time(data.get("generatedUtc")),
             "mission_id": id_field(data, "missionId", "report manifest"),
-            "attempt_id": id_field(data, "attemptId", "report manifest"),
+            "attempt_id": attempt_id,
             "vehicle_id": id_field(data, "vehicleDesignId", "report manifest"),
             "site_id": data.get("siteId"),
             "title": text_field(data, "title", "report manifest", 160),
             "outcome": text_field(data, "outcome", "report manifest", 80),
             "media": parse_report_media(data),
         }
+        report.update(parse_report_lineage(data, attempt_id))
         if report["site_id"] is not None and (not isinstance(report["site_id"], str) or not SAFE_ID.fullmatch(report["site_id"])):
             raise ChronicleError("report manifest has invalid siteId")
         attempts.setdefault(report["attempt_id"], []).append(report)
@@ -297,6 +325,11 @@ def load_reports(archive, output):
         identity = (versions[0]["mission_id"], versions[0]["vehicle_id"], versions[0]["site_id"])
         if any((item["mission_id"], item["vehicle_id"], item["site_id"]) != identity for item in versions[1:]):
             raise ChronicleError("report renderings disagree on identity for " + attempt_id)
+        lineage = (versions[0]["parent_attempt_id"], versions[0]["parent_checkpoint"],
+                   versions[0]["parent_checkpoint_sha256"])
+        if any((item["parent_attempt_id"], item["parent_checkpoint"], item["parent_checkpoint_sha256"]) != lineage
+               for item in versions[1:]):
+            raise ChronicleError("report renderings disagree on lineage for " + attempt_id)
     return attempts
 
 
@@ -313,6 +346,26 @@ def validate_links(catalog, attempts):
         for attempt_id in experiment["attempt_ids"]:
             if attempt_id not in attempts:
                 raise ChronicleError("experiment " + experiment["id"] + " references missing attempt " + attempt_id)
+    for attempt_id, versions in attempts.items():
+        parent = versions[0]["parent_attempt_id"]
+        if parent is not None and parent not in attempts:
+            raise ChronicleError(attempt_id + " references missing parent attempt " + parent)
+    states = {}
+
+    def visit(attempt_id):
+        state = states.get(attempt_id, 0)
+        if state == 1:
+            raise ChronicleError("checkpoint lineage cycle includes " + attempt_id)
+        if state == 2:
+            return
+        states[attempt_id] = 1
+        parent = attempts[attempt_id][0]["parent_attempt_id"]
+        if parent is not None:
+            visit(parent)
+        states[attempt_id] = 2
+
+    for attempt_id in attempts:
+        visit(attempt_id)
 
 
 def nav(prefix, program_name):
@@ -372,7 +425,7 @@ def media_html(entity):
     return '<section><h2>Media</h2><div class="gallery">{}</div></section>'.format(figures)
 
 
-def attempt_view(attempt_id, versions, catalog):
+def attempt_view(attempt_id, versions, catalog, attempts, descendants):
     latest = versions[0]
     experiments = [item for item in catalog["experiments"].values() if attempt_id in item["attempt_ids"]]
     mission = catalog["missions"][latest["mission_id"]]
@@ -394,6 +447,21 @@ def attempt_view(attempt_id, versions, catalog):
     context = ('<aside class="program-context"><div>Recorded outcome: <strong>{}</strong></div>'
                '<div class="program-links">{} <a href="{}">Original report</a></div>').format(
                    esc(latest["outcome"]), " ".join('<a href="{}">{}</a>'.format(url, esc(label)) for url, label in links), source)
+    if latest["parent_attempt_id"] is not None:
+        parent = attempts[latest["parent_attempt_id"]][0]
+        context += ('<section class="program-lineage"><h2>Checkpoint start</h2><p>Started from '
+                    '<a href="../{}/index.html">{} ({})</a> at checkpoint <code>{}</code>.</p>'
+                    '<p>SHA-256 <code>{}</code></p><p>Recorded lineage evidence does not establish '
+                    'deterministic replay.</p></section>').format(
+                        quote(parent["attempt_id"], safe=""), esc(parent["title"]), esc(parent["attempt_id"]),
+                        esc(latest["parent_checkpoint"]), esc(latest["parent_checkpoint_sha256"]))
+    children = descendants.get(attempt_id, [])
+    if children:
+        context += '<section class="program-lineage"><h2>Checkpoint descendants</h2><ul>' + "".join(
+            '<li><a href="../{}/index.html">{} ({})</a> · checkpoint <code>{}</code> · SHA-256 <code>{}</code></li>'.format(
+                quote(child["attempt_id"], safe=""), esc(child["title"]), esc(child["attempt_id"]),
+                esc(child["parent_checkpoint"]), esc(child["parent_checkpoint_sha256"]))
+            for child in children) + '</ul><p>Recorded lineage evidence does not establish deterministic replay.</p></section>'
     if len(versions) > 1:
         context += '<details><summary>Earlier immutable renderings</summary><ul>' + "".join(
             '<li><a href="../../../{}/index.html">{} · {}</a></li>'.format(
@@ -418,7 +486,9 @@ def attempt_view(attempt_id, versions, catalog):
                  "margin-top:8px}.program-context details{margin-top:10px}.program-gallery{display:grid;grid-template-columns:"
                  "repeat(auto-fit,minmax(min(280px,100%),1fr));gap:12px}.program-gallery img{display:block;width:100%;height:auto;"
                  "border-radius:8px}.program-gallery figure{margin:0}.program-gallery figcaption{overflow-wrap:anywhere}"
-                 ".program-copy-note{margin:24px auto;padding:16px;max-width:1100px;color:#aeb7bd}</style>")
+                 ".program-lineage{margin-top:14px;padding:14px;border:1px solid #50636b;border-radius:8px}.program-lineage h2{"
+                 "margin-top:0}.program-lineage code{overflow-wrap:anywhere}.program-copy-note{margin:24px auto;padding:16px;"
+                 "max-width:1100px;color:#aeb7bd}</style>")
     page = latest["html"]
     if not re.search(r"</head\s*>", page, re.IGNORECASE) or not re.search(r"<body(?:\s[^>]*)?>", page, re.IGNORECASE):
         raise ChronicleError("report page cannot accept shared navigation")
@@ -461,6 +531,13 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
     for experiment in catalog["experiments"].values():
         for attempt_id in experiment["attempt_ids"]:
             experiment_by_attempt.setdefault(attempt_id, []).append(experiment)
+    descendants = {}
+    for versions in attempts.values():
+        latest = versions[0]
+        if latest["parent_attempt_id"] is not None:
+            descendants.setdefault(latest["parent_attempt_id"], []).append(latest)
+    for children in descendants.values():
+        children.sort(key=lambda item: item["attempt_id"])
     for attempt_id, versions in attempts.items():
         latest = versions[0]
         attempt_summaries[attempt_id] = {
@@ -470,7 +547,8 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
         }
         destination = staging / "attempts" / attempt_id
         destination.mkdir()
-        (destination / "index.html").write_text(attempt_view(attempt_id, versions, catalog), encoding="utf-8")
+        (destination / "index.html").write_text(
+            attempt_view(attempt_id, versions, catalog, attempts, descendants), encoding="utf-8")
         shutil.copyfile(latest["manifest_path"], destination / "manifest.json")
         for item in latest["media"]:
             if item["status"] not in ("confirmed", "below-required-resolution"):
@@ -530,7 +608,8 @@ def build_site(staging, archive, catalog, attempts, catalog_sha256):
                 program, entity["name"], heading, entity["name"], entity["summary"], content, "../"), encoding="utf-8")
 
     reports = [{"attemptId": attempt_id, "sourceFolder": versions[0]["folder_name"],
-                "generatedUtc": versions[0]["generated"].isoformat()}
+                "generatedUtc": versions[0]["generated"].isoformat(),
+                "parentAttemptId": versions[0]["parent_attempt_id"]}
                for attempt_id, versions in sorted(attempts.items())]
     marker = {
         "schema": SITE_SCHEMA,

@@ -32,6 +32,9 @@ MAX_SEGMENT_SAMPLES = 2000
 MAX_SCREENSHOTS = 64
 MAX_MEDIA_BYTES = 16 * 1024 * 1024
 SAFE_ID = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$")
+SAFE_ATTEMPT_ID = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*-A[0-9]{3,6}$")
+SAFE_CHECKPOINT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
+SAFE_SHA256 = re.compile(r"^[0-9A-Fa-f]{64}$")
 SAFE_PNG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}\.png$")
 SAFE_MISSION_SESSION = re.compile(r"^mission-[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
 SAFE_INPUT_SESSION = re.compile(r"^inputs-[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
@@ -110,13 +113,18 @@ def parse_metadata(path):
         data[key] = value
     if not re.fullmatch(re.escape(data["mission_id"]) + r"-A[0-9]{3,6}", data["attempt_id"]):
         raise ChronicleError("attempt_id must belong to mission_id")
-    for key in ("site_id", "parent_checkpoint"):
-        value = data.get(key)
-        if value is not None:
-            value = safe_text(value, key, 64)
-            if not SAFE_ID.fullmatch(value):
-                raise ChronicleError("invalid " + key)
-            data[key] = value
+    value = data.get("site_id")
+    if value is not None:
+        value = safe_text(value, "site_id", 64)
+        if not SAFE_ID.fullmatch(value):
+            raise ChronicleError("invalid site_id")
+        data["site_id"] = value
+    value = data.get("parent_checkpoint")
+    if value is not None:
+        value = safe_text(value, "parent_checkpoint", 127)
+        if not SAFE_CHECKPOINT.fullmatch(value):
+            raise ChronicleError("invalid parent_checkpoint")
+        data["parent_checkpoint"] = value
     data["name"] = safe_text(data.get("name"), "name", 160)
     for key in ("objective", "configuration", "next_experiment"):
         data[key] = safe_text(data.get(key), key, 2000)
@@ -154,6 +162,37 @@ def validate_receipt_identity(metadata, mission_values):
     for metadata_key, receipt_key in fields:
         if receipt_key in mission_values and mission_values[receipt_key] != metadata.get(metadata_key):
             raise ChronicleError(metadata_key + " does not match mission receipt " + receipt_key)
+
+
+def checkpoint_lineage(metadata, mission_values):
+    keys = ("parentAttemptId", "parentCheckpoint", "parentCheckpointSha256")
+    present = [key for key in keys if key in mission_values]
+    if not present:
+        return {
+            "parentAttemptId": None,
+            "parentCheckpoint": metadata.get("parent_checkpoint"),
+            "parentCheckpointSha256": None,
+        }
+    if len(present) != len(keys):
+        raise ChronicleError("incomplete checkpoint lineage in mission receipt")
+    parent_attempt = mission_values["parentAttemptId"]
+    checkpoint = mission_values["parentCheckpoint"]
+    digest = mission_values["parentCheckpointSha256"]
+    if not SAFE_ATTEMPT_ID.fullmatch(parent_attempt):
+        raise ChronicleError("invalid parentAttemptId")
+    if parent_attempt == metadata["attempt_id"]:
+        raise ChronicleError("checkpoint lineage may not parent itself")
+    if not SAFE_CHECKPOINT.fullmatch(checkpoint):
+        raise ChronicleError("invalid parentCheckpoint")
+    if not SAFE_SHA256.fullmatch(digest):
+        raise ChronicleError("invalid parentCheckpointSha256")
+    if metadata.get("parent_checkpoint") is not None and metadata["parent_checkpoint"] != checkpoint:
+        raise ChronicleError("parent_checkpoint does not match mission receipt parentCheckpoint")
+    return {
+        "parentAttemptId": parent_attempt,
+        "parentCheckpoint": checkpoint,
+        "parentCheckpointSha256": digest.lower(),
+    }
 
 
 def portable_basename(value):
@@ -221,6 +260,7 @@ def parse_telemetry(path):
             "ut": finite_number(row["ut_s"], "mission.csv ut_s"),
             "phase": phase,
             "body": row["body"], "situation": row["situation"], "altitude": row["altitude_m"],
+            "apoapsis": row["apoapsis_m"], "periapsis": row["periapsis_m"],
             "speed": row["surface_speed_mps"], "throttle": row["throttle"],
             "stage": row["stage"], "parts": row["parts"], "packed": row["packed"],
             "autopilot": row["autopilot"],
@@ -266,6 +306,45 @@ def parse_events(path):
             raise ChronicleError("events.txt contains an invalid phase")
         events.append((finite_number(fields[0], "events.txt"), phase))
     return events
+
+
+def checkpoint_clock_view(mission_values, lineage, rows):
+    default = {
+        "summary_rows": rows, "source_ut": None, "excluded_samples": 0,
+        "leading_wall_seconds": 0,
+    }
+    if lineage["parentAttemptId"] is None or "checkpointSourceUT" not in mission_values:
+        return default
+    source_ut = finite_number(mission_values["checkpointSourceUT"], "checkpointSourceUT")
+    previous_wall = previous_ut = None
+    for row in rows:
+        if previous_wall is not None and (row["wall"] < previous_wall or row["ut"] < previous_ut):
+            raise ChronicleError("mission.csv time moved backward")
+        previous_wall, previous_ut = row["wall"], row["ut"]
+    excluded = []
+    summary_rows = []
+    vessel_fields = (
+        "body", "situation", "altitude", "apoapsis", "periapsis", "speed", "throttle", "stage", "parts",
+        "packed", "autopilot",
+    )
+    for row in rows:
+        if row["ut"] < source_ut:
+            if (summary_rows or row["phase"] != "CheckpointFlight"
+                    or any(row[field] != "" for field in vessel_fields)):
+                raise ChronicleError("mission.csv contains meaningful telemetry before checkpoint source UT")
+            excluded.append(row)
+        else:
+            summary_rows.append(row)
+    if not summary_rows:
+        raise ChronicleError("mission.csv contains no telemetry at or after checkpoint source UT")
+    if excluded and summary_rows[0]["phase"] != "CheckpointFlight":
+        raise ChronicleError("mission.csv first retained phase must be CheckpointFlight")
+    return {
+        "summary_rows": summary_rows,
+        "source_ut": source_ut,
+        "excluded_samples": len(excluded),
+        "leading_wall_seconds": summary_rows[0]["wall"] - rows[0]["wall"],
+    }
 
 
 def safe_screenshot_name(name):
@@ -368,9 +447,8 @@ def sha256(path):
 
 
 def source_entry(path, logical):
-    if path.is_symlink():
-        raise ChronicleError("source file may not be a symbolic link: " + path.name)
-    return {"path": logical, "bytes": path.stat().st_size, "sha256": sha256(path)}
+    content = bounded_bytes(path)
+    return {"path": logical, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
 
 
 def collect_input_summary(inputs, sources):
@@ -431,7 +509,7 @@ def card(label, value):
     return '<div class="card"><div class="label">{}</div><div class="value">{}</div></div>'.format(esc(label), esc(value))
 
 
-def render_page(metadata, mission_values, rows, events, captures, input_summary, source_sessions, generated_utc):
+def render_page(metadata, mission_values, lineage, rows, events, clock_view, captures, input_summary, source_sessions, generated_utc):
     config = [
         ("Mission ID", metadata["mission_id"]), ("Attempt", metadata["attempt_id"]),
         ("Vehicle design", metadata["vehicle_design_id"]),
@@ -441,16 +519,33 @@ def render_page(metadata, mission_values, rows, events, captures, input_summary,
     ]
     if metadata.get("site_id"):
         config.append(("Site", metadata["site_id"]))
-    if metadata.get("parent_checkpoint"):
-        config.append(("Parent checkpoint", metadata["parent_checkpoint"]))
+    if lineage["parentAttemptId"]:
+        config.extend([
+            ("Parent attempt", lineage["parentAttemptId"]),
+            ("Parent checkpoint", lineage["parentCheckpoint"]),
+            ("Checkpoint SHA-256", lineage["parentCheckpointSha256"]),
+            ("Lineage evidence", "Recorded lineage evidence does not establish deterministic replay."),
+        ])
+    elif lineage["parentCheckpoint"]:
+        config.append(("Parent checkpoint", lineage["parentCheckpoint"]))
     config_html = "".join(card(label, value) for label, value in config)
 
-    event_start = {phase: ut for ut, phase in events}
+    event_start = {}
+    for ut, phase in events:
+        if (clock_view["source_ut"] is not None and phase == "CheckpointFlight"
+                and ut < clock_view["source_ut"]):
+            event_start[phase] = "{:,.3f} (source epoch; loading event UT was not observed)".format(
+                clock_view["source_ut"])
+        else:
+            event_start[phase] = "{:,.3f}".format(ut)
+    timeline_summaries = phase_summaries(clock_view["summary_rows"])
+    if timeline_summaries:
+        timeline_summaries[0]["wall_duration"] += clock_view["leading_wall_seconds"]
     timeline_html = "".join(
         "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
-            esc(item["phase"]), esc("{:,.3f}".format(event_start.get(item["phase"], item["start_ut"]))),
+            esc(item["phase"]), esc(event_start.get(item["phase"], "{:,.3f}".format(item["start_ut"]))),
             esc(duration(item["wall_duration"])), esc(duration(item["ut_duration"])),
-        ) for item in phase_summaries(rows)
+        ) for item in timeline_summaries
     )
 
     media_html = []
@@ -477,8 +572,14 @@ def render_page(metadata, mission_values, rows, events, captures, input_summary,
     final = rows[-1]
     measurement_values = [
         ("Telemetry rows", len(rows)), ("Observed wall span", duration(final["wall"] - rows[0]["wall"])),
-        ("Observed UT span", duration(final["ut"] - rows[0]["ut"])),
+        ("Observed UT span", duration(final["ut"] - clock_view["summary_rows"][0]["ut"])),
     ]
+    if clock_view["excluded_samples"]:
+        measurement_values.extend([
+            ("Excluded initialization clock samples", clock_view["excluded_samples"]),
+            ("Timing correction",
+             "Excluded leading empty-body CheckpointFlight samples recorded before checkpoint source UT; raw telemetry remains hashed."),
+        ])
     if input_summary["included"]:
         measurement_values.extend([
             ("Input segments", input_summary["segments"]), ("Control samples", input_summary["samples"]),
@@ -540,12 +641,20 @@ def generate(mission, inputs, output, metadata_path):
     metadata = parse_metadata(metadata_path)
     mission_values = parse_key_values(mission / "mission.txt")
     validate_receipt_identity(metadata, mission_values)
+    lineage = checkpoint_lineage(metadata, mission_values)
     validate_input_association(inputs, mission_values)
     rows = parse_telemetry(mission / "mission.csv")
     events = parse_events(mission / "events.txt")
+    clock_view = checkpoint_clock_view(mission_values, lineage, rows)
     captures = parse_screenshots(mission)
     sources = []
-    for name in ("mission.txt", "mission.csv", "events.txt", "screenshots.csv", "milestones.csv", "survey.csv", "terrain.csv"):
+    for name in (
+        "mission.txt", "mission.csv", "events.txt", "screenshots.csv", "milestones.csv",
+        "survey.csv", "terrain.csv", "checkpoint-load-resources.csv",
+        "checkpoint-load-resources.txt", "checkpoint-acquisition-resources.csv",
+        "checkpoint-acquisition-resources.txt", "checkpoint-idle-owners.txt",
+        "checkpoint-acquisition-owners.txt", "mechjeb-settings.csv",
+    ):
         path = mission / name
         if path.is_file():
             sources.append(source_entry(path, "mission/" + name))
@@ -557,7 +666,9 @@ def generate(mission, inputs, output, metadata_path):
         source_sessions["inputs"] = inputs.name
     input_summary = collect_input_summary(inputs, sources)
     generated_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    page = render_page(metadata, mission_values, rows, events, captures, input_summary, source_sessions, generated_utc)
+    page = render_page(
+        metadata, mission_values, lineage, rows, events, clock_view, captures,
+        input_summary, source_sessions, generated_utc)
     manifest = {
         "schema": MANIFEST_SCHEMA, "templateVersion": TEMPLATE_VERSION,
         "generatedUtc": generated_utc, "missionId": metadata["mission_id"],
@@ -567,7 +678,10 @@ def generate(mission, inputs, output, metadata_path):
         "templateSha256": sha256(TEMPLATE_PATH),
         "generatorSha256": sha256(Path(__file__).resolve()),
         "vehicleDesignId": metadata["vehicle_design_id"], "siteId": metadata.get("site_id"),
-        "parentCheckpoint": metadata.get("parent_checkpoint"), "sourceSessions": source_sessions,
+        "parentAttemptId": lineage["parentAttemptId"],
+        "parentCheckpoint": lineage["parentCheckpoint"],
+        "parentCheckpointSha256": lineage["parentCheckpointSha256"],
+        "sourceSessions": source_sessions,
         "inputEvidence": ({"status": "included", "session": inputs.name}
                           if inputs is not None else {"status": "not-supplied"}),
         "sources": sorted(sources, key=lambda item: item["path"]),
