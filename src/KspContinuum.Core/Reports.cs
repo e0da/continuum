@@ -53,15 +53,30 @@ namespace KspContinuum
     }
     [Serializable] public sealed class MarkerReport
     {
-        public string name, status;
+        public string name, status, availabilityDetail;
+        public bool recorderAvailableAtStart;
         public long[] nanoseconds;
         public int[] blocks;
+        public bool[] available;
+        public ProfileMarkerSummary summary;
     }
     [Serializable] public sealed class ProbeReport
     {
-        public string schema = "ksp-continuum-markers/v1";
-        public string status = "marker-timings-not-whole-frame-attribution";
+        public string schema = "ksp-continuum-markers/v2";
+        public string status = "interrupted";
+        public string measurementScope = "Observational previous-frame marker readings and callback cadence; not whole-frame CPU attribution.";
+        public string intervalScope = "Stopwatch interval between coroutine boundaries; includes waiting, scheduling and probe overhead.";
+        public string markerScope = "Recorder previous-frame totals; marker scopes may overlap. Availability does not establish complete engine coverage.";
+        public string percentileMethod = "Linear interpolation at (count-1)*quantile; marker distributions include only available frames with positive block counts.";
+        public string contextScope = "Context sampled at prior coroutine boundary; frame identifiers expose gaps. State can change within a frame.";
+        public string unity, ksp, plugin, platform, processor, graphicsDevice;
+        public int processorCount, targetFrameRate, vSyncCount, warmupFrames = 1;
+        public string recorderCleanupStatus;
+        public string[] cleanupErrors;
         public string utc = DateTime.UtcNow.ToString("o");
         public MarkerReport[] markers;
+        public int requestedFrames, completedFrames, contextMisalignedFrames;
+        public ProfileFrame[] frames;
+        public ProfileDistribution wallIntervals;
     }
 }

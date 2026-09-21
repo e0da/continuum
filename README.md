@@ -2,18 +2,20 @@
 
 An experimental KSP 1 toolkit for measuring simulation cost, recording flight inputs, and testing alternatives. The goal is faster, believable structural physics, including flex and breakage. Rigid grouping is one experiment, not a commitment to making every ship rigid.
 
-**Status: the isolated benchmark passes in headless KSP 1.12.5; 123 analytic/report/timeline assertions pass.** This is a research harness, not a gameplay fix or a replacement physics engine. Synthetic timings are recorded in the validation receipt; stock-vessel speedup and mod compatibility remain unverified.
+**Status: experimental measurement, input, and worker infrastructure.** The isolated physics benchmark has passed in headless KSP 1.12.5. This is a research harness, not a gameplay fix or a replacement physics engine. Synthetic timings are recorded in the validation receipt; stock-vessel speedup and mod compatibility remain unverified.
 
 ## What exists
 
 - A main-menu benchmark compares 8, 32, and 128 aligned boxes as a chain of Unity fixed joints and as one compound rigid body. Both retain the same collider geometry. It uses separate physics scenes and does not change global simulation settings.
 - The benchmark checks collider ray hits, spacing error, a compound body's contact with a floor, and momentum at separation. It reports raw repeated timings. These are synthetic bodies, not stock parts or KSP joints.
 - A flight panel inventories the active vessel without modifying it. A small structural allowlist identifies inspection candidates; it does not approve them for merging.
-- An optional 300-frame timing capture records available Unity markers. Unsupported markers are reported as unavailable, never as evidence of zero cost.
+- An optional 300-frame timing capture records available Unity markers, frame context, and timing distributions. Unsupported markers are reported as unavailable, never as evidence of zero cost. See [profiling](docs/profiling.md).
 - A flight input recorder exports step-keyed recordings plus event/trajectory observations; the format supports manual linear and cubic-Bezier edits. An opt-in analog player enforces a conservative control-ownership boundary; see [input timeline](docs/input-timeline.md).
-- An optional MechJeb mission addon creates a separate sandbox and attempts a recorded stock Kerbal X flight to Minmus. See [mission operation and qualification](docs/minmus-mission.md). One rendered attempt achieved an intact, settled Minmus touchdown; it finished approximately sideways, and repeated rotation during descent remains unexplained.
-- An opt-in survey mode targets a sampled flat Minmus site in daylight, records descent attitude and warp, and requires an upright landing. The first survey reached the field but failed the upright check; see the [flight evidence](docs/validation.md).
+- An optional MechJeb mission addon creates a separate sandbox and attempts a recorded stock Kerbal X flight to Minmus. See [mission operation and qualification](docs/minmus-mission.md). Checkpoint trials now provide repeatable setup and preserved evidence; they do not establish deterministic replay.
+- An opt-in survey mode targets a sampled flat Minmus site in daylight. Two checkpoint trials landed upright with all 17 parts, approximately 120 m from the target, missing the unchanged 100 m criterion. This is a systems test fixture; see the [flight evidence](docs/validation.md).
 - A pure C# model verifies aligned-box aggregation and impulse-free separation without proprietary assemblies.
+- A [bounded background worker](docs/simulation-worker.md) accepts immutable batches with tick, topology, and frame identities. A reference constant-force backend and runnable serial/parallel comparison exercise the boundary without controlling KSP bodies.
+- An [input comparison tool](docs/input-comparison.md) measures sampled differences between recorded control tracks without claiming equivalent physics outcomes.
 
 Experiments run only through explicit panel actions or command-line flags. Analog replay changes flight controls. The optional mission runner creates its own save and uses MechJeb on its mission vessel; normal launches do not start a mission. Local reports/recordings go to `GameData/KspContinuum/PluginData/` and can include vessel identifiers, mod identities and mission save paths. They are runtime artifacts and are not committed to this public repo.
 
@@ -39,7 +41,9 @@ For automated engine qualification in an owned test copy, launch its KSP executa
 
 ## Research direction
 
-The next consequential experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, and GPU compute remain candidates rather than assumed winners.
+The longer-term experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, and GPU compute remain candidates rather than assumed winners.
+
+Development advances along independent worker/backend, profiling, replay/input, and space-program/chronicle tracks. Missions provide workloads and acceptance evidence; landing precision does not gate unrelated simulation infrastructure. The current free-body worker proves a compute boundary, not complete force capture or a shadow vessel solver.
 
 See [integration map](docs/integration-map.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
 
