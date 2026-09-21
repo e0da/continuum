@@ -12,6 +12,8 @@ namespace KspContinuum
         static ShadowCapture owner;
         readonly ShadowEpoch epoch = new ShadowEpoch();
         readonly ShadowComparison comparison = new ShadowComparison();
+        readonly CentralGravityComparison gravityComparison = new CentralGravityComparison();
+        SimulationBatch pendingGravity;
         ShadowSample comparisonSample;
         readonly Stopwatch clock = Stopwatch.StartNew();
         readonly List<ShadowSample> samples = new List<ShadowSample>();
@@ -151,6 +153,22 @@ namespace KspContinuum
                     )
                 )
                 {
+                    double gravityCompareStart = clock.Elapsed.TotalMilliseconds;
+                    gravityComparison.Observe(
+                        physicsEpoch,
+                        topology,
+                        physicalFrame,
+                        eligible,
+                        Time.fixedDeltaTime,
+                        Time.fixedTime,
+                        Time.frameCount,
+                        originEvents,
+                        observedPositions,
+                        observedVelocities,
+                        A(frameVelocity)
+                    );
+                    comparisonSample.gravityComparisonMilliseconds =
+                        clock.Elapsed.TotalMilliseconds - gravityCompareStart;
                     if (comparisonSample.observedComparisonAvailable)
                         report.compared++;
                     else
@@ -180,11 +198,16 @@ namespace KspContinuum
                     if (state == ResultStatus.Ready)
                         Accept(result, topology, physicalFrame);
                     else
+                    {
                         report.stale++;
+                        if (pendingGravity != null)
+                            pendingSample.gravityComparisonStatus = "skipped-worker-stale";
+                    }
                     samples.Add(pendingSample);
                     pending = null;
                     pendingSample = null;
                     pendingPhysical = null;
+                    pendingGravity = null;
                     if (samples.Count >= report.requestedSamples && !comparison.IsPending)
                     {
                         Finish("complete", "Bounded sample count reached.");
@@ -299,6 +322,50 @@ namespace KspContinuum
                 floatingOriginEventCount = originEvents,
                 captureFixedTimeSeconds = Time.fixedTime,
             };
+            pendingGravity = null;
+            double gravityStart = clock.Elapsed.TotalMilliseconds;
+            if (vessel.mainBody == null)
+                sample.gravityModelStatus = "unavailable-no-central-body";
+            else
+            {
+                try
+                {
+                    Vector3d nativeCenter = vessel.mainBody.position;
+                    Vec center = new Vec(nativeCenter.x, nativeCenter.y, nativeCenter.z),
+                        meanAcceleration;
+                    double mu = vessel.mainBody.gMagnitudeAtCenter;
+                    AssemblyModel.Positive(mu);
+                    AssemblyModel.Positive(vessel.mainBody.gravParameter);
+                    var accelerations = new Vec[count];
+                    for (int i = 0; i < count; i++)
+                    {
+                        var p = batch.GetPosition(i);
+                        CentralGravityShadow.Acceleration(p, center, mu);
+                        Vector3d acceleration = FlightGlobals.getGeeForceAtPosition(
+                            new Vector3d(p.X, p.Y, p.Z),
+                            vessel.mainBody
+                        );
+                        accelerations[i] = new Vec(acceleration.x, acceleration.y, acceleration.z);
+                    }
+                    pendingGravity = CentralGravityShadow.PredictCapturedAccelerations(
+                        batch,
+                        accelerations,
+                        out meanAcceleration
+                    );
+                    sample.gravityOrbitalMu = vessel.mainBody.gravParameter;
+                    sample.gravityAccelerationSource =
+                        "FlightGlobals.getGeeForceAtPosition(position,mainBody)";
+                    sample.gravityModelStatus = "captured-frozen-acceleration";
+                    sample.gravityMu = mu;
+                    sample.gravityCenterUnityWorld = A(center);
+                    sample.gravityMeanAcceleration = A(meanAcceleration);
+                }
+                catch (ArgumentException)
+                {
+                    sample.gravityModelStatus = "unavailable-invalid-central-model";
+                }
+            }
+            sample.gravityPredictionMilliseconds = clock.Elapsed.TotalMilliseconds - gravityStart;
             submittedAt = clock.Elapsed.TotalMilliseconds;
             SubmitStatus submission = worker.TrySubmit(batch);
             sample.submitMilliseconds = clock.Elapsed.TotalMilliseconds - submittedAt;
@@ -396,6 +463,14 @@ namespace KspContinuum
                 report.firstAcceptedBatch = pendingPhysical;
             }
             comparison.Attach(pendingSample, result, topology, physicalFrame);
+            if (pendingGravity != null)
+                gravityComparison.Attach(
+                    pendingSample,
+                    pendingGravity,
+                    result,
+                    topology,
+                    physicalFrame
+                );
             comparisonSample = pendingSample;
             report.accepted++;
         }
@@ -445,6 +520,7 @@ namespace KspContinuum
             if (finished)
                 return;
             finished = true;
+            gravityComparison.Cancel("on-" + state);
             if (comparison.Cancel("on-" + state))
             {
                 report.comparisonSkipped++;
@@ -457,6 +533,8 @@ namespace KspContinuum
             if (pendingSample != null)
             {
                 pendingSample.status = "abandoned-on-" + state;
+                if (pendingGravity != null)
+                    pendingSample.gravityComparisonStatus = "skipped-on-" + state;
                 pendingSample.collectUnityFrame = Time.frameCount;
                 pendingSample.handoffWallMilliseconds =
                     clock.Elapsed.TotalMilliseconds - submittedAt;
@@ -465,6 +543,7 @@ namespace KspContinuum
             pending = null;
             pendingSample = null;
             pendingPhysical = null;
+            pendingGravity = null;
             report.status = state;
             report.reason = reason;
             report.wallSeconds = clock.Elapsed.TotalSeconds;

@@ -332,9 +332,238 @@ static class Program
         );
     }
 
+    static ShadowReport gravityFixture;
+
+    static void GravityTests()
+    {
+        var source = SimulationBatch.FromColumns(
+            new WorkStamp(1, 1, 1),
+            .2,
+            new[] { 0, 1 },
+            new[] { 1.0, 100.0 },
+            new[] { new Vec(10, 0, 0), new Vec(0, 20, 0) },
+            new Vec[2],
+            new Vec[2]
+        );
+        Vec mean;
+        var predicted = CentralGravityShadow.Predict(source, new Vec(), 100, out mean);
+        Check(
+            System.Math.Abs(predicted.GetVelocity(0).X + .2) < 1e-14,
+            "central acceleration changes velocity"
+        );
+        Check(
+            System.Math.Abs(predicted.GetPosition(0).X - 9.98) < 1e-14,
+            "frozen central acceleration position"
+        );
+        Check(
+            System.Math.Abs(predicted.GetVelocity(1).Y + .05) < 1e-14,
+            "inverse square acceleration per body"
+        );
+        Check(mean.X == -.5 && mean.Y == -.125, "mean captured gravity telemetry");
+        Check(
+            source.GetVelocity(0).X == 0 && source.GetPosition(0).X == 10,
+            "baseline input remains immutable"
+        );
+        Check(
+            CentralGravityShadow.Acceleration(new Vec(1000010, 0, 0), new Vec(1000000, 0, 0), 100).X
+                == -1,
+            "translation invariant central field"
+        );
+        foreach (double bad in new[] { 0.0, -1, double.NaN, double.PositiveInfinity })
+        {
+            bool rejected = false;
+            try
+            {
+                CentralGravityShadow.Predict(source, new Vec(), bad, out mean);
+            }
+            catch (ArgumentException)
+            {
+                rejected = true;
+            }
+            Check(rejected, "invalid mu rejected");
+        }
+        bool singular = false;
+        try
+        {
+            CentralGravityShadow.Acceleration(new Vec(), new Vec(), 100);
+        }
+        catch (ArgumentException)
+        {
+            singular = true;
+        }
+        Check(singular, "singular radius rejected");
+        bool nonfinite = false;
+        try
+        {
+            CentralGravityShadow.PredictCapturedAccelerations(
+                source,
+                new[] { new Vec(), new Vec(double.NaN, 0, 0) },
+                out mean
+            );
+        }
+        catch (ArgumentException)
+        {
+            nonfinite = true;
+        }
+        Check(nonfinite, "nonfinite native acceleration rejected");
+        var one = SimulationBatch.FromColumns(
+            new WorkStamp(1, 1, 1),
+            .2,
+            new[] { 0 },
+            new[] { 1.0 },
+            new[] { new Vec(10, 0, 0) },
+            new Vec[1],
+            new Vec[1]
+        );
+        var gravity = CentralGravityShadow.Predict(one, new Vec(), 100, out mean);
+        var sample = new ShadowSample
+        {
+            tick = 1,
+            status = "accepted",
+            analyticAvailable = true,
+            bodies = 1,
+            parts = 1,
+            physicsEpoch = 3,
+            captureFixedTimeSeconds = 2,
+            stepSeconds = .2,
+            rawKrakensbaneFrameVelocity = new double[3],
+            vesselId = "00000000-0000-0000-0000-000000000001",
+            body = "synthetic-central-body",
+            situation = "FLYING",
+            topologyGeneration = 1,
+            frameGeneration = 1,
+            captureUnityFrame = 7,
+            collectUnityFrame = 7,
+            warpRate = 1,
+            gravityModelStatus = "captured-frozen-acceleration",
+            gravityAccelerationSource = "analytic-fixture",
+            gravityMu = 100,
+            gravityOrbitalMu = 100,
+            gravityCenterUnityWorld = new double[3],
+            gravityMeanAcceleration = new[] { -1.0, 0, 0 },
+        };
+        var baseline = new ShadowComparison();
+        baseline.Attach(sample, one, "t", "f");
+        var paired = new CentralGravityComparison();
+        paired.Attach(sample, gravity, one, "t", "f");
+        var observedPosition = new[] { new Vec(10, 0, 0) };
+        var observedVelocity = new Vec[1];
+        var endFrame = new[] { -.2, 0.0, 0.0 };
+        baseline.Observe(
+            4,
+            "t",
+            "f",
+            true,
+            .2,
+            2.2,
+            8,
+            1,
+            observedPosition,
+            observedVelocity,
+            endFrame
+        );
+        paired.Observe(
+            4,
+            "t",
+            "f",
+            true,
+            .2,
+            2.2,
+            8,
+            1,
+            observedPosition,
+            observedVelocity,
+            endFrame
+        );
+        Check(
+            sample.observedVelocityRmsMetersPerSecond == 0
+                && sample.gravityVelocityRmsMetersPerSecond == .2,
+            "raw central model can lose to zero"
+        );
+        Check(
+            sample.gravityVelocityRmsDeltaFromZero == .2
+                && !sample.gravityVelocityRmsRatioToZero.HasValue,
+            "negative result retained, zero denominator not divided"
+        );
+        Check(
+            sample.gravityFrameAdjustedVelocityAvailable
+                && sample.zeroFrameAdjustedVelocityAvailable,
+            "paired adjusted diagnostics available"
+        );
+        Check(
+            sample.gravityFrameAdjustedVelocityRmsMetersPerSecond == 0
+                && sample.zeroFrameAdjustedVelocityRmsMetersPerSecond == .2,
+            "subtract frame delta sign and matched baseline"
+        );
+        Check(
+            sample.gravityFrameAdjustedVelocityRmsDeltaFromZero == -.2,
+            "adjusted A/B uses same frame correction"
+        );
+        Check(
+            sample.gravityEndpointFrameVelocityDelta[0] == -.2,
+            "observed future frame delta retained"
+        );
+        var body = PhysicalBody();
+        body.mass = 1;
+        body.constraints = 0;
+        body.sleeping = false;
+        body.position = body.predictedPosition = body.worldCenterOfMass = new[] { 10.0, 0, 0 };
+        body.velocity =
+            body.predictedVelocity =
+            body.angularVelocity =
+            body.centerOfMass =
+                new double[3];
+        gravityFixture = new ShadowReport
+        {
+            evidence = "portable-helper-fixture",
+            status = "complete",
+            submitted = 1,
+            accepted = 1,
+            compared = 1,
+            firstAcceptedTick = 1,
+            physicsEpochs = 4,
+            originEvents = 1,
+            firstAcceptedBatch = new[] { body },
+            samples = new[] { sample },
+        };
+        var skipped = new ShadowSample
+        {
+            bodies = 1,
+            physicsEpoch = 3,
+            captureFixedTimeSeconds = 2,
+            stepSeconds = .2,
+        };
+        paired.Attach(skipped, gravity, one, "t", "f");
+        paired.Observe(
+            5,
+            "t",
+            "f",
+            true,
+            .2,
+            2.4,
+            8,
+            1,
+            observedPosition,
+            observedVelocity,
+            endFrame
+        );
+        Check(
+            !skipped.gravityComparisonAvailable
+                && skipped.gravityComparisonStatus == "skipped-missed-boundary",
+            "gravity shares refusal gate"
+        );
+        paired.Attach(skipped, gravity, one, "t", "f");
+        paired.Cancel("on-interrupted");
+        Check(
+            skipped.gravityComparisonStatus == "skipped-on-interrupted",
+            "gravity cancellation releases state"
+        );
+    }
+
     static void Main(string[] args)
     {
         ComparisonTests();
+        GravityTests();
         var epoch = new ShadowEpoch();
         Reject(() => epoch.CaptureStamp());
         epoch.Observe("a", "f", true);
@@ -540,12 +769,17 @@ static class Program
         Check(true, "empty unavailable report rejected");
         if (args.Length > 0)
         {
-            if (args.Length != 2 || args[0] != "--export-fixture")
+            if (
+                args.Length != 2
+                || args[0] != "--export-fixture" && args[0] != "--export-gravity-fixture"
+            )
                 throw new ArgumentException("Use --export-fixture NEW_PATH");
-            ShadowPhysicalInput.Validate(comparisonFixture);
+            var selectedFixture =
+                args[0] == "--export-gravity-fixture" ? gravityFixture : comparisonFixture;
+            ShadowPhysicalInput.Validate(selectedFixture);
             using (var output = new FileStream(args[1], FileMode.CreateNew, FileAccess.Write))
             {
-                var bytes = Encoding.UTF8.GetBytes(ReportJson.Encode(comparisonFixture));
+                var bytes = Encoding.UTF8.GetBytes(ReportJson.Encode(selectedFixture));
                 output.Write(bytes, 0, bytes.Length);
             }
         }

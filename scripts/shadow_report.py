@@ -53,6 +53,162 @@ def unique_keys(pairs):
     return result
 
 
+def paired_stat(samples, max_field, rms_field):
+    count = sum(sample['gravityComparedBodies'] for sample in samples)
+    scale = max(sample[rms_field] for sample in samples)
+    rms = 0 if scale == 0 else scale * math.sqrt(sum(
+        (sample[rms_field] / scale)**2 * sample['gravityComparedBodies'] / count
+        for sample in samples))
+    return {'maximum': max(sample[max_field] for sample in samples), 'rms': rms}
+
+
+def nullable_ratio(numerator, denominator):
+    if denominator <= 0:
+        return None
+    ratio = numerator / denominator
+    return ratio if math.isfinite(ratio) else None
+
+
+def near(actual, expected, label):
+    require(math.isclose(actual, expected, rel_tol=1e-12, abs_tol=1e-15), label + ' contradicts paired metrics')
+
+
+def gravity_summary(data, samples):
+    present = any(key.startswith('gravity') for key in data) or any(
+        any(key.startswith('gravity') or key.startswith('zeroFrameAdjusted') for key in sample)
+        for sample in samples)
+    if not present:
+        return None
+    require(data.get('gravityStrategy') == 'central-point-mass-frozen-acceleration/v1', 'unsupported gravity strategy')
+    for field in ('gravityExecution', 'gravityFrameAdjustedScope', 'gravityInterpretation'):
+        text(data.get(field), field)
+    model_counts, comparison_counts, frame_counts, sources = Counter(), Counter(), Counter(), Counter()
+    raw, adjusted = [], []
+    timing_fields = ('gravityPredictionMilliseconds', 'gravityComparisonMilliseconds')
+    timings = {field: [] for field in timing_fields}
+    raw_deltas, raw_ratios, adjusted_deltas = [], [], []
+    gravity_adjusted_count = zero_adjusted_count = 0
+    comparison_statuses = COMPARISONS | {'skipped-worker-stale'} | {'skipped-on-' + s for s in TERMINAL}
+    for sample in samples:
+        model = sample.get('gravityModelStatus')
+        require(model in ('not-captured', 'captured-frozen-acceleration',
+                          'unavailable-no-central-body', 'unavailable-invalid-central-model'), 'invalid gravity model status')
+        comparison = sample.get('gravityComparisonStatus')
+        frame_status = sample.get('gravityFrameAdjustedStatus')
+        require(comparison in comparison_statuses, 'invalid gravity comparison status')
+        require(frame_status in comparison_statuses | {'unavailable-invalid-frame-delta'}, 'invalid adjusted status')
+        model_counts[model] += 1
+        comparison_counts[comparison] += 1
+        frame_counts[frame_status] += 1
+        source = text(sample.get('gravityAccelerationSource'), 'gravityAccelerationSource')
+        require(source in ('not-captured', 'analytic-fixture',
+                           'FlightGlobals.getGeeForceAtPosition(position,mainBody)'), 'unsupported acceleration source')
+        sources[source] += 1
+        for field in timing_fields:
+            timings[field].append(finite(sample.get(field), field, 0, 1e9))
+        for field in ('gravityComparisonAvailable', 'gravityFrameAdjustedVelocityAvailable',
+                      'zeroFrameAdjustedVelocityAvailable'):
+            require(type(sample.get(field)) is bool, field + ' must be boolean')
+        available = sample['gravityComparisonAvailable']
+        gravity_adjusted = sample['gravityFrameAdjustedVelocityAvailable']
+        zero_adjusted = sample['zeroFrameAdjustedVelocityAvailable']
+        gravity_adjusted_count += gravity_adjusted
+        zero_adjusted_count += zero_adjusted
+        require(available == (comparison == 'compared'), 'gravity availability contradicts status')
+        count = integer(sample.get('gravityComparedBodies'), 'gravityComparedBodies', 0, sample['bodies'])
+        for field in ('gravityMu', 'gravityOrbitalMu'):
+            value = finite(sample.get(field), field, 0, 1e100)
+            require(model != 'captured-frozen-acceleration' or value > 0, 'captured gravity requires positive parameters')
+        for field in ('gravityCenterUnityWorld', 'gravityMeanAcceleration'):
+            values = sample.get(field)
+            require(isinstance(values, list) and len(values) == (3 if model == 'captured-frozen-acceleration' else 0),
+                    'gravity model vector availability mismatch')
+            for value in values:
+                finite(value, field, -1e100, 1e100)
+        require((source != 'not-captured') == (model == 'captured-frozen-acceleration'), 'gravity source availability mismatch')
+        metric_pairs = (
+            ('gravityPositionMaxMeters', 'gravityPositionRmsMeters', available),
+            ('gravityVelocityMaxMetersPerSecond', 'gravityVelocityRmsMetersPerSecond', available),
+            ('gravityFrameAdjustedVelocityMaxMetersPerSecond', 'gravityFrameAdjustedVelocityRmsMetersPerSecond', gravity_adjusted),
+            ('zeroFrameAdjustedVelocityMaxMetersPerSecond', 'zeroFrameAdjustedVelocityRmsMetersPerSecond', zero_adjusted))
+        for max_field, rms_field, metric_available in metric_pairs:
+            maximum = finite(sample.get(max_field), max_field, 0, 1e100)
+            rms = finite(sample.get(rms_field), rms_field, 0, 1e100)
+            require(rms <= maximum, 'gravity RMS exceeds maximum')
+            require(metric_available or maximum == rms == 0, 'unavailable gravity metric contains data')
+        delta = finite(sample.get('gravityVelocityRmsDeltaFromZero'), 'gravity raw delta', -1e100, 1e100)
+        adjusted_delta = finite(sample.get('gravityFrameAdjustedVelocityRmsDeltaFromZero'), 'adjusted delta', -1e100, 1e100)
+        require('gravityVelocityRmsRatioToZero' in sample, 'missing gravity ratio availability')
+        ratio = sample['gravityVelocityRmsRatioToZero']
+        if ratio is not None:
+            finite(ratio, 'gravity ratio', 0, sys.float_info.max)
+        endpoint_delta = sample.get('gravityEndpointFrameVelocityDelta')
+        require(isinstance(endpoint_delta, list) and len(endpoint_delta) in (0, 3), 'invalid endpoint frame delta')
+        for value in endpoint_delta:
+            finite(value, 'endpoint frame delta', -1e100, 1e100)
+        if available:
+            require(model == 'captured-frozen-acceleration' and sample['observedComparisonAvailable']
+                    and count == sample['comparedBodies'] == sample['bodies'], 'unpaired gravity comparison')
+            near(delta, sample['gravityVelocityRmsMetersPerSecond'] - sample['observedVelocityRmsMetersPerSecond'], 'gravity raw delta')
+            baseline = sample['observedVelocityRmsMetersPerSecond']
+            expected_ratio = nullable_ratio(sample['gravityVelocityRmsMetersPerSecond'], baseline)
+            if expected_ratio is None or not math.isfinite(expected_ratio):
+                require(ratio is None, 'undefined gravity ratio must be null')
+            else:
+                require(ratio is not None, 'missing defined gravity ratio')
+                near(ratio, expected_ratio, 'gravity ratio')
+            require(len(endpoint_delta) == 3, 'compared gravity lacks frame delta')
+            observed_frame = sample.get('comparisonRawKrakensbaneFrameVelocity')
+            require(isinstance(observed_frame, list) and len(observed_frame) == 3, 'missing observed frame velocity')
+            for component, start, end in zip(endpoint_delta, sample['rawKrakensbaneFrameVelocity'], observed_frame):
+                finite(end, 'observed frame velocity', -1e100, 1e100)
+                near(component, end - start, 'endpoint frame delta')
+            raw.append(sample)
+            raw_deltas.append(delta)
+            if ratio is not None:
+                raw_ratios.append(ratio)
+        else:
+            require(count == 0 and delta == 0 and ratio is None and not endpoint_delta,
+                    'unavailable gravity comparison contains paired results')
+        require(not (gravity_adjusted or zero_adjusted) or available, 'adjusted metric lacks raw comparison')
+        require(not gravity_adjusted or frame_status == 'compared', 'adjusted gravity status mismatch')
+        require(not zero_adjusted or gravity_adjusted, 'adjusted zero lacks paired gravity')
+        if gravity_adjusted and zero_adjusted:
+            near(adjusted_delta, sample['gravityFrameAdjustedVelocityRmsMetersPerSecond']
+                 - sample['zeroFrameAdjustedVelocityRmsMetersPerSecond'], 'adjusted gravity delta')
+            adjusted.append(sample)
+            adjusted_deltas.append(adjusted_delta)
+        else:
+            require(adjusted_delta == 0, 'unavailable adjusted pair has delta')
+    raw_summary = adjusted_summary = None
+    if raw:
+        position = paired_stat(raw, 'gravityPositionMaxMeters', 'gravityPositionRmsMeters')
+        velocity = paired_stat(raw, 'gravityVelocityMaxMetersPerSecond', 'gravityVelocityRmsMetersPerSecond')
+        zero = paired_stat(raw, 'observedVelocityMaxMetersPerSecond', 'observedVelocityRmsMetersPerSecond')
+        raw_summary = {'gravityPositionMeters': position, 'gravityVelocityMetersPerSecond': velocity,
+                       'matchedZeroVelocityMetersPerSecond': zero,
+                       'velocityRmsDeltaFromZero': velocity['rms'] - zero['rms'],
+                       'velocityRmsRatioToZero': nullable_ratio(velocity['rms'], zero['rms']),
+                       'sampleRmsDeltas': distribution(raw_deltas), 'sampleRmsRatios': distribution(raw_ratios),
+                       'undefinedSampleRatios': len(raw) - len(raw_ratios)}
+    if adjusted:
+        gravity = paired_stat(adjusted, 'gravityFrameAdjustedVelocityMaxMetersPerSecond', 'gravityFrameAdjustedVelocityRmsMetersPerSecond')
+        zero = paired_stat(adjusted, 'zeroFrameAdjustedVelocityMaxMetersPerSecond', 'zeroFrameAdjustedVelocityRmsMetersPerSecond')
+        adjusted_summary = {'gravityMetersPerSecond': gravity, 'zeroMetersPerSecond': zero,
+                            'rmsDeltaFromZero': gravity['rms'] - zero['rms'],
+                            'sampleRmsDeltas': distribution(adjusted_deltas)}
+    return {'strategy': data['gravityStrategy'], 'execution': data['gravityExecution'],
+            'interpretation': data['gravityInterpretation'], 'frameAdjustedScope': data['gravityFrameAdjustedScope'],
+            'modelStatuses': dict(model_counts), 'comparisonStatuses': dict(comparison_counts),
+            'frameAdjustedStatuses': dict(frame_counts), 'accelerationSources': dict(sources),
+            'rawPairedSamples': len(raw), 'rawPairedBodyComparisons': sum(s['gravityComparedBodies'] for s in raw),
+            'gravityAdjustedAvailableSamples': gravity_adjusted_count, 'zeroAdjustedAvailableSamples': zero_adjusted_count,
+            'adjustedPairedSamples': len(adjusted), 'adjustedPairedBodyComparisons': sum(s['gravityComparedBodies'] for s in adjusted),
+            'raw': raw_summary, 'adjustedVelocity': adjusted_summary,
+            'timingsMilliseconds': {key: distribution(values) for key, values in timings.items()},
+            'aggregation': 'body-weighted RMS on matched samples; deltas compare like-for-like frames; adjusted results condition on observed future frame velocity'}
+
+
 def summary(data):
     require(isinstance(data, dict) and data.get('schema') == 'ksp-continuum-flight-shadow/v2',
             'requires observed-comparison v2 receipt; v1 arithmetic is not observed physics')
@@ -184,7 +340,7 @@ def summary(data):
         'residuals': residuals, 'residualAggregation': 'body-weighted sample RMS; zero-force model discrepancy, not solver error',
         'timingsMilliseconds': {key: distribution(values) for key, values in timings.items()},
         'sampleBodyCounts': distribution(body_counts), 'physicalInput': physical,
-        'wallSeconds': data['wallSeconds'],
+        'wallSeconds': data['wallSeconds'], 'gravity': gravity_summary(data, samples),
         'sourceRuntime': {key: data.get(key) for key in ('unity', 'ksp', 'plugin', 'startedUtc')},
     }
 

@@ -51,6 +51,95 @@ def fixture():
 
 
 class ShadowReportTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / 'gravity.json'
+            run = subprocess.run(['dotnet', 'run', '--project',
+                                  str(ROOT / 'tests/KspContinuum.Shadow.Tests'), '-c', 'Release',
+                                  '--', '--export-gravity-fixture', str(receipt)], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=60)
+            if run.returncode:
+                raise RuntimeError(run.stdout + run.stderr)
+            cls.gravity_fixture = json.loads(receipt.read_text())
+
+    def test_real_gravity_paired_raw_and_adjusted_summary(self):
+        code, report = self.invoke(self.gravity_fixture)
+        self.assertEqual(code, 0)
+        self.assertIsNotNone(report.get('gravity'))
+        gravity = report['gravity']
+        self.assertEqual(gravity['rawPairedSamples'], 1)
+        self.assertEqual(gravity['adjustedPairedSamples'], 1)
+        self.assertAlmostEqual(gravity['raw']['gravityVelocityMetersPerSecond']['rms'], .2)
+        self.assertAlmostEqual(gravity['raw']['velocityRmsDeltaFromZero'], .2)
+        self.assertIsNone(gravity['raw']['velocityRmsRatioToZero'])
+        self.assertAlmostEqual(gravity['adjustedVelocity']['zeroMetersPerSecond']['rms'], .2)
+        self.assertEqual(gravity['adjustedVelocity']['gravityMetersPerSecond']['rms'], 0)
+        self.assertAlmostEqual(gravity['adjustedVelocity']['rmsDeltaFromZero'], -.2)
+        self.assertEqual(gravity['accelerationSources'], {'analytic-fixture': 1})
+        self.assertIn('gravityPredictionMilliseconds', gravity['timingsMilliseconds'])
+        self.assertFalse(report['solverAccuracyQualified'])
+
+    def test_gravity_aggregate_compares_matched_weighted_populations(self):
+        data = copy.deepcopy(self.gravity_fixture)
+        second = copy.deepcopy(data['samples'][0])
+        second.update(tick=2, parts=2, bodies=2, comparedBodies=2, gravityComparedBodies=2,
+                      observedVelocityMaxMetersPerSecond=1, observedVelocityRmsMetersPerSecond=1,
+                      gravityVelocityMaxMetersPerSecond=.6, gravityVelocityRmsMetersPerSecond=.6,
+                      gravityVelocityRmsDeltaFromZero=-.4, gravityVelocityRmsRatioToZero=.6,
+                      zeroFrameAdjustedVelocityMaxMetersPerSecond=.5,
+                      zeroFrameAdjustedVelocityRmsMetersPerSecond=.5,
+                      gravityFrameAdjustedVelocityMaxMetersPerSecond=.2,
+                      gravityFrameAdjustedVelocityRmsMetersPerSecond=.2,
+                      gravityFrameAdjustedVelocityRmsDeltaFromZero=-.3)
+        data['samples'].append(second)
+        data.update(submitted=2, accepted=2, compared=2)
+        code, report = self.invoke(data)
+        self.assertEqual(code, 0)
+        gravity = report['gravity']
+        self.assertEqual(gravity['rawPairedBodyComparisons'], 3)
+        expected_gravity = ((.2**2 + 2*.6**2)/3)**.5
+        expected_zero = (2/3)**.5
+        self.assertAlmostEqual(gravity['raw']['gravityVelocityMetersPerSecond']['rms'], expected_gravity)
+        self.assertAlmostEqual(gravity['raw']['velocityRmsDeltaFromZero'], expected_gravity - expected_zero)
+        self.assertAlmostEqual(gravity['raw']['velocityRmsRatioToZero'], expected_gravity / expected_zero)
+        self.assertEqual(gravity['raw']['undefinedSampleRatios'], 1)
+        self.assertAlmostEqual(gravity['adjustedVelocity']['rmsDeltaFromZero'],
+                               (2*.2**2/3)**.5 - ((.2**2+2*.5**2)/3)**.5)
+
+    def test_overflowing_gravity_ratio_stays_unavailable(self):
+        data = copy.deepcopy(self.gravity_fixture)
+        data['samples'][0]['observedVelocityMaxMetersPerSecond'] = 1e-320
+        data['samples'][0]['observedVelocityRmsMetersPerSecond'] = 1e-320
+        code, report = self.invoke(data)
+        self.assertEqual(code, 0)
+        self.assertIsNone(report['gravity']['raw']['velocityRmsRatioToZero'])
+
+    def test_legacy_v2_has_no_gravity_section(self):
+        code, report = self.invoke(fixture())
+        self.assertEqual(code, 0)
+        self.assertIsNone(report.get('gravity'))
+
+    def test_malformed_gravity_section_is_rejected(self):
+        changes = [
+            ('gravityComparisonAvailable', 1), ('gravityComparedBodies', True),
+            ('gravityPositionRmsMeters', 100), ('gravityMu', -1),
+            ('gravityComparisonStatus', 'not-accepted'),
+            ('gravityVelocityRmsDeltaFromZero', 99), ('gravityVelocityRmsRatioToZero', 1),
+            ('gravityFrameAdjustedVelocityRmsDeltaFromZero', 99),
+            ('zeroFrameAdjustedVelocityAvailable', False),
+            ('gravityEndpointFrameVelocityDelta', [99, 0, 0]),
+            ('gravityPredictionMilliseconds', -1),
+        ]
+        for field, value in changes:
+            with self.subTest(field=field):
+                data = copy.deepcopy(self.gravity_fixture)
+                data['samples'][0][field] = value
+                self.assertEqual(self.invoke(data), (1, None))
+        data = copy.deepcopy(self.gravity_fixture)
+        del data['gravityStrategy']
+        self.assertEqual(self.invoke(data), (1, None))
+
     def invoke(self, data=None, raw=None):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / 'receipt.json'
