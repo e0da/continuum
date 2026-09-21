@@ -62,6 +62,18 @@ static class Program
             new MarkerReport { name = "Missing", available = new bool[2], nanoseconds = new long[2], blocks = new int[2] } } };
         ProfilingSummary.Finish(empty, 0);
         Check(empty.frames.Length == 0 && empty.wallIntervals == null && empty.markers[0].status == "unavailable");
+        var forceContext = new ForceObservationContext("11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222", "FLIGHT", "frame-1", 10, -42, 1, 1, 1, 0, 100, 1, .02, new Vec());
+        var forcePart = new ForcePartObservation(1, 0, -8, -9, new Vec(1, 2, 3), new Vec(), new Vec(4, 5, 6),
+            new[] { new ForceAtPositionObservation(new Vec(7, 8, 9), new Vec(5, 5, 6), new Vec(1, 0, 0)) });
+        var forceReport = new ForceObservationReport { batches = new[] { new ForceObservationBatch(forceContext, new[] { forcePart }) } };
+        using (JsonDocument json = JsonDocument.Parse(ReportJson.Encode(forceReport)))
+        {
+            var batch = json.RootElement.GetProperty("batches")[0];
+            Check(batch.GetProperty("parts")[0].GetProperty("force").GetProperty("Y").GetDouble() == 2);
+            Check(batch.GetProperty("parts")[0].GetProperty("forces")[0].GetProperty("worldLeverArm").GetProperty("X").GetDouble() == 1);
+            Check(json.RootElement.GetProperty("gravity").GetString() == "unavailable-not-observed");
+        }
         Console.WriteLine("Profiling: " + assertions + " assertions passed.");
     }
 }

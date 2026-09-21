@@ -29,6 +29,94 @@ class QualificationReportTests(unittest.TestCase):
         for index, phase in enumerate(PHASES):
             self.write_phase(phase, index)
 
+    @staticmethod
+    def force_report():
+        vec = lambda x=0: {"X": x, "Y": 0, "Z": 0}
+        session = "11111111-1111-1111-1111-111111111111"
+        return {
+            "schema": "ksp-continuum-part-force-observation/v1",
+            "provider": "continuum-part-census", "providerVersion": "1",
+            "sessionId": session, "nativeAssemblyMvid": session,
+            "status": "interrupted", "cleanupStatus": "removed-owned-callbacks",
+            "timingStage": "TimingManager.FashionablyLate", "partCensusStatus": "captured-component-only",
+            **{key: "unavailable-not-observed" for key in ("stockAerodynamics", "gravity", "contactsAndConstraints", "directRigidbodyWrites")},
+            "maxBatches": 16, "maxPartsPerBatch": 512, "maxHoldersPerPart": 64,
+            "maxRetainedParts": 2048, "maxRetainedHolders": 4096,
+            "completedBatches": 1, "retainedParts": 1, "retainedHolders": 1,
+            "skippedCallbacks": 0, "physicsEpochs": 1, "originEvents": 0,
+            "batches": [{"context": {
+                "providerSession": session, "vesselId": session, "scene": "FLIGHT",
+                "referenceFrame": "unity-world-at-FashionablyLate", "frameKey": "FLIGHT:1:0",
+                "unityFrame": 10, "mainBodyInstanceId": -42, "physicsEpoch": 1,
+                "topologyGeneration": 1, "frameGeneration": 1, "floatingOriginEvents": 0,
+                "universalTime": 123, "fixedTimeSeconds": 1.0, "stepSeconds": 0.02,
+                "rawKrakensbaneFrameVelocity": vec(),
+            }, "parts": [{"flightId": 7, "parentFlightId": 0, "nativePartInstanceId": -8,
+                "nativeRigidbodyInstanceId": -9, "rigidBodyPartFlightId": 7,
+                "force": vec(1), "torque": vec(2), "worldCenterOfMass": vec(3),
+                "forces": [{"force": vec(4), "worldPosition": vec(5), "worldLeverArm": vec(2)}]}]}],
+        }
+
+    def test_component_force_coverage_is_distinct_from_total_force(self):
+        path = self.source / "coast-markers.json"
+        report = json.loads(path.read_text())
+        report["partForces"] = self.force_report()
+        path.write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads((self.output / "summary.json").read_text())
+        capture = summary["phases"][0]["profiler"].get("partForces")
+        self.assertIsNotNone(capture, "component observations must reach the consumer")
+        self.assertEqual(1, capture["capturedBatches"])
+        self.assertEqual(1, capture["capturedParts"])
+        self.assertEqual(1, capture["capturedPositionForces"])
+        page = (self.output / "index.html").read_text()
+        self.assertIn("Part force observations", page)
+        self.assertIn("not total force", page)
+        self.assertIn("No part-force observation recorded", page)
+
+    def test_empty_force_capture_does_not_claim_usable_observations(self):
+        path = self.source / "coast-markers.json"
+        report = self.marker_report(0)
+        capture = self.force_report()
+        capture.update(status="bounded", partCensusStatus="not-observed", batches=[],
+                       completedBatches=0, retainedParts=0, retainedHolders=0)
+        report["partForces"] = capture
+        path.write_text(json.dumps(report))
+        result = self.run_report()
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads((self.output / "summary.json").read_text())
+        self.assertFalse(summary["phases"][0]["profiler"]["partForces"]["usableComponentCapture"])
+        self.assertIn("diagnostic only", (self.output / "index.html").read_text())
+
+    def test_rejects_malformed_force_coverage_and_cleanup_contradictions(self):
+        import copy
+        mutations = [
+            lambda r: r.update(status="complete"),
+            lambda r: r["batches"][0]["parts"][0].update(parentFlightId=999),
+            lambda r: r["batches"][0]["parts"][0].update(rigidBodyPartFlightId=999),
+            lambda r: r.update(cleanupStatus="registered"),
+            lambda r: r.update(gravity="captured"),
+            lambda r: r.update(retainedParts=2),
+            lambda r: r.update(cleanupStatus="cleanup-error"),
+            lambda r: r["batches"][0]["context"].update(providerSession="wrong"),
+            lambda r: r["batches"][0]["context"].update(stepSeconds=0),
+            lambda r: r["batches"][0]["parts"][0]["force"].update(X=float("nan")),
+            lambda r: r["batches"][0]["parts"].append(copy.deepcopy(r["batches"][0]["parts"][0])),
+            lambda r: r["batches"][0]["parts"][0].update(worldCenterOfMass=None),
+            lambda r: r["batches"][0]["parts"][0]["forces"][0].update(worldLeverArm=None),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.output = self.root / ("force-invalid-output-%d" % index)
+                path = self.source / "coast-markers.json"
+                report = self.marker_report(0)
+                report["partForces"] = self.force_report()
+                mutate(report["partForces"])
+                path.write_text(json.dumps(report))
+                result = self.run_report()
+                self.assertNotEqual(0, result.returncode, "invalid force contract accepted")
+
     def tearDown(self):
         self.temporary.cleanup()
 
