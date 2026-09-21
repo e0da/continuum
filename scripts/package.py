@@ -25,7 +25,7 @@ with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
                  'space-program.md', 'naming.md', 'wiki-templates.md', 'chronicle.md',
                  'simulation-worker.md', 'profiling.md', 'input-comparison.md', 'worker-benchmark.md', 'structural-benchmark.md',
                  'orbital-fixture.md', 'layout-benchmark.md', 'telemetry-playback.md',
-                 'shadow-worker.md', 'field-gravity.md', 'field-trajectory.md', 'interaction-regimes.md', 'encounter-scheduler.md', 'force-observation.md', 'qualification-report.md', 'learned-compute.md'):
+                 'shadow-worker.md', 'field-gravity.md', 'field-trajectory.md', 'interaction-regimes.md', 'encounter-scheduler.md', 'force-observation.md', 'qualification-report.md', 'learned-compute.md', 'aerodynamics.md'):
         archive.write(root / 'docs' / name, 'GameData/KspContinuum/docs/' + name)
     archive.write(root / 'examples/neutral-inputs.csv', 'GameData/KspContinuum/examples/neutral-inputs.csv')
 print(output.name)
