@@ -57,6 +57,8 @@ MechJeb's minimum throttle is a fraction: `0.05` means 5%. Survey A001's origina
 
 The checkpoint path is an explicit survey experiment for the stock Kerbal X's safe Minmus-orbit milestone. It reconstructs native saved state in a new attempt sandbox and initializes a new landing controller. It does not continue the original in-memory autopilot or replay the original inputs.
 
+Mission initialization waits for KSP's Main Menu GUI-ready event to finish before changing scenes. Entering flight too early can deliver a delayed Main Menu event to the flight UI and initialize its maneuver panel twice. The startup gate fails after 30 wall seconds if that readiness event is missing.
+
 Add these options to the rendered survey command, using an unused attempt ID:
 
 ```sh
@@ -68,5 +70,7 @@ Add these options to the rendered survey command, using an unused attempt ID:
 Use leaf names from the same owned instance, not absolute paths. The checkpoint name omits `.sfs`. The source must have a matching native mission receipt and recorded capture milestone. Its exact bytes are checked against the supplied digest and copied into the new attempt; the source save is not the running destination. The child receipt records the parent attempt, checkpoint name and digest for the [chronicle](chronicle.md).
 
 Checkpoint qualification checks the reconstructed vessel before acquiring control. Keep external MechJeb settings fixed between comparison runs and retain their hashes: the native save overlays local settings on separate global and craft-type configuration files. A save alone does not capture that whole environment. Original and child attempts retain their own outcomes, even when they share a checkpoint.
+
+The comparison epoch is the saved time plus 60 simulation seconds. Acquisition must occur within one second of that epoch at normal, unpacked physics. Orbital position and velocity are compared at the same observed time, with limits of 1 m and 0.01 m/s. Part identities, parent relationships, module order, resource capacities and flow states must match. Non-electric resource amounts have a small numerical tolerance; electric charge must retain at least 90% of its saved amount and differ by no more than 10% of capacity. Pose and angular speed are observations, not assertions of exact restoration.
 
 Use two unchanged-setting trials to measure reconstruction and landing variation before comparing controller variants. Record load and control-acquisition timing, resources, orbit and actual touchdown. The existing survey acceptance remains unchanged; a successful restore is not a successful landing.

@@ -29,6 +29,9 @@ namespace KspContinuum.Mission
         uint commandId;
         bool active, survey, siteWaitStarted, disableThrottleFloor;
         string attemptId;
+        bool bootstrapPending;
+        int menuReadyFrame = -1;
+        double bootstrapWall;
         CheckpointSource checkpointSource;
         CheckpointRestore checkpointRestore;
         SurveyFootprint footprint;
@@ -38,7 +41,25 @@ namespace KspContinuum.Mission
         const double OrbitAltitude = 100000;
         const double EncounterPeriapsis = 25000;
 
-        public void Start()
+        public void Awake()
+        {
+            string[] arguments = Environment.GetCommandLineArgs();
+            if (Array.IndexOf(arguments, "--continuum-survey") < 0 && Array.IndexOf(arguments, "--continuum-minmus") < 0 &&
+                Array.IndexOf(arguments, "--continuum-survey-disable-throttle-floor") < 0) return;
+            bootstrapPending = true;
+            bootstrapWall = Time.realtimeSinceStartup;
+            DontDestroyOnLoad(gameObject);
+            cleanup.Track("menu-ready", () => GameEvents.onLevelWasLoadedGUIReady.Remove(OnMenuReady));
+            GameEvents.onLevelWasLoadedGUIReady.Add(OnMenuReady);
+            Debug.Log("[ContinuumMission] Awaiting native MAINMENU GUI-ready event before mission initialization.");
+        }
+
+        void OnMenuReady(GameScenes scene)
+        {
+            if (bootstrapPending && scene == GameScenes.MAINMENU) menuReadyFrame = Time.frameCount;
+        }
+
+        void InitializeMission()
         {
             string[] arguments = Environment.GetCommandLineArgs();
             survey = Array.IndexOf(arguments, "--continuum-survey") >= 0;
@@ -86,7 +107,7 @@ namespace KspContinuum.Mission
                 telemetry = new StreamWriter(Path.Combine(directory, "mission.csv"));
                 telemetry.AutoFlush = true;
                 telemetry.WriteLine("wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,surface_speed_mps,throttle,stage,parts,packed,autopilot");
-                File.WriteAllText(Path.Combine(directory, "mission.txt"), "status=running\nsave=" + saveName + "\ncraft=Ships/VAB/Kerbal X.craft\nmechjebAssemblyVersion=" + assemblyVersion + "\nmechjebFileVersion=" + fileVersion + "\n");
+                File.WriteAllText(Path.Combine(directory, "mission.txt"), "status=running\nstartupBoundary=Native MAINMENU GUI-ready event completed before initialization on a later frame\nsave=" + saveName + "\ncraft=Ships/VAB/Kerbal X.craft\nmechjebAssemblyVersion=" + assemblyVersion + "\nmechjebFileVersion=" + fileVersion + "\n");
                 if (survey)
                 {
                     File.AppendAllText(Path.Combine(directory, "mission.txt"), SurveyReceipt());
@@ -108,6 +129,23 @@ namespace KspContinuum.Mission
 
         public void Update()
         {
+            if (bootstrapPending)
+            {
+                try
+                {
+                    if (Time.realtimeSinceStartup - bootstrapWall > 30)
+                        throw new TimeoutException("Native MAINMENU GUI-ready startup boundary was not observed within 30 seconds.");
+                    // HighLogic emits GUI-ready after yielding; leave its entire event dispatch before changing scenes.
+                    if (menuReadyFrame < 0 || Time.frameCount <= menuReadyFrame) return;
+                    if (HighLogic.LoadedScene != GameScenes.MAINMENU)
+                        throw new InvalidOperationException("Scene changed before mission initialization.");
+                    bootstrapPending = false;
+                    Release("menu-ready");
+                    InitializeMission();
+                }
+                catch (Exception error) { bootstrapPending = false; active = true; Fail(error); }
+                return;
+            }
             if (!active) return;
             CheckScreenshots();
             if (phase == Phase.Done) return;
