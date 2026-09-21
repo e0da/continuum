@@ -83,7 +83,7 @@ def invariants(p, v, masses):
     return {'energy': energy, 'angular': angular, 'momentum': momentum, 'center': center}
 
 
-def integrate(positions, velocities, masses, dt, steps, mode='direct', track=True):
+def integrate(positions, velocities, masses, dt, steps, mode='direct', track=True, force_provider=None):
     if mode not in ('direct', 'split'):
         raise ValueError('Force mode must be direct or split.')
     if not math.isfinite(dt) or not 0 < abs(dt) <= 1 or type(steps) is not int or not 1 <= steps <= 131072:
@@ -96,7 +96,14 @@ def integrate(positions, velocities, masses, dt, steps, mode='direct', track=Tru
         if any(len(row) != 3 or any(not math.isfinite(x) or abs(x) > 1e6 for x in row) for row in array):
             raise ValueError('Initial vectors must be finite triples with components bounded by 1e6.')
     p, v = [list(row) for row in positions], [list(row) for row in velocities]
-    a = accelerations(p, masses, mode)
+    def force(state):
+        if force_provider is None:
+            return accelerations(state, masses, mode)
+        value = force_provider(state, masses)
+        if len(value) != len(masses) or any(len(row) != 3 or any(not math.isfinite(x) for x in row) for row in value):
+            raise ValueError('Force provider must return one finite acceleration triple per body.')
+        return value
+    a = force(p)
     initial = invariants(p, v, masses) if track else None
     maxima = dict.fromkeys(('relativeEnergy', 'relativeAngularMomentum', 'absoluteCenterDrift', 'absoluteMomentumDrift'), 0.0)
     snapshots = []
@@ -117,7 +124,7 @@ def integrate(positions, velocities, masses, dt, steps, mode='direct', track=Tru
         if step == steps:
             break
         new_p = [[p[i][k]+v[i][k]*dt+.5*a[i][k]*dt*dt for k in range(3)] for i in range(len(masses))]
-        new_a = accelerations(new_p, masses, mode)
+        new_a = force(new_p)
         v = [[v[i][k]+.5*(a[i][k]+new_a[i][k])*dt for k in range(3)] for i in range(len(masses))]
         p, a = new_p, new_a
     if any(not math.isfinite(x) for state in (p, v) for row in state for x in row):

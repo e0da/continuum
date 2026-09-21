@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r tools/field-gravity/requirements.txt
-      - run: python -m unittest discover -s tests -p 'test_field_gravity.py' -v
+      - run: python -m unittest discover -s tests -p 'test_field*.py' -v
   structural:
     runs-on: ubuntu-latest
     steps:
