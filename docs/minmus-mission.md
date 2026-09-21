@@ -73,4 +73,6 @@ Checkpoint qualification checks the reconstructed vessel before acquiring contro
 
 The comparison epoch is the saved time plus 60 simulation seconds. Acquisition must occur within one second of that epoch at normal, unpacked physics. Orbital position and velocity are compared at the same observed time, with limits of 1 m and 0.01 m/s. Part identities, parent relationships, module order, resource capacities and flow states must match. Non-electric resource amounts have a small numerical tolerance; electric charge must retain at least 90% of its saved amount and differ by no more than 10% of capacity. Pose and angular speed are observations, not assertions of exact restoration.
 
+Checkpoint telemetry begins only after the native flight clock is ready at or after the saved epoch. The loading event uses the source epoch explicitly; wall-clock loading time remains measured separately. This prevents the transition from the main-menu clock to the saved clock from appearing as simulated travel.
+
 Use two unchanged-setting trials to measure reconstruction and landing variation before comparing controller variants. Record load and control-acquisition timing, resources, orbit and actual touchdown. The existing survey acceptance remains unchanged; a successful restore is not a successful landing.

@@ -385,7 +385,7 @@ namespace KspContinuum.Mission
                 "\nparentCheckpoint=" + checkpointSource.Checkpoint + "\nparentCheckpointSha256=" + checkpointSource.Sha256 +
                 "\ncheckpointCopySha256=" + CheckpointSource.FileDigest(copy) + "\ncheckpointSourceUT=" + F(checkpointSource.UniversalTime) +
                 "\ncheckpointAcquisitionEpochUT=" + F(checkpointSource.UniversalTime + 60) +
-                "\ncheckpointMode=native reconstructed orbit and resources; controller reinitialized, no saved angular-velocity or complete control-state replay\n" +
+                "\ncheckpointTelemetryClock=Samples begin only after native flight readiness at or after source UT; loading event uses source epoch\ncheckpointMode=native reconstructed orbit and resources; controller reinitialized, no saved angular-velocity or complete control-state replay\n" +
                 "neutralReplay=NOT RUN: installed MechJeb owns checkpoint controls.\n");
             Game game = GamePersistence.LoadGame("checkpoint-source", saveName, true, true);
             checkpointRestore = new CheckpointRestore(game, checkpointSource.UniversalTime);
@@ -393,7 +393,7 @@ namespace KspContinuum.Mission
             HighLogic.CurrentGame = game;
             game.Title = saveName + " (SANDBOX)";
             game.startScene = GameScenes.FLIGHT;
-            Move(Phase.CheckpointFlight);
+            Move(Phase.CheckpointFlight, checkpointSource.UniversalTime);
             game.Start();
         }
 
@@ -590,16 +590,24 @@ namespace KspContinuum.Mission
             return 3600;
         }
 
-        void Move(Phase next)
+        void Move(Phase next, double? epoch = null)
         {
-            phase = next; phaseWall = Time.realtimeSinceStartup; phaseUT = Planetarium.GetUniversalTime();
+            phase = next; phaseWall = Time.realtimeSinceStartup; phaseUT = epoch ?? Planetarium.GetUniversalTime();
             Debug.Log("[ContinuumMission] " + next);
             if (directory != null) File.AppendAllText(Path.Combine(directory, "events.txt"), F(phaseUT) + " " + next + "\n");
+        }
+
+        bool HasSimulationClock()
+        {
+            double now = Planetarium.GetUniversalTime();
+            return checkpointSource == null || (HighLogic.LoadedSceneIsFlight && FlightGlobals.ready && FlightGlobals.ActiveVessel != null &&
+                SurveyPolicy.Finite(now) && now >= checkpointSource.UniversalTime);
         }
 
         void WriteTelemetry()
         {
             if (telemetry == null) return;
+            if (!HasSimulationClock()) return;
             Vessel current = vessel != null ? vessel : FlightGlobals.ActiveVessel;
             string status = core == null ? "" : phase == Phase.Ascent ? core.Ascent.Status : phase == Phase.Landing ? core.Landing.Status : core.Node.State.ToString();
             telemetry.WriteLine(string.Join(",", F(Time.realtimeSinceStartup - startedWall), F(Planetarium.GetUniversalTime()), phase.ToString(),
@@ -613,7 +621,7 @@ namespace KspContinuum.Mission
         void WriteSurveyTelemetry()
         {
             Vessel current = vessel;
-            if (surveyTelemetry == null || current == null || core == null) return;
+            if (surveyTelemetry == null || current == null || core == null || !HasSimulationClock()) return;
             SurveyObservation observation = current.mainBody == minmus ? SurveyObservation.Read(current) : null;
             Quaternion rotation = current.rootPart.transform.rotation;
             Vector3 terrain = current.vesselTransform.TransformDirection(current.terrainNormal);
