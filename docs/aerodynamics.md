@@ -60,7 +60,7 @@ The first stock oracle should observe the exact completed `UpdateAerodynamics(Pa
 
 FAR exposes an aggregate prediction seam through [`FARAPI.CalculateVesselAeroForces`](https://github.com/ferram4/Ferram-Aerospace-Research/blob/787a30bc9deab0bde87591f0cc973ec3b0dd2de9/FerramAerospaceResearch/FARAPI.cs#L316-L348). Treat it as a separate provider and dataset. Its thread safety is not established, so initial calls remain on the main thread. Aggregate output cannot silently substitute for stock per-part labels.
 
-[ModularFlightIntegrator](https://github.com/sarbian/ModularFlightIntegrator/blob/03f07cd6e498ed003f84ee97ce976430e6447256/ModularFlightIntegrator.cs#L390-L430) exposes a single-owner aerodynamic override. FAR already owns that slot when installed. Continuum must not compete for it to observe or benchmark. A future active strategy would require an explicit owner configuration or a permanent dispatcher and likely a scene reload to change owners.
+[ModularFlightIntegrator](https://github.com/sarbian/ModularFlightIntegrator/blob/03f07cd6e498ed003f84ee97ce976430e6447256/ModularFlightIntegrator.cs#L734-L772) exposes a single-owner aerodynamic override. FAR already owns that slot when installed. Continuum must not compete for it to observe or benchmark. A future active strategy would require an explicit owner configuration or a permanent dispatcher and likely a scene reload to change owners.
 
 FAR source is GPLv3 and its assets have separate terms. Continuum should use public APIs, measured outputs and independently implemented algorithms rather than importing implementation code. MFI is MIT licensed.
 
