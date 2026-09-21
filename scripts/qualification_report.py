@@ -520,7 +520,8 @@ def player_loop_html(loop):
 
 
 def parse_shadow(data, phase):
-    if data.get("schema") != "ksp-continuum-flight-shadow/v1":
+    schema = data.get("schema")
+    if schema not in ("ksp-continuum-flight-shadow/v1", "ksp-continuum-flight-shadow/v2"):
         raise ReportError("unsupported shadow schema for " + phase)
     status = data.get("status")
     if status not in ("complete", "timeout", "unavailable", "interrupted", "failed"):
@@ -539,6 +540,7 @@ def parse_shadow(data, phase):
     }
     timings = {key: [] for key in timing_fields}
     observed_accepted = observed_stale = 0
+    observed_compared = observed_comparison_skipped = 0
     body_counts = []
     for sample in samples:
         if not isinstance(sample, dict):
@@ -550,11 +552,26 @@ def parse_shadow(data, phase):
             observed_stale += 1
         elif not isinstance(sample_status, str) or not sample_status.startswith("abandoned-on-"):
             raise ReportError("shadow sample status is invalid")
+        if schema.endswith("/v2"):
+            comparison_status = sample.get("comparisonStatus")
+            available = sample.get("observedComparisonAvailable")
+            if comparison_status == "compared" and available is True:
+                observed_compared += 1
+            elif isinstance(comparison_status, str) and comparison_status.startswith("skipped-") and available is False:
+                observed_comparison_skipped += 1
+            elif comparison_status != "not-accepted" or available is not False:
+                raise ReportError("shadow comparison status is invalid")
         body_counts.append(integer(sample.get("bodies"), "shadow body count", 1, MAX_BODIES))
         for label, field in timing_fields.items():
             timings[label].append(finite(sample.get(field), "shadow " + field, 0, 1e9))
     if observed_accepted != accepted or observed_stale != stale or accepted + stale > submitted:
         raise ReportError("shadow status counts do not match samples")
+    compared = comparison_skipped = None
+    if schema.endswith("/v2"):
+        compared = integer(data.get("compared"), "shadow compared count", 0, accepted)
+        comparison_skipped = integer(data.get("comparisonSkipped"), "shadow comparison skipped count", 0, accepted)
+        if compared != observed_compared or comparison_skipped != observed_comparison_skipped:
+            raise ReportError("shadow comparison counts do not match samples")
     first = data.get("firstAcceptedBatch")
     if not isinstance(first, list) or len(first) > MAX_BODIES:
         raise ReportError("first accepted shadow batch is invalid")
@@ -569,7 +586,8 @@ def parse_shadow(data, phase):
     if accepted:
         integer(first_tick, "first accepted tick", 0, 2 ** 63 - 1)
     return {
-        "status": status, "submitted": submitted, "accepted": accepted, "stale": stale,
+        "schema": schema, "status": status, "submitted": submitted, "accepted": accepted, "stale": stale,
+        "compared": compared, "comparisonSkipped": comparison_skipped,
         "abandoned": submitted - accepted - stale, "sampleCount": len(samples),
         "wallSeconds": wall, "sampleBodyCounts": distribution([float(x) for x in body_counts]),
         "firstAcceptedBodyCount": len(first), "firstAcceptedTick": first_tick if accepted else None,

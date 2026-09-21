@@ -2,7 +2,7 @@
 
 The opt-in flight probe captures actual active-vessel rigidbody data on Unity's main thread, transfers owned columns through `SimulationWorker`, and writes a JSON receipt. Stock KSP remains authoritative. The worker receives no Unity objects and the probe never applies its output to the vessel.
 
-This is a transport and lifecycle experiment. Its backend predicts `position + velocity * dt` with zero force and unchanged velocity. Its analytic residual checks that arithmetic against the captured input. It does **not** compare a predicted trajectory with a later stock observation, model gravity, estimate a physical error budget, or establish a performance improvement.
+This is a transport and lifecycle experiment. Its backend predicts `position + velocity * dt` with zero force and unchanged velocity. Its analytic residual checks that arithmetic against the captured input. Accepted predictions also wait for the next eligible, matching one-boundary stock observation. The probe reports position and velocity discrepancies against that observation. Stock includes gravity, thrust, contacts and constraints omitted by the baseline, so these discrepancies are not solver accuracy, a physical error budget, or performance evidence.
 
 ## Activation
 
@@ -26,9 +26,9 @@ A result whose stamp no longer matches is discarded and recorded as `stale-disca
 
 ## Receipt
 
-`GameData/KspContinuum/PluginData/shadow-<timestamp>-<unique-id>.json` uses `ksp-continuum-flight-shadow/v1`. Writes go through a unique temporary file and rename; final receipts are not overwritten. Export is bounded to 4 MiB. The report includes runtime versions, limits, terminal reason, observed origin/physics epoch counts, and at most 120 sample records, including any abandoned pending sample.
+`GameData/KspContinuum/PluginData/shadow-<timestamp>-<unique-id>.json` uses `ksp-continuum-flight-shadow/v2`. Writes go through a unique temporary file and rename; final receipts are not overwritten. Export is bounded to 4 MiB. The report includes runtime versions, limits, terminal reason, observed origin/physics epoch counts, and at most 120 sample records, including any abandoned pending sample.
 
-The outer schema remains v1 because its transport and lifecycle semantics are unchanged. Additive `physicalInputSchema=ksp-continuum-rigidbody-input/v1` and `referenceFrameSchema=ksp-continuum-unity-frame-context/v1` fields identify the new snapshot contract. Existing v1 readers may ignore these additive fields. A reader that calculates from the physical snapshot must require both discriminators and validate the bounded arrays.
+The outer schema is `ksp-continuum-flight-shadow/v2`. `physicalInputSchema=ksp-continuum-rigidbody-input/v1` and `referenceFrameSchema=ksp-continuum-unity-frame-context/v1` retain the snapshot contract. A reader must not interpret old v1 analytic arithmetic residuals as discrepancies against observed stock motion.
 
 Each sample records capture UT, Unity frames, vessel/body/situation, part/body counts, packed and warp context, worker stamp, prediction duration and status. It also records `referenceFrame=unity-world-at-capture`, the raw Krakensbane frame-velocity vector, and the physics-epoch and floating-origin-event counters observed for that request. Those fields expose the epoch context; they do not define a complete transform to a KSP inertial frame. Timing fields are milliseconds:
 
@@ -44,6 +44,24 @@ Oracle checking, first-batch receipt construction, final serialization and disk 
 
 The physical arrays must be finite, quaternions must be unit length within the contract's float tolerance, principal inertia components must be nonnegative, and synthetic forces must be exactly zero. A zero principal-inertia component is preserved but must not be naively inverted; this receipt does not assign it a physical meaning. Constraints and sleeping state do not expose solver iterations, sleep thresholds, constraint impulses, joints, contacts, collider geometry, force providers, torque, or module internals. The snapshot supports inspection or reconstruction of instantaneous Rigidbody inputs inside its captured Unity frame. It does not predict stock motion, span a frame transition, or constitute a deterministic replay checkpoint.
 
+## Comparison with the next stock observation
+
+A separate comparison owner retains at most one accepted immutable prediction. It does not relax worker stamp invalidation. At the first ordinary `Update`/`LateUpdate` observation after exactly one further host `FixedUpdate` boundary, it requires the same ordered topology, scene, eligible state and fixed-step duration. Multiple boundaries between observations are skipped rather than extrapolated. Routine floating-origin events and Krakensbane frame velocity changes are retained at both endpoints rather than treated as identity changes; raw-coordinate residuals therefore include KSP's frame adjustment as well as omitted forces.
+
+The observed `Time.fixedTime` difference must match the predicted duration within `max(1e-6 s, 2 * float epsilon * max(abs(captureTime), abs(observationTime)))`. When that tolerance reaches one quarter of the prediction duration, the comparison is skipped because the float clock cannot resolve the interval sufficiently. This is an observational guard, not a claim about all installed callback/solver ordering.
+
+`observedComparisonAvailable` gates all residual fields. `observedPositionMaxMeters` and `observedPositionRmsMeters` summarize per-body Euclidean position discrepancies; `observedVelocityMaxMetersPerSecond` and `observedVelocityRmsMetersPerSecond` summarize velocity discrepancies. RMS is over bodies, not individual coordinate components. The receipt includes compared body count, observation frame/boundary, capture and comparison fixed times, and observed duration. `comparisonStatus` explicitly records compared, pending, missed-boundary, context/time/precision rejection or teardown. Unavailable zero-valued metrics must never be interpreted as agreement. The report separately counts `compared` and `comparisonSkipped` accepted predictions.
+
+The final accepted prediction gets a comparison attempt before sample-bound completion. Wall timeout or teardown can still leave it unavailable, with an explicit skipped status. Comparison reads and aggregation add observer cost that existing transport timing fields do not separately attribute. A portable-helper fixture proves comparison arithmetic and refusal behavior; live KSP residuals require separate installed qualification.
+
 ## Verification boundary
 
 Portable shadow tests drive the real worker across blocked topology, frame, eligibility and return-to-prior-state transitions, verify acceptance without a transition, validate physical vectors, quaternions, inertias, force provenance and accepted-sample linkage, and parse nested receipt arrays. The native plugin compiles against owned KSP 1.12.5 assemblies. Installed observations of actual Rigidbody values, staging, origin changes, packing, scene transitions, interruption/export and actual threaded execution require separate game qualification; a source build and synthetic tests do not establish them.
+
+### Installed orbital observation
+
+An installed KSP 1.12.5 qualification run used package `0.1.3-shadow.9EB8D17FD681` (archive SHA-256 `9eb8d17fd681bcce836aed24bf727bce7ed549ab81eeea7b8e1bbf9c2357b2a0`) on the preserved Minmus-orbit workload. The capture completed 120 accepted worker requests with no stale or abandoned work in 4.922 wall seconds. It produced 119 next-boundary comparisons across 10 rigidbodies per comparison; one request explicitly skipped a missed boundary.
+
+Across 1,190 body comparisons, the largest raw-coordinate position discrepancy was `0.000117479 m` and the body-weighted RMS was `0.0000790755 m`. The largest velocity discrepancy was `0.000240641 m/s` and the body-weighted RMS was `0.0000829615 m/s`. Median capture time was `0.08535 ms`, median submission was `0.00820 ms`, and median observed handoff was `0.89175 ms`. These measurements qualify the installed capture, worker, next-observation comparison and export path for this coast workload. They do not isolate gravity, stock force integration, constraints or Krakensbane adjustment, and they do not qualify active publication or a replacement solver.
+
+Two preceding installed attempts retained zero comparisons because routine Krakensbane velocity changes and floating-origin events were initially treated as discontinuities. In ordinary orbit both vary continuously. The final contract keeps those signals at both endpoints and includes their effect in raw-coordinate discrepancy, while topology, scene, eligibility, step duration and exactly-one-boundary requirements remain gates.

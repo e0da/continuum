@@ -2,7 +2,7 @@
 
 An experimental KSP 1 toolkit for measuring simulation cost, recording flight inputs, and testing alternatives. The goal is faster, believable structural physics, including flex and breakage. Rigid grouping is one experiment, not a commitment to making every ship rigid.
 
-**Status: experimental measurement, input, and worker infrastructure.** The isolated physics benchmark has passed in headless KSP 1.12.5. This is a research harness, not a gameplay fix or a replacement physics engine. Synthetic timings are recorded in the validation receipt; stock-vessel speedup and mod compatibility remain unverified.
+**Status: experimental measurement, input, and worker infrastructure.** The isolated physics benchmark has passed in headless KSP 1.12.5, and an installed orbital coast has exercised the live background worker plus next-step stock comparison. This is a research harness, not a gameplay fix or a replacement physics engine. Stock-vessel speedup and mod compatibility remain unverified.
 
 ## What exists
 
@@ -15,7 +15,7 @@ An experimental KSP 1 toolkit for measuring simulation cost, recording flight in
 - An opt-in survey mode targets a sampled flat Minmus site in daylight. Two checkpoint trials landed upright with all 17 parts, approximately 120 m from the target, missing the unchanged 100 m criterion. This is a systems test fixture; see the [flight evidence](docs/validation.md).
 - A pure C# model verifies aligned-box aggregation and impulse-free separation without proprietary assemblies.
 - A [bounded background worker](docs/simulation-worker.md) accepts immutable batches with tick, topology, and frame identities. A reference constant-force backend and runnable serial/parallel comparison exercise the boundary without controlling KSP bodies.
-- An opt-in [flight shadow probe](docs/shadow-worker.md) captures real rigid-body arrays into the worker and rejects stale results. Its first accepted batch also retains pose, angular velocity, centers of mass, principal inertia and frame context for offline inspection. The worker still uses synthetic zero-force transport checks; aggregate native forces and stock-trajectory prediction remain unavailable.
+- An opt-in [flight shadow probe](docs/shadow-worker.md) captures real rigid-body arrays into the worker and rejects stale results. Its first accepted batch also retains pose, angular velocity, centers of mass, principal inertia and frame context for offline inspection. Accepted zero-force predictions can now be compared with the next matching stock observation; `scripts/shadow_report.py` summarizes those model discrepancies. Aggregate native forces and a validated stock-trajectory model remain unavailable.
 - An opt-in [lifecycle trace](docs/lifecycle-trace.md) records named callback observations, body/force samples and context changes under one bounded session sequence. Its portable tests and native build qualify the source path; installed ordering and the flight-panel controls remain unverified.
 - The opt-in qualification harness requests mission cancellation before process exit, preserving an `interrupted` outcome and separate cleanup receipts. Portable tests and native compilation cover this path; installed shutdown behavior still needs qualification.
 - An [input comparison tool](docs/input-comparison.md) measures sampled differences between recorded control tracks without claiming equivalent physics outcomes.
