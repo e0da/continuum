@@ -51,3 +51,14 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 enable_testing()
 add_test(NAME structural-report COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/test_report.py" "$<TARGET_FILE:continuum-structural>")
+
+add_executable(continuum-checkpoint checkpoint.cpp)
+target_link_libraries(continuum-checkpoint PRIVATE Jolt)
+target_compile_features(continuum-checkpoint PRIVATE cxx_std_17)
+target_compile_definitions(continuum-checkpoint PRIVATE
+  CONTINUUM_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  target_compile_options(continuum-checkpoint PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME checkpoint-report COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/checkpoint_test.py" "$<TARGET_FILE:continuum-checkpoint>")

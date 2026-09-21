@@ -48,6 +48,7 @@ The experiments are independent of the running game:
 | Tool | What it measures |
 | --- | --- |
 | [Native structural fixture](docs/structural-benchmark.md) | Pinned Jolt spring motion against an analytic reference, substep cost/error, and a floor-contact check |
+| [Contact checkpoints](docs/contact-checkpoints.md) | Uninterrupted contact/joint simulation versus full state restore and cold body reconstruction |
 | [Orbital/event fixture](docs/orbital-fixture.md) | An external local Gimbal coast implementation against independent orbital states, plus bounded encounter-event adversaries |
 | [Data-layout comparison](docs/layout-benchmark.md) | Object, SoA, and AoSoA captures under the same free-body and neighbor-reading kernels |
 | [Gravitational trajectories](docs/field-trajectory.md) | Analytic and step-refined Plummer trajectories, conservation, reversibility and a potential-consistent split toy |
@@ -75,3 +76,5 @@ The [space program](docs/space-program.md) develops the toolkit through actual m
 Generate a [mission chronicle and connected website](docs/chronicle.md) from attempt telemetry, confirmed screenshots and a maintained program catalog. The site connects missions, attempts, vehicles, landing sites and experiments while preserving the original reports. Reports and game saves remain local; this public repository contains their tooling and templates.
 
 The [local handoff fixture](docs/local-handoff.md) connects encounter planning, a local sphere solver, and atomic in-memory publication. It remains separate from live KSP ownership.
+
+The [state-ownership contract](docs/ksp-state-ownership.md) maps integration responsibilities, proposes a read-only callback trace, and identifies recovery requirements before a live driver can publish simulation results.
