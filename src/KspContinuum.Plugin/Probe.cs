@@ -21,6 +21,7 @@ namespace KspContinuum
         readonly Stopwatch clock = new Stopwatch();
         ProbeReport report;
         PlayerLoopTiming playerLoop;
+        PartForceObservation partForces;
         Action<ProbeReport> completion;
         bool started, finished;
         int completed;
@@ -56,6 +57,12 @@ namespace KspContinuum
                     playerLoop.Start();
                     report.playerLoop = playerLoop.Report;
                 }
+                if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-part-forces") >= 0)
+                {
+                    partForces = new PartForceObservation();
+                    partForces.Start();
+                    report.partForces = partForces.Report;
+                }
                 clock.Start();
                 // Recorder counters describe the previous frame; discard the partly enabled initial frame.
                 yield return null;
@@ -66,6 +73,7 @@ namespace KspContinuum
                     yield return null;
                     if (finished) yield break;
                     if (playerLoop != null) playerLoop.Audit();
+                    if (partForces != null) partForces.Tick();
                     double now = clock.Elapsed.TotalSeconds;
                     previous.observedFrame = Time.frameCount;
                     previous.markerFrame = Time.frameCount - 1;
@@ -152,6 +160,13 @@ namespace KspContinuum
                 catch (Exception error) { errors.Add("PlayerLoop: " + error.GetType().Name); }
                 if (playerLoop.Report.cleanupStatus == "cleanup-error") errors.Add("PlayerLoop: cleanup-error");
                 playerLoop = null;
+            }
+            if (partForces != null)
+            {
+                try { partForces.Dispose(); }
+                catch (Exception error) { errors.Add("PartForces: " + error.GetType().Name); }
+                if (partForces.Report.cleanupStatus == "cleanup-error") errors.Add("PartForces: cleanup-error");
+                partForces = null;
             }
             foreach (Slot slot in slots)
             {

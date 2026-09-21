@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -38,10 +40,11 @@ namespace KspContinuum
                 output.Append(((IFormattable)value).ToString(value is float || value is double ? "R" : null,
                     CultureInfo.InvariantCulture)); return;
             }
-            if (value is Array)
+            if (value is Array || value is ReadOnlyCollection<ForcePartObservation> ||
+                value is ReadOnlyCollection<ForceAtPositionObservation>)
             {
                 output.Append('['); bool first = true;
-                foreach (var item in (Array)value)
+                foreach (var item in (IEnumerable)value)
                 {
                     if (!first) output.Append(','); first = false; Write(output, item);
                 }
@@ -52,6 +55,9 @@ namespace KspContinuum
                 type != typeof(PartReport) && type != typeof(ProbeReport) && type != typeof(MarkerReport) &&
                 type != typeof(ProfileFrame) && type != typeof(ProfileDistribution) && type != typeof(ProfileMarkerSummary) &&
                 type != typeof(LoopTimingReport) && type != typeof(LoopTimingScope) && type != typeof(LoopTimingSample) &&
+                type != typeof(ForceObservationReport) && type != typeof(ForceObservationContext) &&
+                type != typeof(ForceObservationBatch) && type != typeof(ForcePartObservation) &&
+                type != typeof(ForceAtPositionObservation) && type != typeof(Vec) &&
                 type != typeof(ShadowReport) && type != typeof(ShadowSample) && type != typeof(ShadowBody))
                 throw new ArgumentException("Unsupported report type: " + type.FullName);
             output.Append('{'); bool firstField = true;

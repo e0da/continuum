@@ -62,7 +62,9 @@ The longer-term experiment is a shadow solver: capture a vessel's inputs, run a 
 
 Development advances along independent worker/backend, profiling, replay/input, and space-program/chronicle tracks. Missions provide workloads and acceptance evidence; landing precision does not gate unrelated simulation infrastructure. The current free-body worker proves a compute boundary, not complete force capture or a shadow vessel solver.
 
-See [integration map](docs/integration-map.md), [force-observation design](docs/force-observation.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
+The optional `--continuum-part-forces` probe captures a bounded read-only Part census before integration, with provider-local epoch and explicit missing force channels. It is a component-observation candidate; installed ordering and mod compatibility remain unqualified.
+
+See [interaction regimes and scheduling](docs/interaction-regimes.md), [integration map](docs/integration-map.md), [force-observation design](docs/force-observation.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
 
 ## Continuum Space Program
 

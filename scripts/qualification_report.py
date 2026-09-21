@@ -277,6 +277,9 @@ def parse_profiler(data, phase):
             "zeroBlockFrames": zero, "totalBlocks": blocks,
             "observedMilliseconds": observed_ms,
         })
+    part_forces = parse_part_forces(data.get("partForces"))
+    if part_forces and part_forces["cleanupStatus"] == "cleanup-error" and status != "cleanup-error":
+        raise ReportError("part-force cleanup failure contradicts profiler status")
     player_loop = parse_player_loop(data.get("playerLoop"))
     if player_loop and player_loop["cleanupStatus"] == "cleanup-error" and status != "cleanup-error":
         raise ReportError("player-loop cleanup failure must propagate to profiler cleanup status")
@@ -285,8 +288,147 @@ def parse_profiler(data, phase):
         "contextMisalignedFrames": misaligned, "frameIntervalsMilliseconds": distribution(intervals),
         "frameContexts": {"throttleCommand": throttle, "packed": packed,
                           "bodies": bodies, "situations": situations},
-        "markers": markers, "playerLoop": player_loop,
+        "markers": markers, "playerLoop": player_loop, "partForces": part_forces,
     }
+
+
+def parse_part_forces(data):
+    if data is None:
+        return None
+    if not isinstance(data, dict) or data.get("schema") != "ksp-continuum-part-force-observation/v1":
+        raise ReportError("unsupported part-force contract")
+    if (data.get("provider") != "continuum-part-census" or data.get("providerVersion") != "1"
+            or data.get("timingStage") != "TimingManager.FashionablyLate"):
+        raise ReportError("unsupported part-force provider")
+    status, cleanup = data.get("status"), data.get("cleanupStatus")
+    if status not in ("complete", "interrupted", "unavailable", "bounded", "invalid") or cleanup not in (
+            "not-registered", "removed-owned-callbacks", "owner-destroyed", "cleanup-error"):
+        raise ReportError("invalid part-force lifecycle")
+    for key in ("stockAerodynamics", "gravity", "contactsAndConstraints", "directRigidbodyWrites"):
+        if data.get(key) != "unavailable-not-observed":
+            raise ReportError("part census cannot establish coverage of " + key)
+    for key, bound in (("maxBatches", 16), ("maxPartsPerBatch", 512), ("maxHoldersPerPart", 64),
+                       ("maxRetainedParts", 2048), ("maxRetainedHolders", 4096)):
+        if integer(data.get(key), key, 1, bound) != bound:
+            raise ReportError("unsupported force capture bounds")
+
+    def identity(value):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value):
+            raise ReportError("invalid force identity")
+        return value
+
+    def vector(value):
+        if not isinstance(value, dict) or set(value) != {"X", "Y", "Z"}:
+            raise ReportError("invalid force vector")
+        for component in value.values():
+            finite(component, "force vector", -1e30, 1e30)
+
+    identity(data.get("sessionId"))
+    identity(data.get("nativeAssemblyMvid"))
+    batches = data.get("batches")
+    if not isinstance(batches, list) or len(batches) > 16:
+        raise ReportError("invalid force batch list")
+    count = integer(data.get("completedBatches"), "force batch count", 0, 16)
+    epochs = integer(data.get("physicsEpochs"), "force epochs", 0, 2 ** 63 - 1)
+    origins = integer(data.get("originEvents"), "force origins", 0, 2 ** 63 - 1)
+    skipped = integer(data.get("skippedCallbacks"), "skipped force callbacks", 0, 2 ** 31 - 1)
+    if count != len(batches) or (status == "complete" and count != 16) or (status == "unavailable" and count):
+        raise ReportError("force lifecycle contradicts captured batches")
+    if cleanup == "not-registered" and (count or status != "unavailable"):
+        raise ReportError("force observations lack registration evidence")
+    expected = "captured-component-only" if count else "not-observed"
+    if data.get("partCensusStatus") != expected:
+        raise ReportError("force component status contradicts observations")
+    total_parts, total_holders, last_epoch = 0, 0, 0
+    for batch in batches:
+        if not isinstance(batch, dict) or not isinstance(batch.get("context"), dict):
+            raise ReportError("invalid force batch")
+        ctx = batch["context"]
+        if (ctx.get("providerSession") != data["sessionId"] or ctx.get("scene") != "FLIGHT"
+                or ctx.get("referenceFrame") != "unity-world-at-FashionablyLate"):
+            raise ReportError("invalid force frame provenance")
+        identity(ctx.get("vesselId"))
+        frame_key = ctx.get("frameKey")
+        if not isinstance(frame_key, str) or not 1 <= len(frame_key) <= 512:
+            raise ReportError("invalid force frame key")
+        integer(ctx.get("unityFrame"), "force Unity frame", 0, 2 ** 31 - 1)
+        integer(ctx.get("mainBodyInstanceId"), "force body instance", -(2 ** 31), 2 ** 31 - 1)
+        epoch = integer(ctx.get("physicsEpoch"), "force batch epoch", last_epoch + 1, epochs)
+        last_epoch = epoch
+        for key in ("topologyGeneration", "frameGeneration"):
+            integer(ctx.get(key), key, 1, 2 ** 63 - 1)
+        integer(ctx.get("floatingOriginEvents"), "force origin events", 0, origins)
+        for key in ("universalTime", "fixedTimeSeconds"):
+            finite(ctx.get(key), key, -1e15, 1e15)
+        if finite(ctx.get("stepSeconds"), "force step", 0, 1e6) == 0:
+            raise ReportError("force step must be positive")
+        vector(ctx.get("rawKrakensbaneFrameVelocity"))
+        parts = batch.get("parts")
+        if not isinstance(parts, list) or not 1 <= len(parts) <= 512:
+            raise ReportError("invalid force parts")
+        ids, native_ids = set(), set()
+        total_parts += len(parts)
+        for part in parts:
+            if not isinstance(part, dict):
+                raise ReportError("invalid force part")
+            pid = integer(part.get("flightId"), "force part ID", 1, 2 ** 32 - 1)
+            native_id = integer(part.get("nativePartInstanceId"), "force native part ID", -(2 ** 31), 2 ** 31 - 1)
+            if pid in ids or native_id in native_ids:
+                raise ReportError("duplicate force part")
+            ids.add(pid); native_ids.add(native_id)
+            if integer(part.get("parentFlightId"), "force parent ID", 0, 2 ** 32 - 1) == pid:
+                raise ReportError("force part is its own parent")
+            if part.get("rigidBodyPartFlightId") is not None:
+                integer(part["rigidBodyPartFlightId"], "force physical part ID", 1, 2 ** 32 - 1)
+            body = part.get("nativeRigidbodyInstanceId")
+            center = part.get("worldCenterOfMass")
+            if (body is None) != (center is None):
+                raise ReportError("force center requires native body")
+            if body is not None:
+                integer(body, "force rigidbody ID", -(2 ** 31), 2 ** 31 - 1)
+                vector(center)
+            vector(part.get("force")); vector(part.get("torque"))
+            holders = part.get("forces")
+            if not isinstance(holders, list) or len(holders) > 64:
+                raise ReportError("invalid positioned-force entries")
+            total_holders += len(holders)
+            for holder in holders:
+                if not isinstance(holder, dict):
+                    raise ReportError("invalid positioned force")
+                vector(holder.get("force")); vector(holder.get("worldPosition"))
+                if (holder.get("worldLeverArm") is None) != (body is None):
+                    raise ReportError("force lever arm requires same-callback body context")
+                if body is not None:
+                    vector(holder["worldLeverArm"])
+        for part in parts:
+            if (part["parentFlightId"] != 0 and part["parentFlightId"] not in ids
+                    or part.get("rigidBodyPartFlightId") is not None and part["rigidBodyPartFlightId"] not in ids):
+                raise ReportError("force part references an absent captured part")
+    if (total_parts != integer(data.get("retainedParts"), "retained force parts", 0, 2048)
+            or total_holders != integer(data.get("retainedHolders"), "retained force holders", 0, 4096)):
+        raise ReportError("force retained counts contradict observations")
+    return {"status": status, "cleanupStatus": cleanup, "partCensusStatus": expected,
+            "capturedBatches": count, "capturedParts": total_parts, "capturedPositionForces": total_holders,
+            "skippedCallbacks": skipped, "physicsEpochs": epochs,
+            "usableComponentCapture": count > 0 and status in ("complete", "interrupted", "bounded") and cleanup == "removed-owned-callbacks"}
+
+
+def part_forces_html(capture):
+    heading = "<h3>Part force observations</h3>"
+    if capture is None:
+        return heading + "<p>No part-force observation recorded.</p>"
+    content = "<p>Status: {}; cleanup: {}. Retained: {} batches, {} part records, {} positioned-force entries.</p>".format(
+        html.escape(capture["status"]), html.escape(capture["cleanupStatus"]), capture["capturedBatches"],
+        capture["capturedParts"], capture["capturedPositionForces"])
+    content += ("<p>Raw Part census at FashionablyLate; not total force. Stock aerodynamics, gravity, contacts, "
+                "constraints and direct Rigidbody writes remain unavailable. These provider-local epochs cannot "
+                "be joined to the independent shadow capture by counter equality. Part records across batches "
+                "are repeated observations, not unique craft parts.</p>")
+    if not capture["usableComponentCapture"]:
+        content += "<p>Capture lifecycle is unqualified; retained entries are diagnostic only.</p>"
+    if capture["status"] == "bounded":
+        content += "<p>Retention budget reached; the next whole batch was rejected.</p>"
+    return heading + content
 
 
 def parse_player_loop(data):
@@ -668,6 +810,7 @@ def render(summary):
   </div>
   {physical_input}
   {player_loop}
+  {part_forces}
   <h3>Profiler markers</h3>
   <div class="table"><table><thead><tr><th>Marker</th><th>Status</th><th>Available / unavailable frames</th><th>Observed frames</th><th>Observed marker time (ms)</th></tr></thead><tbody>{markers}</tbody></table></div>
 </section>""".format(
@@ -686,6 +829,7 @@ def render(summary):
             abandoned=shadow["abandoned"], wall=fmt(shadow["wallSeconds"]),
             first_bodies=shadow["firstAcceptedBodyCount"], mass_units=html.escape(shadow["massUnits"]),
             player_loop=player_loop_html(profiler.get("playerLoop")),
+            part_forces=part_forces_html(profiler.get("partForces")),
             timings=timings, markers=markers, physical_input=physical_input_html(shadow.get("physicalInput")),
         ))
     missing = "None" if not summary["missingPhases"] else ", ".join(summary["missingPhases"])

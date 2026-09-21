@@ -79,5 +79,6 @@ namespace KspContinuum
         public ProfileFrame[] frames;
         public ProfileDistribution wallIntervals;
         public LoopTimingReport playerLoop;
+        public ForceObservationReport partForces;
     }
 }

@@ -54,3 +54,9 @@ The shadow worker is a read-only zero-force transport probe. Its exact analytic 
 ## Catalog integration
 
 Keep the raw report directory in ignored local artifacts. After review, a maintained experiment entry can link a derived chart or this local report and record its SHA-256, capture mode, package version, checkpoint digest, marker availability, window statuses and explicit observational boundary. Link only mission attempts that actually produced the receipts. A designed profiling or shadow experiment stays `designed` until a terminal native receipt exists; a completed transport report alone does not qualify replacement physics.
+
+## Part-force component coverage
+
+The optional `partForces` receipt uses `ksp-continuum-part-force-observation/v1`. The consumer validates provider/stage, lifecycle, fixed bounds, batch counts, context identities, monotonic callback epochs, finite vectors and part references before summarizing retained batches and records. Missing legacy fields are explicitly absent. Raw diagnostic prose is not copied into the public summary.
+
+Only positive-count captures with a valid terminal prefix and verified callback removal are labeled usable component observations. Cleanup errors must propagate to the outer profiler status. Destroyed owners, invalid captures and no samples remain unqualified. The UI never sums the census into total force, converts raw units to Newtons, infers omitted channels, or joins independent Shadow epochs.

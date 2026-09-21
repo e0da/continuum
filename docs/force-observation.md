@@ -1,14 +1,14 @@
 # Force observation boundary
 
-Continuum does not currently capture native aggregate force. The flight shadow receipt records rigidbody pose, velocity, angular state, inertia and limited frame context; its force columns are synthetic zeros for a transport check. This document recommends a future observation seam. It does not describe an implemented adapter or qualify compatibility with a flight integrator, aerodynamic model or gravity replacement.
+Continuum has an opt-in component observer, enabled with `--continuum-part-forces` during an existing Probe capture. It copies raw `Part.force`, `Part.torque` and `Part.forces` entries at `FashionablyLate`. Source tests and compilation do not qualify installed callback ordering or compatibility. No aggregate-force or solver-replacement claim follows from this capture. The separate flight-shadow worker still uses synthetic zero forces for its transport check.
 
-## Recommended seam
+## Implemented experimental seam
 
-Put KSP-specific readers behind a Continuum-owned, read-only force provider. A provider would return a bounded immutable batch with its identity and version, capture time, vessel and topology identity, physics epoch, reference-frame discriminator and per-part observations. Keep Unity and KSP objects on the main thread.
+`PartForceObservation` owns a read-only main-thread callback and copies values into immutable Core batches. The receipt records provider identity and native assembly MVID; batches link to its session and record capture time, vessel and topology identity, a provider-local physics epoch, frame generations and per-part observations. Unity and KSP objects never enter the portable batches.
 
-The first experimental provider should copy the public `Part.force`, `Part.torque` and `Part.forces` census at `TimingManager.TimingStage.FashionablyLate`, before the flight-integrator stage. [Principia uses this named stage](https://github.com/mockingbirdnest/Principia/blob/dcf1fb949d792be966e5a7a162a1073ddfa1f9c1/ksp_plugin_adapter/ksp_plugin_adapter.cs) to collect nonconservative part forces before the integrator clears them. The owned KSP 1.12.5 assembly identified in [the integration map](integration-map.md) exposes those fields, `Part.AddForce`, `Part.AddForceAtPosition`, `Part.AddTorque`, and the named timing stages.
+The experimental provider copies the public `Part.force`, `Part.torque` and `Part.forces` census at `TimingManager.TimingStage.FashionablyLate`, before the flight-integrator stage; relative ordering among callbacks at the same stage is not a completeness guarantee. [Principia uses this named stage](https://github.com/mockingbirdnest/Principia/blob/dcf1fb949d792be966e5a7a162a1073ddfa1f9c1/ksp_plugin_adapter/ksp_plugin_adapter.cs) to collect nonconservative part forces before the integrator clears them. The owned KSP 1.12.5 assembly identified in [the integration map](integration-map.md) exposes those fields, `Part.AddForce`, `Part.AddForceAtPosition`, `Part.AddTorque`, and the named timing stages.
 
-Each batch should report availability separately for:
+The receipt reports availability separately for:
 
 - the `Part` force and torque census;
 - stock aerodynamics;
@@ -16,7 +16,13 @@ Each batch should report availability separately for:
 - contacts and constraints;
 - direct `Rigidbody` writes.
 
-The initial provider may report only the part census as captured. An unavailable component has no numeric substitute. A batch becomes stale when its vessel, topology generation, physics epoch or frame context no longer matches the physical snapshot it accompanies.
+Only the part census can be reported as captured. An unavailable component has no numeric substitute. Context matching covers session, vessel, topology, physics epoch, frame and capture time. These epochs are local to the provider; equal counter values in the separate Shadow receipt do not join the captures. A future worker bridge needs physical state captured at this same boundary.
+
+The observer copies each logical part's own storage exactly once. `rigidBodyPartFlightId` exposes redirection to a physical part without copying that owner's census again. This does not attribute entries to individual force-producing mods. Positioned forces preserve world position and, where a native body exists, same-callback center of mass and lever arm. Values retain raw KSP units; there is no SI conversion or total-force reconstruction. Impulse deposits may already have been divided by the fixed step by KSP.
+
+Retention is bounded to 16 batches, 512 parts per batch, 64 positioned forces per part, 2048 retained part records and 4096 retained positioned-force entries. Overflow rejects the prospective batch whole and reports `bounded`; no partial census is called complete. `interrupted` retains a valid prefix. `unavailable` and `invalid` retain explicit failure states. Report pages distinguish no samples and unqualified cleanup from useful component observations.
+
+Registration checks that the public named-stage API actually installed exactly one owned callback in a unique live `Timing3`; the native API can silently return without registering. Audits reject callback loss/duplication or stage replacement. Cleanup removes owned delegates from the retained stage, preserves foreign callbacks, unregisters the origin observer and disables capture before removal. A destroyed stage is reported as `owner-destroyed`, not verified removal. Callback faults are caught so later subscribers can continue. Audits and defensive copies have overhead; this is bounded instrumentation, not a hot-loop performance improvement.
 
 ## Why the census is incomplete
 
