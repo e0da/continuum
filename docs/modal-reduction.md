@@ -11,12 +11,12 @@ python3 -B tools/modal-rocket/experiment.py --output artifacts/modal-rocket.json
 
 The model is a one-dimensional free-free chain of 32 unit masses, uniform springs and dashpots. Its exact discrete-cosine eigenvectors provide an independently checkable basis. The full model advances 64 position/velocity scalars. The candidate retains the center-of-mass mode and the first six flexible modes, advancing 14 modal scalars. Both use the same fixed step and force history. State-count reduction is reported only as model structure; this experiment does not time or claim a performance win.
 
-## Predeclared decision
+## Fixed decision gates
 
 Two fixed workloads distinguish where the representation should and should not work:
 
 - `smooth` raises thrust smoothly at one end and adds a broad, time-limited gust. It must keep maximum shape RMS error at or below 8%, tip-shape error at or below 12%, and center-of-mass error at or below 10^-10 m.
-- `localizedImpulse` gives one end mass an instantaneous 1 m/s velocity. It uses the same gates and is expected to fail because the event excites omitted high-frequency modes.
+- `localizedImpulse` gives one end mass an instantaneous 1 m/s velocity. It uses the same frozen gates and is expected to fail because the event excites omitted high-frequency modes.
 
 The experiment qualifies only when the smooth workload passes and the impulse workload fails. This unusual combined criterion protects both the useful domain and the declared boundary. A candidate that makes the impulse pass may be interesting, but it changes this experiment and requires new predeclared cost and accuracy gates.
 
