@@ -20,6 +20,7 @@ namespace KspContinuum
         readonly List<Slot> slots = new List<Slot>();
         readonly Stopwatch clock = new Stopwatch();
         ProbeReport report;
+        PlayerLoopTiming playerLoop;
         Action<ProbeReport> completion;
         bool started, finished;
         int completed;
@@ -49,6 +50,12 @@ namespace KspContinuum
                     report.markers[i] = row;
                     Acquire(row);
                 }
+                if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-playerloop") >= 0)
+                {
+                    playerLoop = new PlayerLoopTiming();
+                    playerLoop.Start();
+                    report.playerLoop = playerLoop.Report;
+                }
                 clock.Start();
                 // Recorder counters describe the previous frame; discard the partly enabled initial frame.
                 yield return null;
@@ -58,6 +65,7 @@ namespace KspContinuum
                 {
                     yield return null;
                     if (finished) yield break;
+                    if (playerLoop != null) playerLoop.Audit();
                     double now = clock.Elapsed.TotalSeconds;
                     previous.observedFrame = Time.frameCount;
                     previous.markerFrame = Time.frameCount - 1;
@@ -138,6 +146,13 @@ namespace KspContinuum
             if (finished) return;
             finished = true;
             var errors = new List<string>();
+            if (playerLoop != null)
+            {
+                try { playerLoop.Dispose(); }
+                catch (Exception error) { errors.Add("PlayerLoop: " + error.GetType().Name); }
+                if (playerLoop.Report.cleanupStatus == "cleanup-error") errors.Add("PlayerLoop: cleanup-error");
+                playerLoop = null;
+            }
             foreach (Slot slot in slots)
             {
                 try { if (!slot.EnabledBefore && slot.Recorder.enabled) slot.Recorder.enabled = false; }

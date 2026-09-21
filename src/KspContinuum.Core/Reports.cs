@@ -78,5 +78,6 @@ namespace KspContinuum
         public int requestedFrames, completedFrames, contextMisalignedFrames;
         public ProfileFrame[] frames;
         public ProfileDistribution wallIntervals;
+        public LoopTimingReport playerLoop;
     }
 }

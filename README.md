@@ -9,7 +9,7 @@ An experimental KSP 1 toolkit for measuring simulation cost, recording flight in
 - A main-menu benchmark compares 8, 32, and 128 aligned boxes as a chain of Unity fixed joints and as one compound rigid body. Both retain the same collider geometry. It uses separate physics scenes and does not change global simulation settings.
 - The benchmark checks collider ray hits, spacing error, a compound body's contact with a floor, and momentum at separation. It reports raw repeated timings. These are synthetic bodies, not stock parts or KSP joints.
 - A flight panel inventories the active vessel without modifying it. A small structural allowlist identifies inspection candidates; it does not approve them for merging.
-- An optional 300-frame timing capture records available Unity markers, frame context, and timing distributions. Unsupported markers are reported as unavailable, never as evidence of zero cost. An opt-in coast/powered/contact run exports a [qualification report](docs/qualification-report.md). See [profiling](docs/profiling.md).
+- An optional 300-frame timing capture records available Unity markers, frame context, and timing distributions. Unsupported markers are reported as unavailable, never as evidence of zero cost. An opt-in coast/powered/contact run exports a [qualification report](docs/qualification-report.md). With `--continuum-playerloop`, captures also bracket unchanged native physics and behaviour FixedUpdate subtrees. This timing candidate is source/build verified; installed dispatch and perturbation remain unqualified. See [profiling](docs/profiling.md).
 - A flight input recorder exports step-keyed recordings plus event/trajectory observations; the format supports manual linear and cubic-Bezier edits. An opt-in analog player enforces a conservative control-ownership boundary; see [input timeline](docs/input-timeline.md).
 - An optional MechJeb mission addon creates a separate sandbox and attempts a recorded stock Kerbal X flight to Minmus. See [mission operation and qualification](docs/minmus-mission.md). Checkpoint trials now provide repeatable setup and preserved evidence; they do not establish deterministic replay.
 - An opt-in survey mode targets a sampled flat Minmus site in daylight. Two checkpoint trials landed upright with all 17 parts, approximately 120 m from the target, missing the unchanged 100 m criterion. This is a systems test fixture; see the [flight evidence](docs/validation.md).
@@ -50,6 +50,7 @@ The experiments are independent of the running game:
 | [Native structural fixture](docs/structural-benchmark.md) | Pinned Jolt spring motion against an analytic reference, substep cost/error, and a floor-contact check |
 | [Orbital/event fixture](docs/orbital-fixture.md) | An external local Gimbal coast implementation against independent orbital states, plus bounded encounter-event adversaries |
 | [Data-layout comparison](docs/layout-benchmark.md) | Object, SoA, and AoSoA captures under the same free-body and neighbor-reading kernels |
+| [Gravitational trajectories](docs/field-trajectory.md) | Analytic and step-refined Plummer trajectories, conservation, reversibility and a potential-consistent split toy |
 | [3D field gravity](docs/field-gravity.md) | Isolated softened forces via padded FFT/CIC against direct forces, with retained accuracy failures |
 | [Telemetry playback](docs/telemetry-playback.md) | Scrubbing and phase navigation over recorded mission observations, without rerunning KSP |
 
@@ -61,7 +62,7 @@ The longer-term experiment is a shadow solver: capture a vessel's inputs, run a 
 
 Development advances along independent worker/backend, profiling, replay/input, and space-program/chronicle tracks. Missions provide workloads and acceptance evidence; landing precision does not gate unrelated simulation infrastructure. The current free-body worker proves a compute boundary, not complete force capture or a shadow vessel solver.
 
-See [integration map](docs/integration-map.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
+See [integration map](docs/integration-map.md), [force-observation design](docs/force-observation.md), [experiment protocol](docs/experiment.md), [replacement architecture](docs/replacement.md), and [validation receipt](docs/validation.md), and [community integration boundaries](docs/compatibility.md). Work uses Git and GitHub on reviewable branches.
 
 ## Continuum Space Program
 

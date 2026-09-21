@@ -271,6 +271,7 @@ class SpaceProgramTests(unittest.TestCase):
         self.assertIn("Available No Samples", qualification)
         self.assertIn("1 / 1 / 0 / 0", qualification)
         self.assertIn("First accepted body count", qualification)
+        self.assertIn("No versioned physical input recorded", qualification)
         self.assertIn("Profiler status</dt><dd>Cleanup Error", qualification)
         self.assertNotIn("/private/runtime", qualification)
 
