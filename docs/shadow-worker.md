@@ -84,3 +84,11 @@ There is a second matched comparison in which **both** zero and central-field pr
 The adjustment uses future observed frame state and is explicitly a post-observation diagnostic, not a forecast. The receipt retains the endpoint delta, adjusted zero and adjusted central max/RMS velocity discrepancies, and central-minus-zero adjusted RMS. Both availability flags must be true for the adjusted pair. No corresponding origin-shift position correction is attempted, and adjusted central results must not be compared against the unadjusted zero baseline as an improvement claim.
 
 A synthetic accelerating-frame control proves the distinction: with `a = -1 m/s²`, `dt = 0.2 s`, observed raw velocity unchanged and frame delta `-0.2 m/s`, raw zero has RMS 0 and raw central has RMS 0.2. After the identical frame correction, zero has RMS 0.2 and central has RMS 0. The exported fixture is labeled `portable-helper-fixture`; it proves arithmetic and matched comparison behavior, not observed KSP physics.
+
+### Installed central-field observation
+
+An installed KSP 1.12.5 run used CKAN package `0.1.4-gravity.CA501F739415` from source commit `878ecc38d20e6694a58ae9f03a02e877e5045cd8`. The bounded Minmus-orbit coast completed 120 submissions in 5.028 seconds. It produced 118 matched comparisons over 1,180 body comparisons; two samples explicitly skipped a missed observation boundary.
+
+In raw Unity coordinates, central-field velocity RMS was `0.00465526 m/s` versus `0.0000799288 m/s` for zero force, a ratio of `58.24`. After applying the same observed endpoint Krakensbane velocity delta to both predictions, central-field RMS was `0.000841748 m/s` versus `0.00381787 m/s` for zero force, a reduction of `0.00297613 m/s` or about 78%. Every matched sample favored central gravity in the adjusted pair. Median synchronous gravity prediction cost was `0.0192 ms`; median paired comparison cost was `0.0536 ms`.
+
+The opposing raw and adjusted results confirm that coordinate treatment dominates this one-step orbital workload. They support central gravity as a useful model and make prediction of the frame transition the next experiment. The adjusted result remains conditioned on the observed future frame delta; it is not yet an independently runnable forecast, stock-integrator equivalence, or evidence for active state publication.
