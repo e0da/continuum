@@ -44,7 +44,8 @@ namespace KspContinuum
             if (value is Array || value is ReadOnlyCollection<ForcePartObservation> ||
                 value is ReadOnlyCollection<ForceAtPositionObservation> || value is ReadOnlyCollection<LifecyclePartSample> ||
                 value is ReadOnlyCollection<AeroPatchTarget> || value is ReadOnlyCollection<AeroPatchEntry> ||
-                value is ReadOnlyCollection<AeroCaptureSample> || value is ReadOnlyCollection<AeroBodyPublication>)
+                value is ReadOnlyCollection<AeroCaptureSample> || value is ReadOnlyCollection<AeroBodyPublication> ||
+                value is ReadOnlyCollection<AeroDragCubeState> || value is ReadOnlyCollection<double>)
             {
                 output.Append('['); bool first = true;
                 foreach (var item in (IEnumerable)value)
@@ -66,7 +67,8 @@ namespace KspContinuum
                 type != typeof(ShadowReport) && type != typeof(ShadowSample) && type != typeof(ShadowBody) &&
                 type != typeof(AeroCaptureReport) && type != typeof(AeroProviderFingerprint) && type != typeof(AeroPatchProvenance) &&
                 type != typeof(AeroPatchTarget) && type != typeof(AeroPatchEntry) && type != typeof(AeroCaptureSample) &&
-                type != typeof(AeroCaptureContext) && type != typeof(AeroPartContext) && type != typeof(AeroBodyPublication))
+                type != typeof(AeroCaptureContext) && type != typeof(AeroPartContext) && type != typeof(AeroBodyPublication) &&
+                type != typeof(AeroDragCubeState))
                 throw new ArgumentException("Unsupported report type: " + type.FullName);
             output.Append('{'); bool firstField = true;
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))

@@ -32,11 +32,13 @@ namespace KspContinuum
     {
         public const int MaximumPatches = 64;
         public readonly AeroProviderFingerprint provider;
+        public readonly string captureOwner;
         public readonly ReadOnlyCollection<AeroPatchTarget> targets;
-        public AeroPatchProvenance(AeroProviderFingerprint provider, AeroPatchTarget[] targets)
+        public AeroPatchProvenance(AeroProviderFingerprint provider, string owner, AeroPatchTarget[] targets)
         {
             if (provider == null || targets == null || targets.Length != 3)
                 throw new ArgumentException("Invalid patch provenance.");
+            AeroCaptureValidation.Text(owner, 256);
             var required = new HashSet<string> { "FlightIntegrator.UpdateAerodynamics", "FlightIntegrator.ApplyAeroDrag", "FlightIntegrator.ApplyAeroLift" };
             int patchCount = 0;
             foreach (var target in targets)
@@ -45,7 +47,21 @@ namespace KspContinuum
                 patchCount += target.orderedPatches.Count;
             }
             if (patchCount > MaximumPatches) throw new ArgumentException("Patch graph exceeds its bound.");
-            this.provider = provider; this.targets = Array.AsReadOnly((AeroPatchTarget[])targets.Clone());
+            this.provider = provider; captureOwner = owner; this.targets = Array.AsReadOnly((AeroPatchTarget[])targets.Clone());
+        }
+        public bool HasExpectedCapturePatches()
+        {
+            foreach (var target in targets)
+            {
+                string method = target.targetMethod == "FlightIntegrator.UpdateAerodynamics" ? "KspContinuum.AeroCapture.UpdateFinalizer" :
+                    target.targetMethod == "FlightIntegrator.ApplyAeroDrag" ? "KspContinuum.AeroCapture.DragPostfix" : "KspContinuum.AeroCapture.LiftPostfix";
+                string kind = target.targetMethod == "FlightIntegrator.UpdateAerodynamics" ? "finalizer" : "postfix";
+                bool found = false;
+                foreach (var patch in target.orderedPatches)
+                    if (patch.owner == captureOwner && patch.patchMethod == method && patch.patchKind == kind) { found = true; break; }
+                if (!found) return false;
+            }
+            return true;
         }
     }
 
@@ -120,27 +136,30 @@ namespace KspContinuum
             speedOfSoundMetersPerSecond, mach, aerodynamicAreaSquareMeters, exposedAreaSquareMeters;
         public readonly bool shielded;
         public readonly Vec worldCenterOfMass, worldVelocity, relativeAirVelocity, worldAngularVelocity,
-            worldAttitudeXYZ, dragCubeArea, dragCubeDepth;
+            worldAttitudeXYZ;
         public readonly double worldAttitudeW;
+        public readonly ReadOnlyCollection<AeroDragCubeState> dragCubes;
         public AeroPartContext(AeroCaptureContext step, long flightId, int partId, int rigidbodyId, double mass, double density,
             double pressure, double temperature, double speedOfSound, double mach, double aerodynamicArea, double exposedArea,
             bool shielded, Vec center, Vec velocity, Vec airVelocity, Vec angularVelocity, Vec attitudeXYZ, double attitudeW,
-            Vec dragCubeArea, Vec dragCubeDepth)
+            AeroDragCubeState[] dragCubes)
         {
             if (step == null || flightId < 1 || flightId > uint.MaxValue || mass <= 0 || density < 0 || pressure < 0 ||
                 temperature < 0 || speedOfSound < 0 || mach < 0 || aerodynamicArea < 0 || exposedArea < 0)
                 throw new ArgumentException("Invalid aero part context.");
             foreach (double value in new[] { mass, density, pressure, temperature, speedOfSound, mach, aerodynamicArea, exposedArea, attitudeW }) AeroCaptureValidation.Number(value);
-            foreach (var value in new[] { center, velocity, airVelocity, angularVelocity, attitudeXYZ, dragCubeArea, dragCubeDepth }) AeroCaptureValidation.Vector(value);
+            foreach (var value in new[] { center, velocity, airVelocity, angularVelocity, attitudeXYZ }) AeroCaptureValidation.Vector(value);
             double norm = attitudeXYZ.X * attitudeXYZ.X + attitudeXYZ.Y * attitudeXYZ.Y + attitudeXYZ.Z * attitudeXYZ.Z + attitudeW * attitudeW;
-            if (Math.Abs(norm - 1) > 1e-9 || dragCubeArea.X < 0 || dragCubeArea.Y < 0 || dragCubeArea.Z < 0 ||
-                dragCubeDepth.X < 0 || dragCubeDepth.Y < 0 || dragCubeDepth.Z < 0) throw new ArgumentException("Invalid stock geometry state.");
+            if (Math.Abs(norm - 1) > 1e-9 || dragCubes == null || dragCubes.Length > AeroDragCubeState.MaximumBlendedCubes)
+                throw new ArgumentException("Invalid stock geometry state.");
+            foreach (var cube in dragCubes) if (cube == null) throw new ArgumentException("Null drag cube.");
             this.step = step; this.flightId = flightId; nativePartInstanceId = partId; nativeRigidbodyInstanceId = rigidbodyId;
             massKilograms = mass; densityKilogramsPerCubicMeter = density; staticPressurePascals = pressure;
             temperatureKelvin = temperature; speedOfSoundMetersPerSecond = speedOfSound; this.mach = mach;
             aerodynamicAreaSquareMeters = aerodynamicArea; exposedAreaSquareMeters = exposedArea; this.shielded = shielded;
             worldCenterOfMass = center; worldVelocity = velocity; relativeAirVelocity = airVelocity; worldAngularVelocity = angularVelocity;
-            worldAttitudeXYZ = attitudeXYZ; worldAttitudeW = attitudeW; this.dragCubeArea = dragCubeArea; this.dragCubeDepth = dragCubeDepth;
+            worldAttitudeXYZ = attitudeXYZ; worldAttitudeW = attitudeW;
+            this.dragCubes = Array.AsReadOnly((AeroDragCubeState[])dragCubes.Clone());
         }
         public bool SameState(AeroPartContext other) => other != null && flightId == other.flightId && nativePartInstanceId == other.nativePartInstanceId &&
             nativeRigidbodyInstanceId == other.nativeRigidbodyInstanceId && massKilograms == other.massKilograms && densityKilogramsPerCubicMeter == other.densityKilogramsPerCubicMeter &&
@@ -148,8 +167,43 @@ namespace KspContinuum
             mach == other.mach && aerodynamicAreaSquareMeters == other.aerodynamicAreaSquareMeters && exposedAreaSquareMeters == other.exposedAreaSquareMeters && shielded == other.shielded &&
             AeroCaptureValidation.Equal(worldCenterOfMass, other.worldCenterOfMass) && AeroCaptureValidation.Equal(worldVelocity, other.worldVelocity) &&
             AeroCaptureValidation.Equal(relativeAirVelocity, other.relativeAirVelocity) && AeroCaptureValidation.Equal(worldAngularVelocity, other.worldAngularVelocity) &&
-            AeroCaptureValidation.Equal(worldAttitudeXYZ, other.worldAttitudeXYZ) && worldAttitudeW == other.worldAttitudeW &&
-            AeroCaptureValidation.Equal(dragCubeArea, other.dragCubeArea) && AeroCaptureValidation.Equal(dragCubeDepth, other.dragCubeDepth);
+            AeroCaptureValidation.Equal(worldAttitudeXYZ, other.worldAttitudeXYZ) && worldAttitudeW == other.worldAttitudeW && SameCubes(other.dragCubes);
+        bool SameCubes(ReadOnlyCollection<AeroDragCubeState> other)
+        {
+            if (dragCubes.Count != other.Count) return false;
+            for (int i = 0; i < dragCubes.Count; i++) if (!dragCubes[i].SameState(other[i])) return false;
+            return true;
+        }
+    }
+
+    public sealed class AeroDragCubeState
+    {
+        public const int FaceCount = 6, MaximumBlendedCubes = 16;
+        public readonly string name;
+        public readonly double weight;
+        public readonly Vec center, size;
+        public readonly ReadOnlyCollection<double> area, drag, depth, dragModifiers;
+        public AeroDragCubeState(string name, double weight, Vec center, Vec size, double[] area, double[] drag,
+            double[] depth, double[] modifiers)
+        {
+            AeroCaptureValidation.Text(name, 128); AeroCaptureValidation.Number(weight);
+            AeroCaptureValidation.Vector(center); AeroCaptureValidation.Vector(size);
+            if (weight < 0 || size.X < 0 || size.Y < 0 || size.Z < 0) throw new ArgumentException("Invalid drag cube shape or weight.");
+            this.area = Faces(area); this.drag = Faces(drag); this.depth = Faces(depth); dragModifiers = Faces(modifiers);
+            this.name = name; this.weight = weight; this.center = center; this.size = size;
+        }
+        static ReadOnlyCollection<double> Faces(double[] values)
+        {
+            if (values == null || values.Length != FaceCount) throw new ArgumentException("Drag cube data requires six faces.");
+            var copy = (double[])values.Clone();
+            foreach (double value in copy) { AeroCaptureValidation.Number(value); if (value < 0) throw new ArgumentException("Drag cube face values cannot be negative."); }
+            return Array.AsReadOnly(copy);
+        }
+        internal bool SameState(AeroDragCubeState other) => other != null && name == other.name && weight == other.weight &&
+            AeroCaptureValidation.Equal(center, other.center) && AeroCaptureValidation.Equal(size, other.size) &&
+            Same(area, other.area) && Same(drag, other.drag) && Same(depth, other.depth) && Same(dragModifiers, other.dragModifiers);
+        static bool Same(ReadOnlyCollection<double> left, ReadOnlyCollection<double> right)
+        { for (int i = 0; i < FaceCount; i++) if (left[i] != right[i]) return false; return true; }
     }
 
     public sealed class AeroBodyPublication
@@ -228,6 +282,8 @@ namespace KspContinuum
                 throw new ArgumentException("Abstained or invalid captures cannot publish partial samples.");
             if (cleanup == AeroCleanupOutcome.Failed && disposition != AeroCaptureDisposition.Invalid)
                 throw new ArgumentException("Cleanup failure invalidates the capture.");
+            if (disposition == AeroCaptureDisposition.Valid && (cleanup != AeroCleanupOutcome.RemovedOwnedPatches || !provenance.HasExpectedCapturePatches()))
+                throw new ArgumentException("Valid capture requires expected owned patches and confirmed removal.");
             this.provenance = provenance; this.disposition = disposition; this.reason = reason; this.cleanup = cleanup;
             this.samples = Array.AsReadOnly((AeroCaptureSample[])samples.Clone());
         }
