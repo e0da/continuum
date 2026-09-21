@@ -260,6 +260,7 @@ def parse_telemetry(path):
             "ut": finite_number(row["ut_s"], "mission.csv ut_s"),
             "phase": phase,
             "body": row["body"], "situation": row["situation"], "altitude": row["altitude_m"],
+            "apoapsis": row["apoapsis_m"], "periapsis": row["periapsis_m"],
             "speed": row["surface_speed_mps"], "throttle": row["throttle"],
             "stage": row["stage"], "parts": row["parts"], "packed": row["packed"],
             "autopilot": row["autopilot"],
@@ -323,7 +324,7 @@ def checkpoint_clock_view(mission_values, lineage, rows):
     excluded = []
     summary_rows = []
     vessel_fields = (
-        "body", "situation", "altitude", "speed", "throttle", "stage", "parts",
+        "body", "situation", "altitude", "apoapsis", "periapsis", "speed", "throttle", "stage", "parts",
         "packed", "autopilot",
     )
     for row in rows:

@@ -545,6 +545,8 @@ class ChronicleTests(unittest.TestCase):
         cases = (
             "0.2,0,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,128,0,2,17,True,\"\"\n",
             "0.2,0,CheckpointFlight,,ORBITING,,,,,,,,,\"\"\n",
+            ",".join(["0.2", "0", "CheckpointFlight", "", "", "", "27120", "", "", "", "", "", "", ""]) + "\n",
+            ",".join(["0.2", "0", "CheckpointFlight", "", "", "", "", "27082", "", "", "", "", "", ""]) + "\n",
         )
         retained = "2,268881.4188647733,CheckpointFlight,Minmus,ORBITING,27105,27120,27082,128,0,2,17,False,\"\"\n"
         for index, initial in enumerate(cases):
