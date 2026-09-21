@@ -57,7 +57,7 @@ namespace KspContinuum
                 {
                     if (!target.HasPatch(captureOwner, "KspContinuum.AeroCapture.UpdatePrefix", "prefix") ||
                         !target.HasPatch(captureOwner, "KspContinuum.AeroCapture.UpdatePostfix", "postfix", AeroPatchEntry.PriorityLast) ||
-                        !target.HasPatch(captureOwner, "KspContinuum.AeroCapture.UpdateFinalizer", "finalizer")) return false;
+                        !target.HasPatch(captureOwner, "KspContinuum.AeroCapture.UpdateFinalizer", "finalizer", AeroPatchEntry.PriorityLast)) return false;
                 }
                 else
                 {
