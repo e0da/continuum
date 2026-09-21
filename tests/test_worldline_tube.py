@@ -25,6 +25,7 @@ class WorldlineTubeToyTests(unittest.TestCase):
             self.assertEqual('clear',rows['straight-clear']['status'])
             self.assertEqual('clear',rows['near-miss']['status'])
             self.assertEqual('expired',rows['expired']['status'])
+            self.assertEqual('expired',rows['expired-and-unknown']['status'])
             self.assertEqual('unknown',rows['unknown-bound']['status'])
             self.assertEqual('unknown',rows['unknown-predicate']['status'])
             before=output.read_bytes()

@@ -76,10 +76,10 @@ namespace KspContinuum
             AssemblyModel.Finite(requestedSeconds);if(requestedSeconds<0)throw new ArgumentException("Negative horizon.");
             if(first.Epoch!=second.Epoch||first.Frame!=second.Frame)
                 return Result(WorldlineTubeStatus.Unknown,"A common physical epoch and frame are required.",requestedSeconds);
-            if(!first.ValidityPredicatesSatisfied||!second.ValidityPredicatesSatisfied||!first.AccelerationUncertainty.HasValue||!second.AccelerationUncertainty.HasValue)
-                return Result(WorldlineTubeStatus.Unknown,"A validity predicate or approximation bound is unknown.",requestedSeconds);
             if(requestedSeconds>first.ValidForSeconds||requestedSeconds>second.ValidForSeconds)
                 return Result(WorldlineTubeStatus.Expired,"The requested horizon exceeds a tube expiry.",requestedSeconds);
+            if(!first.ValidityPredicatesSatisfied||!second.ValidityPredicatesSatisfied||!first.AccelerationUncertainty.HasValue||!second.AccelerationUncertainty.HasValue)
+                return Result(WorldlineTubeStatus.Unknown,"A validity predicate or approximation bound is unknown.",requestedSeconds);
             var motions=new [] { Motion(first,requestedSeconds),Motion(second,requestedSeconds) };
             EncounterPlan plan=EncounterPlanner.Plan(motions,requestedSeconds,budget);
             var answer=Result(plan.Status==EncounterPlanStatus.Complete?(plan.Candidates.Count==0?WorldlineTubeStatus.Clear:WorldlineTubeStatus.Candidate):WorldlineTubeStatus.Unknown,

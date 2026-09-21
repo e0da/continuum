@@ -40,6 +40,7 @@ static class Program
         cases.Add(C("uncertain-burn",uncertain,T(2,V(10),V(-1),zero,r),6,t=>At(V(-10),V(1),V(2),t),t=>V(10-t)));
         cases.Add(C("conservative-false-positive",T(1,V(-10),V(1),zero,r,5),T(2,V(10),V(-1),zero,r,5),4,t=>V(-10+t),t=>V(10-t)));
         cases.Add(C("expired",T(1,V(0),zero,zero,r,0,0,0,1),T(2,V(10),zero,zero,r),2,t=>V(0),t=>V(10),false));
+        cases.Add(C("expired-and-unknown",T(1,V(0),zero,zero,r,0,0,null,1,false),T(2,V(10),zero,zero,r),2,t=>V(0),t=>V(10),false));
         cases.Add(C("unknown-bound",T(1,V(0),zero,zero,r,0,0,null),T(2,V(10),zero,zero,r),2,t=>V(0),t=>V(10),false));
         cases.Add(C("unknown-predicate",T(1,V(0),zero,zero,r,0,0,0,10,false),T(2,V(10),zero,zero,r),2,t=>V(0),t=>V(10),false));
         var rows=new List<object>();int positives=0,falsePositives=0,falseNegatives=0,totalIntervals=0;
