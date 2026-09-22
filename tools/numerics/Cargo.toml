@@ -1,0 +1,36 @@
+[package]
+name = "continuum-numerics"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[[bin]]
+name = "curve-bounds"
+path = "src/bin/curve_bounds.rs"
+
+[[bin]]
+name = "modal-rocket"
+path = "src/bin/modal_rocket.rs"
+
+[[bin]]
+name = "field-gravity"
+path = "src/bin/field_gravity.rs"
+
+[[bin]]
+name = "field-trajectory"
+path = "src/bin/field_trajectory.rs"
+
+[[bin]]
+name = "field-spatial"
+path = "src/bin/field_spatial.rs"
+
+[[bin]]
+name = "orbit-fixture"
+path = "src/bin/orbit_fixture.rs"

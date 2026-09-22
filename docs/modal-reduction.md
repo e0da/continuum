@@ -1,12 +1,12 @@
 # Modal rocket reduction
 
-`MODAL-ROCKET-001` asks whether a rocket-like spring chain can retain gross motion and a few flexible modes without pretending that every load is low dimensional. It is a deterministic, pure-Python toy. It does not use KSP parts, nonlinear joints, rotation, contact, breakage or a production solver.
+`MODAL-ROCKET-001` asks whether a rocket-like spring chain can retain gross motion and a few flexible modes without pretending that every load is low dimensional. It is a deterministic, pure-Rust toy. It does not use KSP parts, nonlinear joints, rotation, contact, breakage or a production solver.
 
-Run it with Python 3.11 or later. The output must be a new file in an existing directory.
+Run it with the repository Rust toolchain. The output must be a new file in an existing directory.
 
 ```sh
-python3 -B -m unittest tests.test_modal_rocket -v
-python3 -B tools/modal-rocket/experiment.py --output artifacts/modal-rocket.json
+cargo test --manifest-path tools/numerics/Cargo.toml modal
+cargo run --manifest-path tools/numerics/Cargo.toml --bin modal-rocket -- --output artifacts/modal-rocket.json
 ```
 
 The model is a one-dimensional free-free chain of 32 unit masses, uniform springs and dashpots. Its exact discrete-cosine eigenvectors provide an independently checkable basis. The full model advances 64 position/velocity scalars. The candidate retains the center-of-mass mode and the first six flexible modes, advancing 14 modal scalars. Both use the same fixed step and force history. State-count reduction is reported only as model structure; this experiment does not time or claim a performance win.
