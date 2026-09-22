@@ -1,5 +1,9 @@
 # Data layout benchmark
 
+Each result now includes a `continuum-performance-observation/v1` record. It binds raw samples to the system, workload, fixture hash, item count, step count, and strategy. The fixed phases are `capture`, `pack`, `compute`, `synchronize`, `publish`, and directly measured `total`; every phase records elapsed milliseconds and current-thread allocated bytes for the same randomized samples. An in-process synchronization phase can be near the timer floor, but remains explicit so native, device, and sidecar strategies can report their real synchronization cost without changing the report shape.
+
+`PerformanceObservations.Compare` compares total medians only when workload identities match and returns speedup, allocation ratio, and a caller-selected maximum-regression verdict. It does not add phase timings to manufacture a total, set a universal threshold, or claim stock KSP performance. Machine and runtime identity remains owned by the surrounding benchmark report.
+
 `KspContinuum.LayoutBench` is a bounded synthetic experiment for deciding whether a different simulation capture layout deserves further testing. It compares the current immutable object representation with two private experimental representations:
 
 - `object-aos` builds the existing `SimulationBody` and `SimulationBatch` objects for both input and output.

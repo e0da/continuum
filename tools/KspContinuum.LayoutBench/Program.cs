@@ -67,6 +67,7 @@ static class Program
     static CaseReport MeasureCase(int bodyCount, int samples, int seed)
     {
         BodySeed[] source = Fixture(bodyCount);
+        string fixtureSha256 = HashFixture(source);
         var expected = Workloads.ToDictionary(workload => workload,
             workload => Expected(source, workload), StringComparer.Ordinal);
         var results = new Dictionary<string, ResultReport>(StringComparer.Ordinal);
@@ -93,13 +94,16 @@ static class Program
                 }
             }
         }
-        return new CaseReport {
+        var report = new CaseReport {
             Bodies = bodyCount,
-            FixtureSha256 = HashFixture(source),
+            FixtureSha256 = fixtureSha256,
             MeasuredStrategyOrders = orders,
             Results = results.Values.OrderBy(result => result.Workload, StringComparer.Ordinal)
                 .ThenBy(result => result.Strategy, StringComparer.Ordinal).ToList()
         };
+        foreach (ResultReport result in report.Results)
+            result.Finish(bodyCount, fixtureSha256);
+        return report;
     }
 
     static Measurement Execute(BodySeed[] source, StateValue[] expected, string workload, string strategy)
@@ -109,7 +113,13 @@ static class Program
 
         long allocationStart = GC.GetAllocatedBytesForCurrentThread();
         long start = Stopwatch.GetTimestamp();
-        ICapture capture = Pack(source, strategy);
+        BodySeed[] captured = (BodySeed[])source.Clone();
+        double captureMilliseconds = Milliseconds(start, Stopwatch.GetTimestamp());
+        long captureAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+
+        allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        start = Stopwatch.GetTimestamp();
+        ICapture capture = Pack(captured, strategy);
         double packingMilliseconds = Milliseconds(start, Stopwatch.GetTimestamp());
         long packingAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
 
@@ -121,19 +131,30 @@ static class Program
 
         allocationStart = GC.GetAllocatedBytesForCurrentThread();
         start = Stopwatch.GetTimestamp();
-        Evidence evidence = Consume(result, expected);
+        IResult synchronized = result;
+        GC.KeepAlive(synchronized);
+        double synchronizeMilliseconds = Milliseconds(start, Stopwatch.GetTimestamp());
+        long synchronizeAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+
+        allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        start = Stopwatch.GetTimestamp();
+        Evidence evidence = Consume(synchronized, expected);
         double consumeMilliseconds = Milliseconds(start, Stopwatch.GetTimestamp());
         long consumeAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
 
         double endToEndMilliseconds = Milliseconds(totalStart, Stopwatch.GetTimestamp());
         long endToEndAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - totalAllocationStart;
         return new Measurement {
+            CaptureMilliseconds = captureMilliseconds,
             PackingMilliseconds = packingMilliseconds,
             KernelMilliseconds = kernelMilliseconds,
+            SynchronizeMilliseconds = synchronizeMilliseconds,
             ConsumeMilliseconds = consumeMilliseconds,
             EndToEndMilliseconds = endToEndMilliseconds,
+            CaptureAllocatedBytes = captureAllocatedBytes,
             PackingAllocatedBytes = packingAllocatedBytes,
             KernelAllocatedBytes = kernelAllocatedBytes,
+            SynchronizeAllocatedBytes = synchronizeAllocatedBytes,
             ConsumeAllocatedBytes = consumeAllocatedBytes,
             EndToEndAllocatedBytes = endToEndAllocatedBytes,
             Evidence = evidence
@@ -511,8 +532,8 @@ static class Program
 
     sealed class Measurement
     {
-        public double PackingMilliseconds, KernelMilliseconds, ConsumeMilliseconds, EndToEndMilliseconds;
-        public long PackingAllocatedBytes, KernelAllocatedBytes, ConsumeAllocatedBytes, EndToEndAllocatedBytes;
+        public double CaptureMilliseconds, PackingMilliseconds, KernelMilliseconds, SynchronizeMilliseconds, ConsumeMilliseconds, EndToEndMilliseconds;
+        public long CaptureAllocatedBytes, PackingAllocatedBytes, KernelAllocatedBytes, SynchronizeAllocatedBytes, ConsumeAllocatedBytes, EndToEndAllocatedBytes;
         public Evidence Evidence = null!;
     }
     sealed class Evidence { public string Sha256 = ""; public double PositionError, VelocityError; }
@@ -520,7 +541,7 @@ static class Program
     {
         public string Schema { get; } = Program.Schema;
         public string Status { get; } = "synthetic-layout-experiment-only";
-        public string Measurement { get; } = "Current-thread allocation and capture-through-consume latency; synthetic kernels, randomized strategy order.";
+        public string Measurement { get; } = "Current-thread allocation and directly measured capture-through-publication latency; synthetic kernels, randomized strategy order.";
         public bool ImmutableLogicalCaptures { get; } = true;
         public bool PoolingUsed { get; } = false;
         public bool StockPhysicsSpeedupMeasured { get; } = false;
@@ -568,12 +589,17 @@ static class Program
         public ResultReport(string workload, string strategy) { Workload = workload; Strategy = strategy; }
         public string Workload { get; }
         public string Strategy { get; }
+        public PerformanceObservation Observation { get; private set; } = null!;
+        public List<double> CaptureMilliseconds { get; } = new List<double>();
         public List<double> PackingMilliseconds { get; } = new List<double>();
         public List<double> KernelMilliseconds { get; } = new List<double>();
+        public List<double> SynchronizeMilliseconds { get; } = new List<double>();
         public List<double> ConsumeMilliseconds { get; } = new List<double>();
         public List<double> EndToEndMilliseconds { get; } = new List<double>();
+        public List<long> CaptureAllocatedBytes { get; } = new List<long>();
         public List<long> PackingAllocatedBytes { get; } = new List<long>();
         public List<long> KernelAllocatedBytes { get; } = new List<long>();
+        public List<long> SynchronizeAllocatedBytes { get; } = new List<long>();
         public List<long> ConsumeAllocatedBytes { get; } = new List<long>();
         public List<long> EndToEndAllocatedBytes { get; } = new List<long>();
         public string OutputSha256 { get; private set; } = "";
@@ -586,10 +612,31 @@ static class Program
             OutputSha256 = value.Evidence.Sha256;
             MaxPositionError = Math.Max(MaxPositionError, value.Evidence.PositionError);
             MaxVelocityError = Math.Max(MaxVelocityError, value.Evidence.VelocityError);
-            PackingMilliseconds.Add(value.PackingMilliseconds); KernelMilliseconds.Add(value.KernelMilliseconds);
+            CaptureMilliseconds.Add(value.CaptureMilliseconds); PackingMilliseconds.Add(value.PackingMilliseconds); KernelMilliseconds.Add(value.KernelMilliseconds);
+            SynchronizeMilliseconds.Add(value.SynchronizeMilliseconds);
             ConsumeMilliseconds.Add(value.ConsumeMilliseconds); EndToEndMilliseconds.Add(value.EndToEndMilliseconds);
-            PackingAllocatedBytes.Add(value.PackingAllocatedBytes); KernelAllocatedBytes.Add(value.KernelAllocatedBytes);
+            CaptureAllocatedBytes.Add(value.CaptureAllocatedBytes); PackingAllocatedBytes.Add(value.PackingAllocatedBytes); KernelAllocatedBytes.Add(value.KernelAllocatedBytes);
+            SynchronizeAllocatedBytes.Add(value.SynchronizeAllocatedBytes);
             ConsumeAllocatedBytes.Add(value.ConsumeAllocatedBytes); EndToEndAllocatedBytes.Add(value.EndToEndAllocatedBytes);
+        }
+        public void Finish(int bodies, string fixtureSha256)
+        {
+            Observation = new PerformanceObservation {
+                workload = new PerformanceWorkloadIdentity { system = "layout-integration", workload = Workload,
+                    fixtureSha256 = fixtureSha256, items = bodies, steps = 1 },
+                strategy = Strategy,
+                capture = Phase(CaptureMilliseconds, CaptureAllocatedBytes),
+                pack = Phase(PackingMilliseconds, PackingAllocatedBytes),
+                compute = Phase(KernelMilliseconds, KernelAllocatedBytes),
+                synchronize = Phase(SynchronizeMilliseconds, SynchronizeAllocatedBytes),
+                publish = Phase(ConsumeMilliseconds, ConsumeAllocatedBytes),
+                total = Phase(EndToEndMilliseconds, EndToEndAllocatedBytes)
+            };
+            PerformanceObservations.Validate(Observation);
+        }
+        static PerformancePhaseSamples Phase(List<double> milliseconds, List<long> bytes)
+        {
+            return new PerformancePhaseSamples { milliseconds = milliseconds.ToArray(), allocatedBytes = bytes.ToArray() };
         }
     }
 }

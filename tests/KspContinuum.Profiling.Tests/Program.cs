@@ -44,6 +44,18 @@ static class Program
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[] { 1 }, blocks = new int[] { 0 }, available = new bool[] { true } })));
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[0], blocks = new int[] { 1 }, available = new bool[] { true } })));
 
+        var baselinePerformance = Observation("scalar", new[] { 2.0, 4.0, 3.0 }, new long[] { 100, 120, 110 });
+        var candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        PerformanceObservations.Validate(baselinePerformance);
+        PerformanceComparison performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
+        Near(performance.speedup, 2); Near(performance.candidateToBaselineAllocationRatio.GetValueOrDefault(), 0.5);
+        Check(performance.withinMaximumRegression && performance.baselineStrategy == "scalar" && performance.candidateStrategy == "simd");
+        candidatePerformance.workload.items = 65;
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance.workload.items = 64;
+        candidatePerformance.compute.milliseconds = new[] { double.NaN, 1.0, 1.0 };
+        Check(Reject(() => PerformanceObservations.Validate(candidatePerformance)));
+
         marker.summary = summary;
         var report = new ProbeReport { markers = new[] { marker }, frames = new[] { new ProfileFrame {
             contextFrame = 10, markerFrame = 10, observedFrame = 11, contextAligned = true, wallMilliseconds = 16.7,
@@ -127,4 +139,14 @@ static class Program
     }
     static LoopTimingScope Scope(string name, double value) { return new LoopTimingScope { name = name, status = "observed", milliseconds = Dist(value), samples = new LoopTimingSample[1] }; }
     static ProfileDistribution Dist(double value) { return new ProfileDistribution { count = 1, minimum = value, maximum = value, mean = value, p50 = value, p95 = value, p99 = value }; }
+    static PerformanceObservation Observation(string strategy, double[] totals, long[] allocations)
+    {
+        var workload = new PerformanceWorkloadIdentity { system = "test-system", workload = "free-body",
+            fixtureSha256 = new string('a', 64), items = 64, steps = 1 };
+        PerformancePhaseSamples Phase(double value) => new PerformancePhaseSamples {
+            milliseconds = new[] { value, value, value }, allocatedBytes = new long[] { 0, 0, 0 } };
+        return new PerformanceObservation { workload = workload, strategy = strategy,
+            capture = Phase(0.1), pack = Phase(0.2), compute = Phase(0.5), synchronize = Phase(0), publish = Phase(0.2),
+            total = new PerformancePhaseSamples { milliseconds = totals, allocatedBytes = allocations } };
+    }
 }

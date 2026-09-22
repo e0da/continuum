@@ -341,6 +341,16 @@ fn verify_layout(root: &Path) -> Result {
             row["maxVelocityError"].as_f64().unwrap_or(f64::INFINITY) <= 1e-12,
             "layout velocity error exceeded tolerance",
         )?;
+        let observation = &row["observation"];
+        eq_str(observation, "schema", "continuum-performance-observation/v1")?;
+        require(observation["workload"]["items"] == 32, "performance workload identity changed")?;
+        require(observation["strategy"] == row["strategy"], "performance strategy identity changed")?;
+        for phase in ["capture", "pack", "compute", "synchronize", "publish", "total"] {
+            require(array(&observation[phase], "milliseconds")?.len() == 3,
+                &format!("performance phase {phase} sample count changed"))?;
+            require(array(&observation[phase], "allocatedBytes")?.len() == 3,
+                &format!("performance phase {phase} allocation count changed"))?;
+        }
     }
     Ok(())
 }
