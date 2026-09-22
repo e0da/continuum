@@ -244,7 +244,8 @@ namespace KspContinuum
             Motion(joint.angularXMotion); Motion(joint.angularYMotion); Motion(joint.angularZMotion);
             Require(joint.rotationDriveMode == "XYAndZ" || joint.rotationDriveMode == "Slerp",
                 "Rotation drive mode is invalid.");
-            Require(joint.projectionMode == "None" || joint.projectionMode == "PositionAndRotation",
+            Require(joint.projectionMode == "None" || joint.projectionMode == "PositionOnly"
+                || joint.projectionMode == "PositionAndRotation",
                 "Projection mode is invalid.");
             Nonnegative(joint.projectionDistance, "Projection distance");
             Nonnegative(joint.projectionAngle, "Projection angle");

@@ -897,6 +897,8 @@ static class Program
             breakForceStatus = "unbreakable", breakTorqueStatus = "unbreakable", massScale = 1,
             connectedMassScale = 1, configurable = Configurable(),
         } };
+        physical.firstAcceptedLinks[0].configurable.projectionMode = "PositionOnly";
+        ShadowPhysicalInput.Validate(physical);
         physical.firstAcceptedLinks[0].configurable.projectionMode = "bogus";
         Reject(() => ShadowPhysicalInput.Validate(physical));
         physical = PhysicalReport();
