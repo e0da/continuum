@@ -25,6 +25,7 @@ namespace KspContinuum
         public string ksp;
         public string plugin;
         public string vesselId;
+        public string topology;
         public int bodyAInstanceId;
         public int bodyBInstanceId;
         public int jointInstanceId;
@@ -33,6 +34,8 @@ namespace KspContinuum
         public double stepSeconds;
         public double impulseMagnitude = .01;
         public double[] worldAxis = new double[0];
+        public double[] baselineBodyAWorldCenterOfMass = new double[0];
+        public double[] baselineBodyBWorldCenterOfMass = new double[0];
         public double[] referenceRelativeCenterOfMass = new double[0];
         public double[] requestedBodyAImpulse = new double[0];
         public double[] requestedBodyBImpulse = new double[0];
@@ -74,8 +77,26 @@ namespace KspContinuum
             {
                 Require(report.status == "invalid" || report.status == "unavailable" || report.status == "waiting",
                     "Structural experiment status is invalid.");
-                Require(!String.IsNullOrEmpty(report.reason) || report.status == "waiting",
-                    "Terminal structural experiment has no reason.");
+                Require(report.status == "waiting" && report.receiptValidity == "pending"
+                    && report.runEligibility == "pending" && report.cleanupStatus == "pending"
+                    && String.IsNullOrEmpty(report.reason)
+                    || report.status != "waiting" && report.receiptValidity == "valid-invalidated-run"
+                    && report.runEligibility == "ineligible" && report.cleanupStatus == "complete"
+                    && !String.IsNullOrEmpty(report.reason),
+                    "Non-complete structural experiment state is contradictory.");
+                Require(report.experimentQualified == "not-evaluated", "Incomplete capture claimed qualification.");
+                Require(report.trace == null && report.bodySamples != null && report.bodySamples.Length == 0
+                    && report.retainedSamples == 0, "V1 invalid receipt must not publish partial samples.");
+                Require(report.worldAxis != null && report.worldAxis.Length == 0
+                    && report.baselineBodyAWorldCenterOfMass != null && report.baselineBodyAWorldCenterOfMass.Length == 0
+                    && report.baselineBodyBWorldCenterOfMass != null && report.baselineBodyBWorldCenterOfMass.Length == 0
+                    && report.referenceRelativeCenterOfMass != null && report.referenceRelativeCenterOfMass.Length == 0
+                    && report.requestedBodyAImpulse != null && report.requestedBodyAImpulse.Length == 0
+                    && report.requestedBodyBImpulse != null && report.requestedBodyBImpulse.Length == 0
+                    && report.requestedNetImpulse != null && report.requestedNetImpulse.Length == 0,
+                    "V1 invalid receipt contains unvalidated numeric payloads.");
+                Require(Finite(report.stepSeconds) && Finite(report.impulseMagnitude),
+                    "Non-complete structural experiment contains nonfinite scalars.");
                 return;
             }
             Require(String.IsNullOrEmpty(report.reason), "Complete structural experiment has a failure reason.");
@@ -91,7 +112,8 @@ namespace KspContinuum
                 "Contact evidence contradicts run eligibility.");
             Require(report.coordinateSchema == "ksp-continuum-structural-relative-coordinate/v1",
                 "Structural coordinate schema is unsupported.");
-            Require(!String.IsNullOrEmpty(report.vesselId), "Structural vessel identity is missing.");
+            Require(!String.IsNullOrEmpty(report.vesselId) && !String.IsNullOrEmpty(report.topology),
+                "Structural vessel or topology identity is missing.");
             Require(report.bodyAInstanceId != report.bodyBInstanceId && report.bodyAInstanceId != 0
                 && report.bodyBInstanceId != 0 && report.jointInstanceId != 0, "Structural native identities are invalid.");
             Require(Finite(report.stepSeconds) && report.stepSeconds > 0, "Structural step is invalid.");
@@ -105,6 +127,8 @@ namespace KspContinuum
                 && !String.IsNullOrEmpty(report.lifecycleQualificationId),
                 "Installed callback qualification is missing.");
             Vector(report.worldAxis, 3, "world axis");
+            Vector(report.baselineBodyAWorldCenterOfMass, 3, "baseline body A center of mass");
+            Vector(report.baselineBodyBWorldCenterOfMass, 3, "baseline body B center of mass");
             Vector(report.referenceRelativeCenterOfMass, 3, "reference relative center of mass");
             Vector(report.requestedBodyAImpulse, 3, "requested body A impulse");
             Vector(report.requestedBodyBImpulse, 3, "requested body B impulse");
@@ -117,6 +141,9 @@ namespace KspContinuum
                 double expected = report.mode == "sham" ? 0 : report.worldAxis[i] * report.impulseMagnitude;
                 Require(Math.Abs(report.requestedBodyAImpulse[i] - expected) <= 1e-12,
                     "Requested impulse does not match the frozen axis and magnitude.");
+                Require(Math.Abs(report.baselineBodyBWorldCenterOfMass[i] - report.baselineBodyAWorldCenterOfMass[i]
+                    - report.referenceRelativeCenterOfMass[i]) <= 1e-12,
+                    "Structural displacement reference does not match the raw baseline.");
             }
             double axisNorm = report.worldAxis[0] * report.worldAxis[0] + report.worldAxis[1] * report.worldAxis[1]
                 + report.worldAxis[2] * report.worldAxis[2];
@@ -126,6 +153,8 @@ namespace KspContinuum
             Require(report.bodySamples != null && report.bodySamples.Length == report.retainedSamples,
                 "Structural body sample count is inconsistent.");
             StructuralResponse.Validate(report.trace);
+            Require(report.trace.evidence == report.evidence, "Structural trace provenance does not match its receipt.");
+            Require(report.trace.topology == report.topology, "Structural trace topology does not match its receipt.");
             Require(report.trace.samples.Length == report.retainedSamples && report.trace.stepSeconds == report.stepSeconds,
                 "Structural trace does not match the experiment.");
             long topologyGeneration = -1, frameGeneration = -1, originEventCount = -1;
