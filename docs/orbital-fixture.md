@@ -1,13 +1,13 @@
 # Orbital and event fixture
 
-`tools/orbit-fixture/run.py` exercises an existing, external Gimbal coast implementation against independent closed-form orbital states. It also demonstrates event crossings that endpoint sampling misses. It does not install a solver in KSP or introduce a new general orbital solver.
+the Rust `orbit-fixture` binary exercises an existing, external Gimbal coast implementation against independent closed-form orbital states. It also demonstrates event crossings that endpoint sampling misses. It does not install a solver in KSP or introduce a new general orbital solver.
 
 ## Run
 
 An existing clean Gimbal checkout, its cached Cargo dependencies, and an installed Rust toolchain are required. No Gimbal implementation code is copied into this public repository. Supply the checkout location explicitly and pin the full expected Git revision:
 
 ```sh
-python3 tools/orbit-fixture/run.py \
+cargo run --manifest-path tools/numerics/Cargo.toml --bin orbit-fixture -- \
   --gimbal-root /path/to/gimbal \
   --expected-revision a4ca52a45921bbbca6180a8d5882e44354df05a6 \
   --output /tmp/orbit-fixture.json
@@ -16,7 +16,7 @@ python3 tools/orbit-fixture/run.py \
 The output must be new; existing files and symlinks are refused. The parent directory must already exist. Cargo is found on `PATH`, then at `~/.cargo/bin/cargo`. If that launcher is unavailable, pass an existing concrete toolchain binary:
 
 ```sh
-python3 tools/orbit-fixture/run.py \
+cargo run --manifest-path tools/numerics/Cargo.toml --bin orbit-fixture -- \
   --gimbal-root /path/to/gimbal \
   --expected-revision a4ca52a45921bbbca6180a8d5882e44354df05a6 \
   --cargo "$HOME/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin/cargo" \
@@ -60,10 +60,10 @@ This event computation does **not** locate events along Gimbal's curved orbital 
 
 ## Evidence and limits
 
-Run the dependency-free Python tests separately:
+Run the Rust tests separately:
 
 ```sh
-python3 -B -m unittest discover -s tools/orbit-fixture -v
+cargo test --manifest-path tools/numerics/Cargo.toml --bin orbit-fixture
 ```
 
 The test-first reference scaffold produced a witnessed assertion failure on the circular quarter-period time; the implemented suite then passed seven tests. It includes a deliberately perturbed 1 cm returned position that fails the 1 mm gate, nonfinite-output rejection, event misses/hits, invalid domains, exclusive output, and a missing-donor failure.

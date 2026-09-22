@@ -2,15 +2,15 @@
 
 This standalone experiment establishes a bounded direct Plummer trajectory reference and checks a smooth, potential-consistent pair decomposition. The original resolution schedule fails two noncircular gates; one explicit doubling passes the same gates. Neither result qualifies FFT trajectories or demonstrates a speedup.
 
-Run with Python 3.11 or later; no scientific packages are required. Output paths must be new and their parent directories must exist.
+The experiment is implemented in the shared Rust numerics crate with no scientific runtime dependency. Output paths must be new and their parent directories must exist.
 
 ```sh
-python3 -B -m unittest tests.test_field_trajectory -v
-python3 -B tools/field-gravity/trajectory.py --output artifacts/trajectory-baseline.json
-python3 -B tools/field-gravity/trajectory.py --refinement-level 1 --output artifacts/trajectory-refined.json
+cargo test --manifest-path tools/numerics/Cargo.toml field
+cargo run --manifest-path tools/numerics/Cargo.toml --bin field-trajectory -- --output artifacts/trajectory-baseline.json
+cargo run --manifest-path tools/numerics/Cargo.toml --bin field-trajectory -- --output artifacts/trajectory-refined.json
 ```
 
-A completed baseline report currently exits 2 because its gates fail. A completed qualified report exits 0. Invalid input or output errors exit 1; argparse syntax errors also use 2, so check that a report exists before treating an exit code as a scientific result. Existing output is never overwritten. JSON includes model, schedules, gates, every resolution's residuals, sampled positions, split adversaries, Python version and the script's SHA-256.
+A completed baseline report currently exits 2 because its gates fail. A completed qualified report exits 0. Invalid input or output errors exit 1; argparse syntax errors also use 2, so check that a report exists before treating an exit code as a scientific result. Existing output is never overwritten. JSON includes model, schedules, gates, every resolution's residuals, sampled positions, split adversaries.
 
 ## Physical model and independent reference
 
@@ -78,39 +78,12 @@ The first failure is retained locally in `artifacts/field-trajectory-first.json`
 
 Seven tests pass. Before implementation, the one-step Verlet test failed for an unchanged state and the component-gradient test failed for a missing product-rule term. The implementation is bounded to 16 bodies and 131072 steps per call, but qualification covers only these two-body fixtures. It does not qualify arbitrary many-body dynamics, long horizons, close-encounter adaptivity, floating-point determinism across machines, a mesh split, or FFT trajectory integration. The [earlier hard-cutoff correction](field-gravity.md) remains unchanged and retains its continuity failure.
 
-## Optional spatial follow-on: retained failure
+## Spatial follow-on
 
-This research follow-on is not on the critical path for celestial ephemerides or local interaction scheduling. It asks whether the same analytic near/far decomposition remains accurate when the far component is evaluated spatially. The answer is **no at the tested resolutions and fixed gates**. No further refinement is implied by this result.
-
-The new `spatial.py` uses the existing pinned NumPy environment:
+The same Rust crate provides the bounded spatial report:
 
 ```sh
-artifacts/field-gravity-venv/bin/python -B -m unittest tests.test_field_spatial -v
-artifacts/field-gravity-venv/bin/python -B tools/field-gravity/spatial.py \
-  --output artifacts/spatial-split.json
+cargo run --manifest-path tools/numerics/Cargo.toml --bin field-spatial -- --output artifacts/spatial-split.json
 ```
 
-Use the [field-gravity environment setup](field-gravity.md) if that local environment does not exist. `--grids 17` selects a smaller diagnostic run; the fixed recorded experiment uses all of 17, 33 and 65. The CLI uses exclusive output and the same completed-pass/completed-failure exit convention. Six new tests plus the seventeen existing field/trajectory tests pass in the pinned NumPy environment. Test passes verify the harness and its retained failures, not physical qualification.
-
-The physical law, softening, switch radii and durations remain unchanged. Near forces use the exact analytic derivative at each particle separation. Far forces use the analytic far-force derivative sampled on a fixed isolated grid in [0,8]³, with CIC deposition and matching CIC sampling. The initial orbital COM is placed at [4,4,4]; this origin remains fixed during integration. Particles leaving the closed box are rejected, rather than wrapped or clamped.
-
-For two bodies, the deposited/sampled pair interaction can be evaluated directly as the sum over 8 source and 8 target nodes. The trajectory uses this 64-term stencil sum, with symmetric mass-weighted pair accumulation and analytically zero self terms. It is O(64 N²) and bounded to 16 bodies. **It is not an FFT trajectory benchmark or a scalable mesh implementation.** Five snapshots at each grid resolution independently exercise actual zero-padded FFT convolution, including an off-grid isolated body, box boundaries, a node-aligned switching-shell pair, an off-grid pair and an asymmetric three-body scene. The FFT/stencil absolute-acceleration gate is 10⁻¹¹; their observed maximum difference is 2.23×10⁻¹⁵.
-
-The unchanged level-1 direct/analytic-split baseline must still qualify. Each spatial candidate uses the same 256/512/1024/2048 step schedule and energy, angular-momentum, COM, momentum, reversal, endpoint and refinement gates. The 10⁻¹⁰ analytic split identity gate remains a check on the exact decomposition in that baseline; the approximate spatial candidate's same-step difference from direct is reported separately as `sameStepDirectDifference`. Qualification does not reinterpret an approximation as an exact identity. The circular reference remains analytic; the noncircular reference remains the finer direct integration.
-
-| Finest-step trajectory | Grid | Relative energy excursion | Relative angular-momentum drift | Normalized endpoint position error |
-| --- | ---: | ---: | ---: | ---: |
-| Circular | 17³ | 0.5928 | 0.04865 | 1.6792 |
-| Circular | 33³ | 0.1521 | 0.007363 | 0.8236 |
-| Circular | 65³ | 0.03100 | 0.01326 | 0.9022 |
-| Noncircular | 17³ | 0.3071 | 0.1657 | 0.2145 |
-| Noncircular | 33³ | 0.1111 | 0.01765 | 0.3798 |
-| Noncircular | 65³ | 0.05822 | 0.003159 | 0.2033 |
-
-Every row fails the fixed energy (10⁻⁴), angular-momentum (10⁻¹⁰) and endpoint (10⁻³) gates. Final temporal refinement ratios range approximately 0.991–1.010 rather than the required 3–5. Momentum, COM and reversibility still pass; those properties do not establish physical accuracy. Endpoint errors are not monotonic with grid refinement, so the result does not justify extrapolating a passing grid size.
-
-The off-grid switching-shell snapshot's relative force RMS error falls from 129.97% to 40.89% to 11.24%, still above the existing 5% static-force gate. It has a nonzero torque about the COM. This distinguishes spatial force error from integration error. Although the exact near/far pair components are gradients of their respective analytic potentials, CIC interpolation of a force kernel is not asserted to be the gradient of a discrete particle potential. Its pair force need not align with the physical particle separation. Evaluating the near component at the true separation and the far component through a grid also disrupts their strong cancellation in the switching shell. The results rule out treating smooth analytic splitting alone as a fix for spatial accuracy.
-
-The retained local report is `artifacts/field-spatial-first.json`. The complete local run took 13.10 seconds, including the direct baseline and references, all forward/reverse stencil trajectories, capture, stencils, force work, diagnostics and FFT snapshots; serialization and process startup are excluded. Per-snapshot direct, stencil and FFT call times are reported separately. The trajectory timer does not include an FFT per step and must not be used to claim FFT throughput. These are single local observations, not matched-accuracy speed measurements.
-
-Before implementation, the aligned switching-shell test observed zero acceleration instead of the independent Plummer value 1.7786909787073937. A force-provider seam initially ignored by Verlet produced position 0.2 instead of 0.26 under a specified constant acceleration. Both failures were witnessed before the implementation passed. The original mesh solver and earlier raw receipts remain unchanged. This slice stops at a measured limitation and does not propose a new celestial solver.
+It evaluates the analytic near component and the far CIC pair stencil without a dense FFT dependency. The report preserves the explicit `fftTrajectoryQualified: false` and `speedClaim: false` boundaries.
