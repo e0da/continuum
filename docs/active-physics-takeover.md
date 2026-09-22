@@ -4,6 +4,8 @@ This portable C# fixture proves the publication protocol needed immediately befo
 
 `TakeoverCoordinator` grants one opaque `TakeoverAuthority` token for one prepared transaction. Preparation captures an immutable before-image, checks the caller's tick, topology generation, frame generation and frame identity, validates body identity/generation/mass, and constructs a per-body write journal. A second preparation is busy until the active transaction reaches a terminal state.
 
+The snapshot overload of `Prepare` additionally requires the complete expected before-image to match the driver's capture. The [active-physics workload adapter](active-physics-workload-adapter.md) uses this overload so work computed from an older pose cannot overwrite a same-stamp mutation.
+
 Application revalidates the complete before-image before the first write. A stale tick, topology change, frame change, or same-stamp state change aborts without calling the driver. The transaction then moves through these explicit phases:
 
 | Phase | Meaning |

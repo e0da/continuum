@@ -132,9 +132,17 @@ static class Program
         var receipt = tx.Abort(tx.Authority);
         Check(receipt.Status == TakeoverStatus.Aborted && driver.Writes == 0, "explicit abort writes nothing");
     }
+    static void ExactBeforeImage()
+    {
+        var expected = Snapshot(Stamp()); var driver = new MemoryDriver(Snapshot(Stamp(), 2));
+        var coordinator = new TakeoverCoordinator(driver); TakeoverTransaction transaction;
+        Check(coordinator.Prepare(expected, Snapshot(expected.Stamp, 5), out transaction) == TakeoverStatus.Stale,
+            "exact before-image rejects same-stamp mutation");
+        Check(transaction == null && driver.Writes == 0, "exact before-image rejection wrote state");
+    }
     static void Main()
     {
-        SuccessAndAuthority(); AdmissionRejection(); Revalidation(); Compensation(); ExplicitAbort();
+        SuccessAndAuthority(); AdmissionRejection(); Revalidation(); Compensation(); ExplicitAbort(); ExactBeforeImage();
         Console.WriteLine("Takeover assertions: " + assertions);
     }
 }
