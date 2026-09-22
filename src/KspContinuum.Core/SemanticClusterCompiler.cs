@@ -138,8 +138,9 @@ namespace KspContinuum
             var indexById = new Dictionary<string, int>(StringComparer.Ordinal);
             for (int i = 0; i < orderedParts.Count; i++)
             {
-                if (!indexById.TryAdd(orderedParts[i].LogicalId, i))
+                if (indexById.ContainsKey(orderedParts[i].LogicalId))
                     throw new ArgumentException("Logical part IDs must be unique.", "parts");
+                indexById.Add(orderedParts[i].LogicalId, i);
             }
 
             var orderedAttachments = new List<SemanticAttachment>(attachments);
