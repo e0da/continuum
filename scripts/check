@@ -1,0 +1,72 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repo_root"
+
+run() {
+  if [ "${KSP_CONTINUUM_CHECK_DRY_RUN:-0}" = 1 ]; then
+    printf '%s\n' "$*"
+  else
+    "$@"
+  fi
+}
+
+portable() {
+  for project in \
+    tests/KspContinuum.Tests \
+    tests/KspContinuum.Worker.Tests \
+    tests/KspContinuum.Handoff.Tests \
+    tests/KspContinuum.Contact.Tests \
+    tests/KspContinuum.Encounter.Tests \
+    tests/KspContinuum.Encounter.Oracle.Tests \
+    tests/KspContinuum.Profiling.Tests \
+    tests/KspContinuum.PlayerLoop.Tests \
+    tests/KspContinuum.ForceObservation.Tests \
+    tests/KspContinuum.AeroCapture.Tests \
+    tests/KspContinuum.LifecycleTrace.Tests \
+    tests/KspContinuum.Shadow.Tests \
+    src/KspContinuum.Mission/Tests/Mission.Tests.csproj
+  do
+    run dotnet run --project "$project" -c Release
+  done
+
+  run python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+  curve_output=${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ksp-continuum-curve-bounds-$$.json
+  trap 'rm -f "$curve_output"' EXIT HUP INT TERM
+  run python3 tools/curve-bounds/experiment.py --output "$curve_output"
+  run python3 -m unittest discover -s tools/orbit-fixture -p 'test_*.py' -v
+  rm -f "$curve_output"
+  trap - EXIT HUP INT TERM
+}
+
+field() {
+  run python3 -m pip install -r tools/field-gravity/requirements.txt
+  run python3 -m unittest discover -s tests -p 'test_field*.py' -v
+}
+
+structural() {
+  run cmake -S tools/structural-bench -B artifacts/structural-ci -DCMAKE_BUILD_TYPE=Release
+  run cmake --build artifacts/structural-ci --parallel 2
+  run ctest --test-dir artifacts/structural-ci --output-on-failure
+}
+
+usage() {
+  printf 'usage: %s {portable|field|structural|all}\n' "$0" >&2
+}
+
+case "${1:-}" in
+  portable) portable ;;
+  field) field ;;
+  structural) structural ;;
+  all)
+    portable
+    field
+    structural
+    ;;
+  *)
+    usage
+    exit 64
+    ;;
+esac
