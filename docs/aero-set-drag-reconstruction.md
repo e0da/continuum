@@ -16,6 +16,8 @@ Portable fixtures must be deterministic and match hand-computed results within `
 
 Live qualification is split by complete capture receipt, never adjacent samples. With at least two valid capture-v3 receipts, freeze one complete receipt as development data and keep another complete receipt held out. The held-out stock `AreaDrag` comparison gate is p99 relative error at most `1e-5` and maximum relative error at most `1e-4`, with absolute error at most `1e-5 m^2` when the stock label is near zero. A passing area-drag result does not qualify total force magnitude, trajectories, lift, submerged samples, provider compatibility, or active authority.
 
+Here, complete means the qualification capture reached its declared 64-sample bound. A partial receipt can still produce diagnostic error distributions, but it cannot set `qualifiedHeldOutGate`; the comparison report exposes completeness separately for the development and held-out sides.
+
 ## Current evidence boundary
 
 The local qualified powered-descent receipt is capture schema v2. It has 64 samples and 2,560 body-drag labels, but it predates `setDragInputs`; therefore it cannot evaluate H1. Capture-v3 source and parsing contracts exist, but no completed capture-v3 receipt is currently available. Portable tests can validate the extracted formula and abstention boundary; the held-out live gate remains pending a future read-only capture run.

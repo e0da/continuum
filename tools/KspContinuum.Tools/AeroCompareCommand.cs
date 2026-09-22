@@ -75,8 +75,8 @@ internal static class AeroCompareCommand
 
         var developmentSetDrag = EvaluateSetDrag(developmentReports);
         var heldOutSetDrag = heldOutReport is null ? null : EvaluateSetDrag(new[] { heldOutReport });
-        var qualifiedHeldOutGate = developmentSetDrag.MeetsNumericGate &&
-            heldOutSetDrag is not null && heldOutSetDrag.MeetsNumericGate;
+        var qualifiedHeldOutGate = developmentSetDrag.MeetsNumericGate && developmentSetDrag.HasCompleteReceipts &&
+            heldOutSetDrag is not null && heldOutSetDrag.MeetsNumericGate && heldOutSetDrag.HasCompleteReceipts;
         var output = new JsonObject
         {
             ["schema"] = ComparisonSchema,
@@ -98,10 +98,10 @@ internal static class AeroCompareCommand
                 qualifiedHeldOutGate),
             ["setDragQualificationSplit"] = new JsonObject
             {
-                ["development"] = SetDragMetrics(developmentSetDrag.Rows, developmentSetDrag.Abstentions, false),
+                ["development"] = SetDragQualificationMetrics(developmentSetDrag, false),
                 ["heldOut"] = heldOutSetDrag is null
                     ? null
-                    : SetDragMetrics(heldOutSetDrag.Rows, heldOutSetDrag.Abstentions, qualifiedHeldOutGate),
+                    : SetDragQualificationMetrics(heldOutSetDrag, qualifiedHeldOutGate),
                 ["qualifiedHeldOutGate"] = qualifiedHeldOutGate
             },
             ["stockDragScalarDiagnostics"] = StockDragScalarMetrics(scalarRows),
@@ -148,7 +148,8 @@ internal static class AeroCompareCommand
                 abstentions[reason] = abstentions.GetValueOrDefault(reason) + 1;
             }
         }
-        return new SetDragEvaluation(rows, abstentions, MeetsNumericGate(rows, abstentions));
+        return new SetDragEvaluation(rows, abstentions, MeetsNumericGate(rows, abstentions),
+            reports.All(report => report.SampleCount == AeroCaptureReport.MaximumSamples));
     }
 
     private static bool MeetsNumericGate(IReadOnlyList<SetDragRow> rows, Dictionary<string, int> abstentions)
@@ -178,6 +179,14 @@ internal static class AeroCompareCommand
             ["meetsNumericGate"] = MeetsNumericGate(rows, abstentions),
             ["qualifiedHeldOutGate"] = qualifiedHeldOutGate
         };
+    }
+
+    private static JsonObject SetDragQualificationMetrics(SetDragEvaluation evaluation, bool qualifiedHeldOutGate)
+    {
+        var metrics = SetDragMetrics(evaluation.Rows, evaluation.Abstentions, qualifiedHeldOutGate);
+        metrics["completeCaptureReceipts"] = evaluation.HasCompleteReceipts;
+        metrics["expectedSamplesPerReceipt"] = AeroCaptureReport.MaximumSamples;
+        return metrics;
     }
 
     private static double PercentileOrInfinity(double[] values, double probability)
@@ -409,7 +418,7 @@ internal static class AeroCompareCommand
         IReadOnlyList<Publication> Publications)
     { public int BodyDragCount => Publications.Count(item => item.Kind == AeroPublicationKind.BodyDrag); }
     private sealed record SetDragEvaluation(IReadOnlyList<SetDragRow> Rows,
-        Dictionary<string, int> Abstentions, bool MeetsNumericGate);
+        Dictionary<string, int> Abstentions, bool MeetsNumericGate, bool HasCompleteReceipts);
     private sealed record Provider(string Name, string Version, string Assembly, string Sha256, string Mvid)
     { public JsonObject ToJson() => new() { ["name"] = Name, ["version"] = Version, ["assembly"] = Assembly, ["assemblySha256"] = Sha256, ["assemblyMvid"] = Mvid }; }
     private sealed class Publication

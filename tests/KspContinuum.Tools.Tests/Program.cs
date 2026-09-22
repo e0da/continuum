@@ -46,10 +46,14 @@ try
         "portable SetDrag fixture either missed its numeric gate or overstated held-out qualification");
     Require(aeroComparison["setDragQualificationSplit"]!["heldOut"] is null,
         "ordinary comparison invented a held-out dataset");
+    var development = Path.Combine(temporary, "aero-development.json");
+    File.WriteAllText(development, ReportJson.Encode(AeroReceipt("1.12.5",
+        "00000000-0000-0000-0000-000000000001", AeroCaptureReport.MaximumSamples)));
     var heldOut = Path.Combine(temporary, "aero-held-out.json");
-    File.WriteAllText(heldOut, ReportJson.Encode(AeroReceipt("1.12.5", "00000000-0000-0000-0000-000000000003")));
+    File.WriteAllText(heldOut, ReportJson.Encode(AeroReceipt("1.12.5",
+        "00000000-0000-0000-0000-000000000003", AeroCaptureReport.MaximumSamples)));
     var qualifiedOutput = Path.Combine(temporary, "aero-qualified.json");
-    Require(Run("aero-compare", aero, "--held-out", heldOut, "--output", qualifiedOutput) == 0,
+    Require(Run("aero-compare", development, "--held-out", heldOut, "--output", qualifiedOutput) == 0,
         "development/held-out comparison failed");
     var qualified = JsonNode.Parse(File.ReadAllText(qualifiedOutput))!.AsObject();
     Require(qualified["setDragQualificationSplit"]!["development"]!["meetsNumericGate"]!.GetValue<bool>() &&
@@ -57,6 +61,11 @@ try
         qualified["setDragQualificationSplit"]!["qualifiedHeldOutGate"]!.GetValue<bool>() &&
         qualified["setDragAreaReconstruction"]!["qualifiedHeldOutGate"]!.GetValue<bool>(),
         "separate passing receipt did not satisfy held-out SetDrag gate");
+    var partialOutput = Path.Combine(temporary, "aero-partial.json");
+    Require(Run("aero-compare", aero, "--held-out", heldOut, "--output", partialOutput) == 0 &&
+        !JsonNode.Parse(File.ReadAllText(partialOutput))!["setDragQualificationSplit"]!["qualifiedHeldOutGate"]!.GetValue<bool>() &&
+        !JsonNode.Parse(File.ReadAllText(partialOutput))!["setDragQualificationSplit"]!["development"]!["completeCaptureReceipts"]!.GetValue<bool>(),
+        "partial development receipt incorrectly qualified as trajectory evidence");
     Require(qualified["incompleteness"]!.AsArray().Any(item =>
         item!.ToString().Contains("explicit development/held-out split", StringComparison.Ordinal) &&
         item.ToString().Contains("craft-family and regime independence remain procedural", StringComparison.Ordinal)) &&
@@ -144,7 +153,7 @@ finally { Directory.Delete(temporary, true); }
 int Run(params string[] arguments) { var start = new ProcessStartInfo("dotnet") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true }; start.ArgumentList.Add("run"); start.ArgumentList.Add("--project"); start.ArgumentList.Add(project); start.ArgumentList.Add("-c"); start.ArgumentList.Add("Release"); start.ArgumentList.Add("--no-build"); start.ArgumentList.Add("--"); foreach (var argument in arguments) start.ArgumentList.Add(argument); using var process = Process.Start(start)!; process.WaitForExit(); if (process.ExitCode != 0) Console.Error.Write(process.StandardError.ReadToEnd()); return process.ExitCode; }
 void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 string FindRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current is not null && !File.Exists(Path.Combine(current.FullName, "README.md"))) current = current.Parent; return current?.FullName ?? throw new InvalidOperationException("repository root not found"); }
-AeroCaptureReport AeroReceipt(string version, string sessionId = "00000000-0000-0000-0000-000000000001")
+AeroCaptureReport AeroReceipt(string version, string sessionId = "00000000-0000-0000-0000-000000000001", int sampleCount = 1)
 {
     const string hash = "8a20892953fc14c02f352b393eb6712c665156d94a7d846d16c20a7de3e22f27";
     var provider = new AeroProviderFingerprint("stock-flight-integrator", version, "Assembly-CSharp", hash, "10657063-2fc3-43a7-84fa-d39e75e877bf");
@@ -156,27 +165,30 @@ AeroCaptureReport AeroReceipt(string version, string sessionId = "00000000-0000-
             Entry("KspContinuum.AeroCapture.UpdateFinalizer", "finalizer", 2, AeroPatchEntry.PriorityLast)]),
         new AeroPatchTarget("FlightIntegrator.ApplyAeroDrag", [Entry("KspContinuum.AeroCapture.DragPrefix", "prefix", 0)]),
         new AeroPatchTarget("FlightIntegrator.ApplyAeroLift", [Entry("KspContinuum.AeroCapture.LiftPrefix", "prefix", 0)])]);
-    AeroCaptureContext Step(int ordinal) => new(sessionId, "00000000-0000-0000-0000-000000000002", "frame", 1, 1, 1, 1, 1, ordinal, 100, 2, .02);
+    AeroCaptureContext Step(int epoch, int ordinal) => new(sessionId, "00000000-0000-0000-0000-000000000002", "frame", epoch, 1, 1, epoch, 1, ordinal, 100 + epoch, 2 + epoch * .02, .02);
     var faces = new[] { 1d, 1, 1, 1, 1, 1 };
     var curve = new AeroFloatCurveDefinition(0, 0, [new AeroCurveKey(0, 1, 0, 0, 0, 0, 0)]);
     var setDragInputs = new AeroSetDragInputs([0, 3, 0, 0, 0, 0], faces,
         new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
     var emptySetDragInputs = new AeroSetDragInputs(new double[6], faces,
         new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
-    AeroPartContext Part(long id, int ordinal, bool cubes) => new(Step(ordinal), id, (int)id + 10, (int)id + 20, 10, 1.2, 100000, 280, 330, .5, 1, 1, false,
+    AeroPartContext Part(int epoch, long id, int ordinal, bool cubes) => new(Step(epoch, ordinal), id, (int)id + 10, (int)id + 20, 10, 1.2, 100000, 280, 330, .5, 1, 1, false,
         new Vec(id, 0, 0), new Vec(-10, 0, 0), new Vec(10, 0, 0), new Vec(), new Vec(), 1,
         cubes ? [new AeroDragCubeState("Default", 1, new Vec(), new Vec(1, 1, 1), faces, faces, faces, faces)] : [],
         cubes ? setDragInputs : emptySetDragInputs);
-    var dragContext = Part(1, 0, true); var exact = AeroDragCubeBaseline.Evaluate(dragContext);
-    var drag = new AeroBodyPublication(dragContext, AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
-        exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters,
-        new AeroStockDragScalars(3, 2, 4, 5, .5, .06));
-    var liftContext = Part(1, 1, true); var lift = new AeroBodyPublication(liftContext, AeroPublicationKind.BodyLift,
-        AeroApplicationMode.AtCenterOfMass, new Vec(), liftContext.worldCenterOfMass, new Vec());
-    var absentContext = Part(2, 2, false); var absent = new AeroBodyPublication(absentContext, AeroPublicationKind.BodyDrag,
-        AeroApplicationMode.AtCenterOfMass, new Vec(), absentContext.worldCenterOfMass, new Vec(),
-        new AeroStockDragScalars(0, 60, 1, 1, 1, 0));
+    AeroCaptureSample Sample(int epoch) {
+        var dragContext = Part(epoch, 1, 0, true); var exact = AeroDragCubeBaseline.Evaluate(dragContext);
+        var drag = new AeroBodyPublication(dragContext, AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
+            exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters,
+            new AeroStockDragScalars(3, 2, 4, 5, .5, .06));
+        var liftContext = Part(epoch, 1, 1, true); var lift = new AeroBodyPublication(liftContext, AeroPublicationKind.BodyLift,
+            AeroApplicationMode.AtCenterOfMass, new Vec(), liftContext.worldCenterOfMass, new Vec());
+        var absentContext = Part(epoch, 2, 2, false); var absent = new AeroBodyPublication(absentContext, AeroPublicationKind.BodyDrag,
+            AeroApplicationMode.AtCenterOfMass, new Vec(), absentContext.worldCenterOfMass, new Vec(),
+            new AeroStockDragScalars(0, 60, 1, 1, 1, 0));
+        return new AeroCaptureSample(Step(epoch, 3), [drag, lift, absent]);
+    }
     return new AeroCaptureReport(provenance, AeroCaptureDisposition.Valid, AeroCaptureReason.None,
-        AeroCleanupOutcome.RemovedOwnedPatches, [new AeroCaptureSample(Step(3), [drag, lift, absent])]);
+        AeroCleanupOutcome.RemovedOwnedPatches, Enumerable.Range(1, sampleCount).Select(Sample).ToArray());
 }
 string Sha256(string path) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
