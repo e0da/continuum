@@ -127,6 +127,20 @@ namespace KspContinuum
         { this.driver = driver ?? throw new ArgumentNullException("driver"); }
 
         public TakeoverStatus Prepare(ActivePhysicsStamp expected, ActivePhysicsSnapshot desired, out TakeoverTransaction transaction)
+        { return PrepareCore(expected, null, desired, out transaction); }
+
+        public TakeoverStatus Prepare(ActivePhysicsSnapshot expectedBefore, ActivePhysicsSnapshot desired, out TakeoverTransaction transaction)
+        {
+            if (expectedBefore == null)
+            {
+                transaction = null;
+                return TakeoverStatus.Rejected;
+            }
+            return PrepareCore(expectedBefore.Stamp, expectedBefore, desired, out transaction);
+        }
+
+        TakeoverStatus PrepareCore(ActivePhysicsStamp expected, ActivePhysicsSnapshot expectedBefore,
+            ActivePhysicsSnapshot desired, out TakeoverTransaction transaction)
         {
             transaction = null;
             lock (sync)
@@ -138,6 +152,7 @@ namespace KspContinuum
                 catch (Exception) { return TakeoverStatus.Rejected; }
                 var mismatch = CompareStamp(expected, before.Stamp);
                 if (mismatch != TakeoverStatus.Prepared) return mismatch;
+                if (expectedBefore != null && !SameState(expectedBefore, before)) return TakeoverStatus.Stale;
                 if (!SameEnvelope(before, desired)) return TakeoverStatus.Rejected;
                 var writes = new List<TakeoverWrite>();
                 for (int i = 0; i < before.Bodies.Count; i++) writes.Add(new TakeoverWrite(before.Bodies[i], desired.Bodies[i]));

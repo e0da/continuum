@@ -10,6 +10,7 @@ const DOTNET_TESTS: &[&str] = &[
     "tests/KspContinuum.Worker.Tests",
     "tests/KspContinuum.Handoff.Tests",
     "tests/KspContinuum.Takeover.Tests",
+    "tests/KspContinuum.Adapter.Tests",
     "tests/KspContinuum.Contact.Tests",
     "tests/KspContinuum.Encounter.Tests",
     "tests/KspContinuum.Encounter.Oracle.Tests",
