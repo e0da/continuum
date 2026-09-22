@@ -98,12 +98,29 @@ static class Program
         Near(a.Orientation.W, b.Orientation.W, "replay orientation w", 0);
     }
 
+    static void FrozenAccelerationStep()
+    {
+        var cluster = RigidCluster6Dof.Capture(new[] {
+            Body(1, 1, new Vec(-1, 0, 0), Rotation.Identity, new Vec(3, 0, 0), new Vec(0, 0, .2), new Vec(1, 2, 3)),
+            Body(2, 3, new Vec(1, 0, 0), Rotation.Identity, new Vec(3, 0, 0), new Vec(0, 0, .2), new Vec(1, 2, 3))
+        });
+        Vec beforeMomentum = cluster.LinearMomentum;
+        var advanced = cluster.AdvanceFrozenAcceleration(new Vec(0, -10, 0), .2);
+        Near(cluster.CenterOfMass + cluster.LinearVelocity * .2 + new Vec(0, -10, 0) * .02,
+            advanced.CenterOfMass, "constant-acceleration COM position");
+        Near(beforeMomentum + new Vec(0, -10, 0) * (cluster.TotalMass * .2),
+            advanced.LinearMomentum, "constant-acceleration momentum");
+        Near(cluster.AngularMomentum, advanced.AngularMomentum, "COM gravity adds no angular impulse");
+        var poses = advanced.Reconstruct();
+        Near(2, Length(Subtract(poses[1].Position, poses[0].Position)), "constant-acceleration step stays rigid", 2e-10);
+    }
+
     static Vec Subtract(Vec a, Vec b) { return new Vec(a.X - b.X, a.Y - b.Y, a.Z - b.Z); }
     static double Length(Vec value) { return Math.Sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z); }
 
     static int Main()
     {
-        UnequalMassesAndAsymmetricOffsets(); OffCenterImpulse(); Covariance(); DeterministicReplay();
+        UnequalMassesAndAsymmetricOffsets(); OffCenterImpulse(); Covariance(); DeterministicReplay(); FrozenAccelerationStep();
         Console.WriteLine("PASS " + checks + " six-DOF rigid-cluster assertions");
         return 0;
     }
