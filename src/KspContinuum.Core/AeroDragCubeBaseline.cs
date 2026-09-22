@@ -29,7 +29,7 @@ namespace KspContinuum
 
     public static class AeroDragCubeBaseline
     {
-        public const string Strategy = "continuum-drag-cube-projection/v1";
+        public const string Strategy = "continuum-drag-cube-projection/v2";
 
         public static AeroBaselineResult Evaluate(AeroPartContext input)
         {
@@ -45,7 +45,7 @@ namespace KspContinuum
                     .5 * input.densityKilogramsPerCubicMeter * speedSquared, 0);
 
             double speed = Math.Sqrt(speedSquared);
-            Vec worldDirection = input.relativeAirVelocity * (1 / speed);
+            Vec worldDirection = input.relativeAirVelocity * (-1 / speed);
             Rotation attitude = new Rotation(input.worldAttitudeXYZ.X, input.worldAttitudeXYZ.Y,
                 input.worldAttitudeXYZ.Z, input.worldAttitudeW);
             Vec localDirection = attitude.Inverse.Rotate(worldDirection);
@@ -96,7 +96,7 @@ namespace KspContinuum
         static double AxisContribution(AeroDragCubeState cube, double component, int positiveFace, int negativeFace)
         {
             int face = component >= 0 ? positiveFace : negativeFace;
-            return Math.Abs(component) * cube.area[face] * cube.drag[face] * cube.dragModifiers[face];
+            return Math.Abs(component) * cube.area[face] * cube.drag[face];
         }
 
         static void ValidateBatch(IReadOnlyList<AeroPartContext> inputs)
