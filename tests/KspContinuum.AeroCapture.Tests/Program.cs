@@ -12,8 +12,9 @@ static class Program
         public AeroPatchProvenance Installed { get; set; } = Program.Provenance();
         public AeroPatchProvenance Inspected { get; set; } = Program.Provenance();
         public AeroCleanupOutcome Cleanup { get; set; } = AeroCleanupOutcome.RemovedOwnedPatches;
+        public bool ThrowOnInstall { get; set; }
         public int installs, inspections, removals;
-        public AeroPatchProvenance Install(string owner) { installs++; Check(owner == AeroCaptureRun.Owner); return Installed; }
+        public AeroPatchProvenance Install(string owner) { installs++; Check(owner == AeroCaptureRun.Owner); if (ThrowOnInstall) throw new InvalidOperationException("partial install"); return Installed; }
         public AeroPatchProvenance Inspect(string owner) { inspections++; return Inspected; }
         public AeroCleanupOutcome Remove(string owner) { removals++; return Cleanup; }
     }
@@ -159,6 +160,14 @@ static class Program
             "10657063-2fc3-43a7-84fa-d39e75e877bf") };
         using (var run = new AeroCaptureRun(runtime)) { run.Start(); }
         Check(runtime.installs == 0 && runtime.removals == 0);
+
+        runtime = new FakeRuntime { ThrowOnInstall = true };
+        AeroCaptureReport partialInstallReport;
+        using (var run = new AeroCaptureRun(runtime)) { run.Start(); partialInstallReport = run.Report; }
+        Check(runtime.installs == 1 && runtime.inspections == 1 && runtime.removals == 1);
+        Check(partialInstallReport.disposition == AeroCaptureDisposition.Invalid &&
+            partialInstallReport.reason == AeroCaptureReason.HookFailure &&
+            partialInstallReport.cleanup == AeroCleanupOutcome.RemovedOwnedPatches);
         Console.WriteLine("Aero capture contract: " + checks + " assertions passed.");
     }
 }

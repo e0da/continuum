@@ -330,7 +330,7 @@ namespace KspContinuum
         readonly IAeroCapturePatchRuntime runtime;
         readonly List<AeroCaptureSample> samples = new List<AeroCaptureSample>();
         AeroPatchProvenance provenance;
-        bool started, finished;
+        bool started, finished, installAttempted;
         public AeroCaptureReport Report { get; private set; }
         public int PublishedSamples { get { return samples.Count; } }
 
@@ -350,6 +350,7 @@ namespace KspContinuum
             { Finish(AeroCaptureDisposition.Invalid, AeroCaptureReason.ProviderFingerprintMismatch); return; }
             try
             {
+                installAttempted = true;
                 provenance = runtime.Install(Owner);
                 if (provenance == null || !provenance.HasExpectedCapturePatches())
                     Finish(AeroCaptureDisposition.Invalid, AeroCaptureReason.PatchGraphMismatch);
@@ -380,7 +381,7 @@ namespace KspContinuum
             if (finished) return;
             finished = true;
             AeroCleanupOutcome cleanup = AeroCleanupOutcome.NotRegistered;
-            if (provenance != null)
+            if (installAttempted)
             {
                 try
                 {
@@ -388,8 +389,9 @@ namespace KspContinuum
                     if (inspected == null || !inspected.HasExpectedCapturePatches())
                     { disposition = AeroCaptureDisposition.Invalid; reason = AeroCaptureReason.PatchGraphMismatch; }
                     else provenance = inspected;
-                    cleanup = runtime.Remove(Owner);
                 }
+                catch { disposition = AeroCaptureDisposition.Invalid; reason = AeroCaptureReason.PatchGraphMismatch; }
+                try { cleanup = runtime.Remove(Owner); }
                 catch { cleanup = AeroCleanupOutcome.Failed; }
             }
             if (cleanup == AeroCleanupOutcome.Failed)
