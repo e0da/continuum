@@ -5,7 +5,7 @@ namespace KspContinuum
     public sealed class StructuralExperimentReport
     {
         public const int RequiredSamples = 120;
-        public string schema = "ksp-continuum-structural-experiment/v1";
+        public string schema = "ksp-continuum-structural-experiment/v2";
         public string evidence = "native-adapter-observation";
         public string status = "waiting";
         public string reason;
@@ -22,6 +22,8 @@ namespace KspContinuum
         public string contactObservationStatus = "unavailable";
         public string coordinateSchema = "ksp-continuum-structural-relative-coordinate/v1";
         public string startedUtc;
+        public string sessionId;
+        public string runId;
         public string unity;
         public string ksp;
         public string plugin;
@@ -41,6 +43,9 @@ namespace KspContinuum
         public double[] requestedBodyAImpulse = new double[0];
         public double[] requestedBodyBImpulse = new double[0];
         public double[] requestedNetImpulse = new double[0];
+        public StructuralAdmissionEvidence admission;
+        public StructuralBodySample baseline;
+        public StructuralInjectionWitness injection;
         public StructuralTrace trace;
         public StructuralBodySample[] bodySamples = new StructuralBodySample[0];
     }
@@ -51,6 +56,9 @@ namespace KspContinuum
         public long topologyGeneration;
         public long frameGeneration;
         public long originEventCount;
+        public long callbackInvocation;
+        public int bodyAInstanceId;
+        public int bodyBInstanceId;
         public int unityFrame;
         public double fixedTimeSeconds;
         public double[] bodyAWorldCenterOfMass;
@@ -63,12 +71,52 @@ namespace KspContinuum
         public double[] bodyBAngularVelocity;
     }
 
+    public sealed class StructuralAdmissionEvidence
+    {
+        public string status = "pending";
+        public string topology;
+        public int dynamicBodyCount;
+        public int mappedJointCount;
+        public int unmappedJointCount;
+        public int bodyAInstanceId;
+        public int bodyBInstanceId;
+        public int jointInstanceId;
+        public string jointType;
+        public int jointHostBodyInstanceId;
+        public int jointConnectedBodyInstanceId;
+        public bool jointEnabled;
+        public int installedContactSentinels;
+        public int removedContactSentinels;
+        public long contactWindowFirstEpoch;
+        public long contactWindowLastEpoch;
+        public int contactObservationCount;
+        public int detectedContactCount;
+        public int jointBreakCount;
+    }
+
+    public sealed class StructuralInjectionWitness
+    {
+        public string status = "pending";
+        public string callback;
+        public long physicsEpoch;
+        public long callbackInvocation;
+        public int callbackInvocationCount;
+        public int bodyAInstanceId;
+        public int bodyBInstanceId;
+        public int bodyACommandCount;
+        public int bodyBCommandCount;
+        public bool bodyACommandReturned;
+        public bool bodyBCommandReturned;
+        public double[] bodyAImpulse = new double[0];
+        public double[] bodyBImpulse = new double[0];
+    }
+
     public static class StructuralExperiment
     {
         public static void Validate(StructuralExperimentReport report)
         {
             if (report == null) throw new ArgumentNullException("report");
-            Require(report.schema == "ksp-continuum-structural-experiment/v1", "Unexpected structural experiment schema.");
+            Require(report.schema == "ksp-continuum-structural-experiment/v2", "Unexpected structural experiment schema.");
             Require(report.evidence == "native-adapter-observation" || report.evidence == "portable-helper-fixture",
                 "Unexpected structural experiment provenance.");
             Require(report.mode == "impulse" || report.mode == "sham", "Structural experiment mode is invalid.");
@@ -87,7 +135,7 @@ namespace KspContinuum
                     "Non-complete structural experiment state is contradictory.");
                 Require(report.experimentQualified == "not-evaluated", "Incomplete capture claimed qualification.");
                 Require(report.trace == null && report.bodySamples != null && report.bodySamples.Length == 0
-                    && report.retainedSamples == 0, "V1 invalid receipt must not publish partial samples.");
+                    && report.retainedSamples == 0, "V2 invalid receipt must not publish partial samples.");
                 Require(report.worldAxis != null && report.worldAxis.Length == 0
                     && report.baselineBodyAWorldCenterOfMass != null && report.baselineBodyAWorldCenterOfMass.Length == 0
                     && report.baselineBodyBWorldCenterOfMass != null && report.baselineBodyBWorldCenterOfMass.Length == 0
@@ -95,7 +143,9 @@ namespace KspContinuum
                     && report.requestedBodyAImpulse != null && report.requestedBodyAImpulse.Length == 0
                     && report.requestedBodyBImpulse != null && report.requestedBodyBImpulse.Length == 0
                     && report.requestedNetImpulse != null && report.requestedNetImpulse.Length == 0,
-                    "V1 invalid receipt contains unvalidated numeric payloads.");
+                    "V2 invalid receipt contains unvalidated numeric payloads.");
+                Require(report.admission == null && report.baseline == null && report.injection == null,
+                    "V2 invalid receipt retained qualifying evidence.");
                 Require(Finite(report.stepSeconds) && Finite(report.impulseMagnitude),
                     "Non-complete structural experiment contains nonfinite scalars.");
                 return;
@@ -113,6 +163,14 @@ namespace KspContinuum
                 "Contact evidence contradicts run eligibility.");
             Require(report.coordinateSchema == "ksp-continuum-structural-relative-coordinate/v1",
                 "Structural coordinate schema is unsupported.");
+            DateTime started;
+            Require(!String.IsNullOrEmpty(report.startedUtc) && DateTime.TryParse(report.startedUtc,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+                out started), "Structural start time is missing or invalid.");
+            Require(!String.IsNullOrEmpty(report.sessionId) && !String.IsNullOrEmpty(report.runId)
+                && !String.IsNullOrEmpty(report.unity) && !String.IsNullOrEmpty(report.ksp)
+                && !String.IsNullOrEmpty(report.plugin), "Structural run or build identity is missing.");
             Require(!String.IsNullOrEmpty(report.vesselId) && !String.IsNullOrEmpty(report.topology),
                 "Structural vessel or topology identity is missing.");
             Require(report.bodyAInstanceId != report.bodyBInstanceId && report.bodyAInstanceId != 0
@@ -139,6 +197,9 @@ namespace KspContinuum
                 && report.lifecycleQualification.ksp == report.ksp
                 && report.lifecycleQualification.plugin == report.plugin,
                 "Installed callback qualification does not bind this structural experiment.");
+            double qualifiedStep = LifecycleOrderQualification.QualifiedStepSeconds(report.lifecycleQualification);
+            Require(Math.Abs(report.stepSeconds - qualifiedStep) <= 1e-9,
+                "Lifecycle qualification timestep does not bind this structural experiment.");
             Vector(report.worldAxis, 3, "world axis");
             Vector(report.baselineBodyAWorldCenterOfMass, 3, "baseline body A center of mass");
             Vector(report.baselineBodyBWorldCenterOfMass, 3, "baseline body B center of mass");
@@ -165,27 +226,37 @@ namespace KspContinuum
                 "Structural experiment is incomplete.");
             Require(report.bodySamples != null && report.bodySamples.Length == report.retainedSamples,
                 "Structural body sample count is inconsistent.");
+            ValidateBaselineAndInjection(report);
+            ValidateAdmission(report);
             StructuralResponse.Validate(report.trace);
             Require(report.trace.evidence == report.evidence, "Structural trace provenance does not match its receipt.");
             Require(report.trace.topology == report.topology, "Structural trace topology does not match its receipt.");
             Require(report.trace.samples.Length == report.retainedSamples && report.trace.stepSeconds == report.stepSeconds,
                 "Structural trace does not match the experiment.");
             long topologyGeneration = -1, frameGeneration = -1, originEventCount = -1;
+            int previousUnityFrame = -1;
             double previousTime = 0;
             for (int i = 0; i < report.bodySamples.Length; i++)
             {
                 StructuralBodySample sample = report.bodySamples[i];
                 Require(sample != null && sample.physicsEpoch == report.trace.samples[i].physicsEpoch,
                     "Structural body sample epoch is inconsistent.");
-                Require(sample.physicsEpoch >= 0 && sample.physicsEpoch != Int64.MaxValue && sample.topologyGeneration >= 0
-                    && sample.frameGeneration >= 0 && sample.originEventCount >= 0 && sample.unityFrame >= 0
+                Require(sample.physicsEpoch >= 0 && sample.physicsEpoch != Int64.MaxValue && sample.topologyGeneration > 0
+                    && sample.frameGeneration > 0 && sample.originEventCount >= 0 && sample.unityFrame >= 0
                     && Finite(sample.fixedTimeSeconds), "Structural sample context is invalid.");
+                Require(sample.bodyAInstanceId == report.bodyAInstanceId && sample.bodyBInstanceId == report.bodyBInstanceId,
+                    "Structural sample body identity changed.");
+                Require(sample.callbackInvocation == i + 1, "Structural observation callback sequence is not exact.");
+                Require(sample.unityFrame >= previousUnityFrame, "Structural rendered frame sequence reversed.");
+                previousUnityFrame = sample.unityFrame;
                 if (i == 0) { topologyGeneration = sample.topologyGeneration; frameGeneration = sample.frameGeneration;
                     originEventCount = sample.originEventCount; }
                 Require(sample.topologyGeneration == topologyGeneration && sample.frameGeneration == frameGeneration
                     && sample.originEventCount == originEventCount, "Structural sample context changed.");
                 if (i != 0) Require(Math.Abs((sample.fixedTimeSeconds - previousTime) - report.stepSeconds) <= 1e-6,
                     "Structural fixed-time sequence is inconsistent.");
+                Require(sample.physicsEpoch == report.baseline.physicsEpoch + i,
+                    "Structural samples are not consecutive from the injection epoch.");
                 previousTime = sample.fixedTimeSeconds;
                 Vector(sample.bodyAWorldCenterOfMass, 3, "body A center of mass"); Quaternion(sample.bodyARotation, "body A rotation");
                 Vector(sample.bodyAVelocity, 3, "body A velocity"); Vector(sample.bodyAAngularVelocity, 3, "body A angular velocity");
@@ -201,6 +272,90 @@ namespace KspContinuum
                 Require(Math.Abs(displacement - report.trace.samples[i].relativeDisplacement) <= 1e-9
                     && Math.Abs(velocity - report.trace.samples[i].relativeVelocity) <= 1e-9,
                     "Structural derived trace does not match raw body states.");
+            }
+        }
+
+        static void ValidateAdmission(StructuralExperimentReport report)
+        {
+            StructuralAdmissionEvidence value = report.admission;
+            Require(value != null && value.status == "verified", "Structural admission evidence is missing.");
+            Require(value.topology == report.topology, "Structural admission topology does not bind the report.");
+            Require(value.dynamicBodyCount == 2 && value.mappedJointCount == 1 && value.unmappedJointCount == 0
+                && value.jointEnabled, "Structural topology was not admitted exactly.");
+            Require(value.bodyAInstanceId == report.bodyAInstanceId && value.bodyBInstanceId == report.bodyBInstanceId
+                && value.jointInstanceId == report.jointInstanceId
+                && value.jointType == "UnityEngine.ConfigurableJoint"
+                && value.jointHostBodyInstanceId == report.bodyAInstanceId
+                && value.jointConnectedBodyInstanceId == report.bodyBInstanceId,
+                "Structural admission identities do not bind the report.");
+            if (report.runEligibility == "eligible")
+            {
+                Require(report.contactObservationStatus == "observed-none"
+                    && value.installedContactSentinels == 2 && value.removedContactSentinels == 2
+                    && value.contactWindowFirstEpoch == report.baseline.physicsEpoch
+                    && value.contactWindowLastEpoch == report.bodySamples[report.bodySamples.Length - 1].physicsEpoch
+                    && value.contactObservationCount == report.bodySamples.Length
+                    && value.detectedContactCount == 0 && value.jointBreakCount == 0,
+                    "Structural contact sentinel evidence is incomplete or observed interference.");
+            }
+            else
+            {
+                Require(report.runEligibility == "provisional-contact-unobserved"
+                    && report.contactObservationStatus == "unavailable"
+                    && value.installedContactSentinels == 0 && value.removedContactSentinels == 0
+                    && value.contactWindowFirstEpoch == -1 && value.contactWindowLastEpoch == -1
+                    && value.contactObservationCount == 0 && value.detectedContactCount == 0
+                    && value.jointBreakCount == 0,
+                    "Provisional structural capture contains contradictory contact evidence.");
+            }
+        }
+
+        static void ValidateBaselineAndInjection(StructuralExperimentReport report)
+        {
+            StructuralBodySample baseline = report.baseline;
+            StructuralInjectionWitness injection = report.injection;
+            Require(baseline != null && injection != null && injection.status == "completed",
+                "Structural baseline or injection witness is missing.");
+            Require(baseline.physicsEpoch >= 0 && baseline.physicsEpoch != Int64.MaxValue
+                && baseline.callbackInvocation == 1 && baseline.topologyGeneration > 0 && baseline.frameGeneration > 0
+                && baseline.originEventCount >= 0 && baseline.unityFrame >= 0 && Finite(baseline.fixedTimeSeconds),
+                "Structural baseline context is invalid.");
+            Require(baseline.bodyAInstanceId == report.bodyAInstanceId && baseline.bodyBInstanceId == report.bodyBInstanceId,
+                "Structural baseline body identity changed.");
+            Require(injection.callback == report.injectionCallback && injection.physicsEpoch == baseline.physicsEpoch
+                && injection.callbackInvocation == baseline.callbackInvocation && injection.callbackInvocationCount == 1
+                && injection.bodyAInstanceId == report.bodyAInstanceId && injection.bodyBInstanceId == report.bodyBInstanceId,
+                "Structural injection did not execute once in the baseline callback.");
+            int expectedCalls = report.mode == "impulse" ? 1 : 0;
+            bool expectedReturned = report.mode == "impulse";
+            Require(injection.bodyACommandCount == expectedCalls && injection.bodyBCommandCount == expectedCalls
+                && injection.bodyACommandReturned == expectedReturned && injection.bodyBCommandReturned == expectedReturned,
+                "Structural injection command completion is not exact.");
+            Vector(baseline.bodyAWorldCenterOfMass, 3, "baseline event body A center of mass");
+            Quaternion(baseline.bodyARotation, "baseline event body A rotation");
+            Vector(baseline.bodyAVelocity, 3, "baseline event body A velocity");
+            Vector(baseline.bodyAAngularVelocity, 3, "baseline event body A angular velocity");
+            Vector(baseline.bodyBWorldCenterOfMass, 3, "baseline event body B center of mass");
+            Quaternion(baseline.bodyBRotation, "baseline event body B rotation");
+            Vector(baseline.bodyBVelocity, 3, "baseline event body B velocity");
+            Vector(baseline.bodyBAngularVelocity, 3, "baseline event body B angular velocity");
+            Vector(injection.bodyAImpulse, 3, "witness body A impulse");
+            Vector(injection.bodyBImpulse, 3, "witness body B impulse");
+            StructuralBodySample first = report.bodySamples[0];
+            Require(first.physicsEpoch == baseline.physicsEpoch && first.fixedTimeSeconds == baseline.fixedTimeSeconds
+                && first.topologyGeneration == baseline.topologyGeneration && first.frameGeneration == baseline.frameGeneration
+                && first.originEventCount == baseline.originEventCount,
+                "Structural first response does not bind the pre-physics baseline.");
+            for (int i = 0; i < 3; i++)
+            {
+                Require(baseline.bodyAWorldCenterOfMass[i] == report.baselineBodyAWorldCenterOfMass[i]
+                    && baseline.bodyBWorldCenterOfMass[i] == report.baselineBodyBWorldCenterOfMass[i]
+                    && report.referenceRelativeCenterOfMass[i] == baseline.bodyBWorldCenterOfMass[i]
+                        - baseline.bodyAWorldCenterOfMass[i],
+                    "Structural baseline arrays do not bind the injection event.");
+                Require(injection.bodyAImpulse[i] == report.requestedBodyAImpulse[i]
+                    && injection.bodyBImpulse[i] == report.requestedBodyBImpulse[i],
+                    "Structural injection witness does not match the request.");
             }
         }
 

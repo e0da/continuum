@@ -110,6 +110,16 @@ namespace KspContinuum
             }
         }
 
+        public static double QualifiedStepSeconds(LifecycleOrderQualificationReport report)
+        {
+            Validate(report);
+            double step = report.trials[0].fixedDeltaSeconds;
+            for (int i = 1; i < report.trials.Length; i++)
+                Require(Math.Abs(report.trials[i].fixedDeltaSeconds - step) <= 1e-9,
+                    "Lifecycle-order qualification timestep changed between trials.");
+            return step;
+        }
+
         static void ValidateTrial(LifecycleOrderTrial trial, int index)
         {
             Require(trial != null && trial.trial == index + 1, "Lifecycle-order trial identity is invalid.");
