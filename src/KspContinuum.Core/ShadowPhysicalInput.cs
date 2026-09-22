@@ -45,6 +45,10 @@ namespace KspContinuum
                 report.samples != null && report.firstAcceptedBatch != null && report.firstAcceptedLinks != null,
                 "Shadow arrays are missing."
             );
+            bool hasControl = report.controlStrategy != "unavailable";
+            Require(!hasControl || report.controlStrategy == "independent-constant-force/v1",
+                "Unexpected matched control strategy.");
+            Require(!String.IsNullOrEmpty(report.controlStrategyScope), "Matched control scope is missing.");
             Require(report.firstAcceptedUnmappedJoints >= 0, "Unmapped joint count is negative.");
             Require(report.firstAcceptedLinks.Length <= MaximumCapturedLinks, "Structural link count exceeds its bound.");
             Require(
@@ -146,6 +150,37 @@ namespace KspContinuum
                         && sample.comparisonStatus.StartsWith("skipped-", StringComparison.Ordinal)
                     )
                         skipped++;
+                }
+                Require(!sample.controlComparisonAvailable || hasControl,
+                    "Matched control evidence has no declared strategy.");
+                if (sample.controlComparisonAvailable)
+                {
+                    Require(sample.observedComparisonAvailable && sample.controlComparisonStatus == "compared"
+                        && sample.controlComparedBodies == sample.comparedBodies,
+                        "Matched control is not paired with the stock observation.");
+                    Require(Finite(sample.controlPositionMaxMeters) && sample.controlPositionMaxMeters >= 0
+                        && Finite(sample.controlPositionRmsMeters) && sample.controlPositionRmsMeters >= 0
+                        && sample.controlPositionRmsMeters <= sample.controlPositionMaxMeters
+                        && Finite(sample.controlVelocityMaxMetersPerSecond) && sample.controlVelocityMaxMetersPerSecond >= 0
+                        && Finite(sample.controlVelocityRmsMetersPerSecond) && sample.controlVelocityRmsMetersPerSecond >= 0
+                        && sample.controlVelocityRmsMetersPerSecond <= sample.controlVelocityMaxMetersPerSecond,
+                        "Matched control residual is invalid.");
+                    Require(Finite(sample.strategyPositionRmsDeltaFromControl)
+                        && Finite(sample.strategyVelocityRmsDeltaFromControl)
+                        && Math.Abs(sample.strategyPositionRmsDeltaFromControl
+                            - (sample.observedPositionRmsMeters - sample.controlPositionRmsMeters)) <= 1e-12
+                        && Math.Abs(sample.strategyVelocityRmsDeltaFromControl
+                            - (sample.observedVelocityRmsMetersPerSecond - sample.controlVelocityRmsMetersPerSecond)) <= 1e-12,
+                        "Matched strategy delta contradicts residuals.");
+                }
+                else
+                {
+                    Require(sample.controlComparedBodies == 0 && sample.controlPositionMaxMeters == 0
+                        && sample.controlPositionRmsMeters == 0 && sample.controlVelocityMaxMetersPerSecond == 0
+                        && sample.controlVelocityRmsMetersPerSecond == 0
+                        && sample.strategyPositionRmsDeltaFromControl == 0
+                        && sample.strategyVelocityRmsDeltaFromControl == 0,
+                        "Unavailable matched control contains residual data.");
                 }
                 if (sample.tick == report.firstAcceptedTick && sample.status == "accepted")
                     linkedAcceptedSample = true;

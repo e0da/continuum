@@ -142,6 +142,31 @@ class ShadowReportTests(unittest.TestCase):
         data['samples'][0]['analyticMaxPositionError'] = 1
         self.assertEqual(self.invoke(data), (1, None))
 
+    def test_rigid_cluster_matched_control_selects_by_body_count(self):
+        data = fixture()
+        data['workerStrategy'] = 'translational-rigid-cluster/v1'
+        data['workerStrategyScope'] = 'All captured bodies form one translational cluster.'
+        data['controlStrategy'] = 'independent-constant-force/v1'
+        data['controlStrategyScope'] = 'Same batch and stock endpoint.'
+        sample = data['samples'][0]
+        sample.update(controlComparisonAvailable=True, controlComparisonStatus='compared',
+                      controlComparedBodies=1, controlPositionMaxMeters=.5,
+                      controlPositionRmsMeters=.5, controlVelocityMaxMetersPerSecond=.3,
+                      controlVelocityRmsMetersPerSecond=.3,
+                      strategyPositionRmsDeltaFromControl=-.3,
+                      strategyVelocityRmsDeltaFromControl=.1)
+        code, report = self.invoke(data)
+        self.assertEqual(code, 0)
+        paired = report['matchedControl']
+        self.assertEqual(paired['pairedSamples'], 1)
+        self.assertEqual(paired['controlStrategy'], 'independent-constant-force/v1')
+        self.assertEqual(paired['byBodyCount'][0]['bodyCount'], 1)
+        self.assertEqual(paired['byBodyCount'][0]['positionWinner'], 'strategy')
+        self.assertEqual(paired['byBodyCount'][0]['velocityWinner'], 'control')
+
+        sample['strategyPositionRmsDeltaFromControl'] = 99
+        self.assertEqual(self.invoke(data), (1, None))
+
     def test_malformed_gravity_section_is_rejected(self):
         changes = [
             ('gravityComparisonAvailable', 1), ('gravityComparedBodies', True),

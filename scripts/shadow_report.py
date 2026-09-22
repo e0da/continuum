@@ -312,6 +312,11 @@ def summary(data):
         require(strategy == 'independent-constant-force/v1', 'missing worker strategy scope')
         strategy_scope = 'Legacy v2 receipt: each captured body advanced independently under its captured force.'
     text(strategy_scope, 'workerStrategyScope')
+    control_strategy = data.get('controlStrategy', 'unavailable')
+    require(control_strategy in ('unavailable', 'independent-constant-force/v1'),
+            'unsupported matched control strategy')
+    control_scope = data.get('controlStrategyScope', 'No matched control strategy was evaluated.')
+    text(control_scope, 'controlStrategyScope')
     text(data.get('reason'), 'reason', nullable=True)
     for field in ('unity', 'ksp', 'plugin', 'startedUtc'):
         text(data.get(field), field, nullable=True)
@@ -331,7 +336,7 @@ def summary(data):
     require(isinstance(samples, list) and len(samples) == submitted, 'submitted count mismatch')
     counts, comparisons = Counter(), Counter()
     timings = {field: [] for field in TIMINGS}
-    body_counts, compared_samples = [], []
+    body_counts, compared_samples, paired_control_samples = [], [], []
     last_tick = 0
     for sample in samples:
         require(isinstance(sample, dict), 'invalid sample')
@@ -399,6 +404,33 @@ def summary(data):
             compared_samples.append(sample)
         else:
             require(count == 0 and all(value == 0 for value in values), 'unavailable residual contains claimed data')
+        control_available = sample.get('controlComparisonAvailable', False)
+        require(type(control_available) is bool, 'controlComparisonAvailable must be boolean')
+        control_status = sample.get('controlComparisonStatus', 'not-accepted')
+        require(control_status in COMPARISONS or control_status in {'skipped-on-' + s for s in TERMINAL},
+                'unsupported matched control status')
+        control_count = integer(sample.get('controlComparedBodies', 0), 'controlComparedBodies', 0, body_count)
+        control_fields = ('controlPositionMaxMeters', 'controlPositionRmsMeters',
+                          'controlVelocityMaxMetersPerSecond', 'controlVelocityRmsMetersPerSecond')
+        control_values = [finite(sample.get(field, 0), field, 0, 1e100) for field in control_fields]
+        position_delta = finite(sample.get('strategyPositionRmsDeltaFromControl', 0),
+                                'strategy position delta', -1e100, 1e100)
+        velocity_delta = finite(sample.get('strategyVelocityRmsDeltaFromControl', 0),
+                                'strategy velocity delta', -1e100, 1e100)
+        if control_available:
+            require(control_strategy != 'unavailable' and available and control_status == 'compared'
+                    and control_count == count == body_count, 'matched control is not paired')
+            require(control_values[1] <= control_values[0] and control_values[3] <= control_values[2],
+                    'matched control RMS exceeds maximum')
+            near(position_delta, sample['observedPositionRmsMeters'] - control_values[1],
+                 'strategy position delta')
+            near(velocity_delta, sample['observedVelocityRmsMetersPerSecond'] - control_values[3],
+                 'strategy velocity delta')
+            paired_control_samples.append(sample)
+        else:
+            require(control_count == 0 and all(value == 0 for value in control_values)
+                    and position_delta == velocity_delta == 0,
+                    'unavailable matched control contains claimed data')
     require(counts['accepted'] == accepted and counts['stale-discarded'] == stale,
             'acceptance counts contradict samples')
     require(len(compared_samples) == compared and sum(v for k, v in comparisons.items() if k.startswith('skipped-')) == skipped,
@@ -425,11 +457,43 @@ def summary(data):
             rms = 0 if scale == 0 else scale * math.sqrt(sum(
                 (s[rms_field]/scale)**2 * s['comparedBodies']/count for s in compared_samples))
             residuals[label] = {'maximum': max(s[max_field] for s in compared_samples), 'rms': rms}
+    matched_control = None
+    if paired_control_samples:
+        buckets = []
+        for body_count in sorted({sample['bodies'] for sample in paired_control_samples}):
+            group = [sample for sample in paired_control_samples if sample['bodies'] == body_count]
+            weight = sum(sample['comparedBodies'] for sample in group)
+            def aggregate(field):
+                scale = max(sample[field] for sample in group)
+                return 0 if scale == 0 else scale * math.sqrt(sum(
+                    (sample[field] / scale) ** 2 * sample['comparedBodies'] / weight
+                    for sample in group))
+            strategy_position = aggregate('observedPositionRmsMeters')
+            control_position = aggregate('controlPositionRmsMeters')
+            strategy_velocity = aggregate('observedVelocityRmsMetersPerSecond')
+            control_velocity = aggregate('controlVelocityRmsMetersPerSecond')
+            buckets.append({'bodyCount': body_count, 'samples': len(group), 'bodyComparisons': weight,
+                            'strategyPositionRmsMeters': strategy_position,
+                            'controlPositionRmsMeters': control_position,
+                            'positionRmsDeltaFromControl': strategy_position - control_position,
+                            'strategyVelocityRmsMetersPerSecond': strategy_velocity,
+                            'controlVelocityRmsMetersPerSecond': control_velocity,
+                            'velocityRmsDeltaFromControl': strategy_velocity - control_velocity,
+                            'positionWinner': 'strategy' if strategy_position < control_position else
+                                'control' if control_position < strategy_position else 'tie',
+                            'velocityWinner': 'strategy' if strategy_velocity < control_velocity else
+                                'control' if control_velocity < strategy_velocity else 'tie'})
+        matched_control = {'strategy': strategy, 'controlStrategy': control_strategy,
+                           'scope': control_scope, 'pairedSamples': len(paired_control_samples),
+                           'pairedBodyComparisons': sum(s['comparedBodies'] for s in paired_control_samples),
+                           'byBodyCount': buckets,
+                           'selectionRule': 'lower body-weighted RMS against the same next-step stock observation; inspect position and velocity separately'}
     return {
         'schema': 'ksp-continuum-shadow-summary/v1', 'sourceSchema': data['schema'],
         'status': data['status'], 'reason': data.get('reason'), 'evidence': evidence,
         'scope': data['scope'], 'comparisonScope': data['comparisonScope'], 'framePolicy': data['framePolicy'],
         'workerStrategy': strategy, 'workerStrategyScope': strategy_scope,
+        'matchedControl': matched_control,
         'installedComparisonQualified': False, 'solverAccuracyQualified': False,
         'counts': {'submitted': submitted, 'accepted': accepted, 'stale': stale,
                    'abandoned': submitted-accepted-stale},

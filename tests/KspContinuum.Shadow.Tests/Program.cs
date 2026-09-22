@@ -363,6 +363,26 @@ static class Program
             large.observedComparisonAvailable && large.observedPositionRmsMeters == 1e200,
             "scaled RMS avoids square overflow"
         );
+        var paired = new ShadowSample { bodies = 2, physicsEpoch = 9,
+            captureFixedTimeSeconds = 4, stepSeconds = .02 };
+        var strategyPrediction = SimulationBatch.FromColumns(new WorkStamp(2, 1, 1), .02,
+            new[] { 0, 1 }, new[] { 1.0, 1 }, new[] { new Vec(), new Vec(2, 0, 0) },
+            new Vec[2], new Vec[2]);
+        var controlPrediction = SimulationBatch.FromColumns(new WorkStamp(2, 1, 1), .02,
+            new[] { 0, 1 }, new[] { 1.0, 1 }, new[] { new Vec(1, 0, 0), new Vec(3, 0, 0) },
+            new Vec[2], new Vec[2]);
+        var strategy = new ShadowComparison();
+        var control = new MatchedShadowControl();
+        strategy.Attach(paired, strategyPrediction, "t", "f");
+        control.Attach(paired, controlPrediction, "t", "f");
+        var stock = new[] { new Vec(), new Vec(2, 0, 0) };
+        strategy.Observe(10, "t", "f", true, .02, 4.02, 20, 0, stock, new Vec[2], new double[3]);
+        control.Observe(10, "t", "f", true, .02, 4.02, 20, 0, stock, new Vec[2], new double[3]);
+        Check(paired.controlComparisonAvailable && paired.controlComparedBodies == 2,
+            "matched control compares the same endpoint");
+        Check(paired.observedPositionRmsMeters == 0 && paired.controlPositionRmsMeters == 1
+            && paired.strategyPositionRmsDeltaFromControl == -1,
+            "matched control exposes strategy improvement");
     }
 
     static ShadowReport gravityFixture;

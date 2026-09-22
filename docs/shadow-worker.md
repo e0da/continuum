@@ -113,3 +113,9 @@ The persistence forecast's frame-delta error ranged from `1.12885e-7` to `1.6975
 The raw receipt SHA-256 is `5f3b127056e82679b75d8dc0bfb58e8e72af8c515afb97a50f97f4e6925663c2`. The derived summary SHA-256 is `80771e334b899dcdfb1310e89bf629264d1f52d25211ad9ea7cd2284cc1cc298`.
 
 The opposing raw and adjusted results confirm that coordinate treatment dominates this one-step orbital workload. They support central gravity as a useful model. The retrospective result remains conditioned on the observed future frame delta; the installed persistence result qualifies an independent forecast for this coast workload. Neither establishes stock-integrator equivalence, transition-regime coverage, or active state publication.
+
+## Matched rigid-cluster control
+
+The translational rigid-cluster mode now evaluates an independent-body control from the same captured batch. Both predictions are held for the same next eligible stock observation, so their residual difference is a matched strategy comparison rather than a comparison between separate flights. The control uses the existing `independent-constant-force/v1` model with the same synthetic-zero force limitation.
+
+`shadow_report.py` reports body-weighted position and velocity RMS for both strategies, their signed difference, and the lower-residual strategy separately for each observed vessel body count. Negative deltas favor the rigid cluster. Position and velocity remain separate decisions, and an unavailable or skipped endpoint produces no winner. These summaries select the closer one-step translational approximation for the captured workload; they do not establish physical correctness, rotation, force completeness, or gameplay speedup.

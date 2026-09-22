@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 using UnityEngine;
 
 namespace KspContinuum
@@ -12,6 +13,7 @@ namespace KspContinuum
         static ShadowCapture owner;
         readonly ShadowEpoch epoch = new ShadowEpoch();
         readonly ShadowComparison comparison = new ShadowComparison();
+        readonly MatchedShadowControl matchedControl = new MatchedShadowControl();
         readonly CentralGravityComparison gravityComparison = new CentralGravityComparison();
         SimulationBatch pendingGravity;
         ShadowSample comparisonSample;
@@ -63,6 +65,8 @@ namespace KspContinuum
             {
                 report.scope = "Read-only alternate-solver probe: captured Unity rigidbody positions, velocities, masses and synthetic zero forces enter the named worker strategy. Its one-step prediction is compared with the next matching stock observation. The worker writes nothing to the vessel.";
                 report.comparisonScope = "Named alternate strategy versus observed raw-coordinate KSP motion. Stock joint constraints are replaced by one all-body translational cluster; gravity, thrust, contacts, rotation and Krakensbane frame adjustment remain omitted. This is behavioral discrepancy telemetry, not stock equivalence.";
+                report.controlStrategy = "independent-constant-force/v1";
+                report.controlStrategyScope = "The same captured batch advances each body independently under the same synthetic-zero force and is compared with the same next stock observation.";
             }
             worker = new SimulationWorker(backend);
             this.constantForceOracle = constantForceOracle;
@@ -171,6 +175,11 @@ namespace KspContinuum
                     )
                 )
                 {
+                    matchedControl.Observe(
+                        physicsEpoch, topology, physicalFrame, eligible, Time.fixedDeltaTime,
+                        Time.fixedTime, Time.frameCount, originEvents, observedPositions,
+                        observedVelocities, A(frameVelocity)
+                    );
                     double gravityCompareStart = clock.Elapsed.TotalMilliseconds;
                     gravityComparison.Observe(
                         physicsEpoch,
@@ -521,6 +530,14 @@ namespace KspContinuum
                 report.firstAcceptedUnmappedJoints = pendingUnmappedJoints;
             }
             comparison.Attach(pendingSample, result, topology, physicalFrame);
+            if (!constantForceOracle)
+            {
+                SimulationBatch control = new ConstantForceBackend().Compute(
+                    pending,
+                    CancellationToken.None
+                );
+                matchedControl.Attach(pendingSample, control, topology, physicalFrame);
+            }
             if (pendingGravity != null)
                 gravityComparison.Attach(
                     pendingSample,
@@ -702,6 +719,7 @@ namespace KspContinuum
             gravityComparison.Cancel("on-" + state);
             if (comparison.Cancel("on-" + state))
             {
+                matchedControl.Cancel("on-" + state);
                 report.comparisonSkipped++;
                 comparisonSample = null;
             }
