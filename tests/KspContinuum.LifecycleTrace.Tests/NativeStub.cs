@@ -140,12 +140,19 @@ public class CelestialBody : UnityEngine.Object { }
 
 public class Vessel : UnityEngine.Object
 {
+    public enum Situations
+    {
+        ORBITING,
+        LANDED,
+    }
+
     public Guid id = Guid.NewGuid();
     public bool loaded = true,
         packed,
         HoldPhysics;
     public List<Part> parts = new List<Part>();
     public CelestialBody mainBody = new CelestialBody { Id = 99 };
+    public Situations situation = Situations.ORBITING;
 }
 
 public class Part : UnityEngine.Object
