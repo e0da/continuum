@@ -44,6 +44,8 @@ namespace KspContinuum
         public string gravityStrategy = CentralGravityShadow.ModelId;
         public string workerStrategy = "independent-constant-force/v1";
         public string workerStrategyScope = "Each captured body advances independently under its captured force.";
+        public string controlStrategy = "unavailable";
+        public string controlStrategyScope = "No matched control strategy was evaluated.";
         public string gravityExecution =
             "synchronous bounded main-thread counterfactual; observer overhead, not worker acceleration";
         public string gravityFrameAdjustedScope =
@@ -153,6 +155,15 @@ namespace KspContinuum
             observedPositionRmsMeters,
             observedVelocityMaxMetersPerSecond,
             observedVelocityRmsMetersPerSecond;
+        public bool controlComparisonAvailable;
+        public string controlComparisonStatus = "not-accepted";
+        public int controlComparedBodies;
+        public double controlPositionMaxMeters,
+            controlPositionRmsMeters,
+            controlVelocityMaxMetersPerSecond,
+            controlVelocityRmsMetersPerSecond,
+            strategyPositionRmsDeltaFromControl,
+            strategyVelocityRmsDeltaFromControl;
     }
 
     public sealed class ShadowBody
@@ -436,6 +447,58 @@ namespace KspContinuum
         static bool Finite(double value)
         {
             return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+    }
+
+    public sealed class MatchedShadowControl
+    {
+        readonly ShadowComparison comparison = new ShadowComparison();
+        ShadowSample target, control;
+        public bool IsPending { get { return target != null; } }
+
+        public void Attach(ShadowSample sample, SimulationBatch prediction, string topology, string frame)
+        {
+            if (IsPending || sample == null) throw new ArgumentException("Matched control is already pending or missing.");
+            target = sample;
+            control = new ShadowSample {
+                bodies = sample.bodies, physicsEpoch = sample.physicsEpoch,
+                stepSeconds = sample.stepSeconds, captureFixedTimeSeconds = sample.captureFixedTimeSeconds,
+            };
+            comparison.Attach(control, prediction, topology, frame);
+            target.controlComparisonStatus = "waiting";
+        }
+
+        public bool Observe(long epoch, string topology, string frame, bool eligible, double step,
+            double fixedTime, int unityFrame, long originEvents, Vec[] positions, Vec[] velocities,
+            double[] frameVelocity)
+        {
+            if (!IsPending) return false;
+            if (!comparison.Observe(epoch, topology, frame, eligible, step, fixedTime, unityFrame,
+                originEvents, positions, velocities, frameVelocity)) return false;
+            Publish(); return true;
+        }
+
+        public bool Cancel(string reason)
+        {
+            if (!IsPending) return false;
+            comparison.Cancel(reason); Publish(); return true;
+        }
+
+        void Publish()
+        {
+            target.controlComparisonStatus = control.comparisonStatus;
+            if (control.observedComparisonAvailable)
+            {
+                target.controlComparisonAvailable = true;
+                target.controlComparedBodies = control.comparedBodies;
+                target.controlPositionMaxMeters = control.observedPositionMaxMeters;
+                target.controlPositionRmsMeters = control.observedPositionRmsMeters;
+                target.controlVelocityMaxMetersPerSecond = control.observedVelocityMaxMetersPerSecond;
+                target.controlVelocityRmsMetersPerSecond = control.observedVelocityRmsMetersPerSecond;
+                target.strategyPositionRmsDeltaFromControl = target.observedPositionRmsMeters - target.controlPositionRmsMeters;
+                target.strategyVelocityRmsDeltaFromControl = target.observedVelocityRmsMetersPerSecond - target.controlVelocityRmsMetersPerSecond;
+            }
+            target = null; control = null;
         }
     }
 }
