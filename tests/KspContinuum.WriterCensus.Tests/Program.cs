@@ -15,8 +15,8 @@ static class Program
     {
         return new WriterCensusSnapshot { vesselId = vessel, topologyKey = topology, originGeneration = origin,
             frameVelocity = new Vec(frameVelocity, 0, 0), bodies = new[] {
-                new WriterCensusBody { id = "1:a", relativePosition = new Vec(firstX, 0, 0), normalizedVelocity = new Vec(10, 0, 0), orientation = new[] { 0d, 0, 0, 1 }, angularVelocity = new Vec() },
-                new WriterCensusBody { id = "2:b", relativePosition = new Vec(secondX, 0, 0), normalizedVelocity = new Vec(secondVelocity, 0, 0), orientation = new[] { 0d, 0, rotationZ, rotationW }, angularVelocity = new Vec(0, angularVelocity, 0) }
+                new WriterCensusBody { id = "1:a", relativePosition = new Vec(firstX, 0, 0), normalizedVelocity = new Vec(10, 0, 0), orientation = new[] { 0d, 0, 0, 1 }, angularVelocity = new Vec(), internalPosition = new Vec(), internalVelocity = new Vec(), internalAngularVelocity = new Vec(), internalOrientation = new[] { 0d, 0, 0, 1 } },
+                new WriterCensusBody { id = "2:b", relativePosition = new Vec(secondX, 0, 0), normalizedVelocity = new Vec(secondVelocity, 0, 0), orientation = new[] { 0d, 0, rotationZ, rotationW }, angularVelocity = new Vec(0, angularVelocity, 0), internalPosition = new Vec(secondX, 0, 0), internalVelocity = new Vec(secondVelocity - 10, 0, 0), internalAngularVelocity = new Vec(0, angularVelocity, 0), internalOrientation = new[] { 0d, 0, rotationZ, rotationW } }
             } };
     }
     static WriterCensus Run(params WriterCensusSnapshot[] snapshots)
@@ -32,6 +32,8 @@ static class Program
         Check(census.Report.status == "observed" && row.status == "observed");
         Check(row.reason == "state-changed-within-interval" && row.changedPositions == 1 && row.changedVelocities == 1);
         Check(row.maximumPositionDelta == .25 && row.maximumVelocityDelta == 1);
+        Check(row.changedInternalPositions == 1 && row.changedInternalVelocities == 1);
+        Check(row.maximumInternalPositionDelta == .25 && row.maximumInternalVelocityDelta == 1);
         Check(census.Report.measurementScope.Contains("does not identify the writer"));
         using (var json = JsonDocument.Parse(ReportJson.Encode(census.Report)))
             Check(json.RootElement.GetProperty("intervals").GetArrayLength() == 1);
@@ -41,6 +43,26 @@ static class Program
         row = census.Report.intervals[0];
         Check(row.status == "observed" && row.reason == "no-observed-change");
         Check(row.changedPositions == 0 && row.maximumPositionDelta == 0);
+        Check(row.changedInternalPositions == 0 && row.maximumInternalPositionDelta == 0);
+
+        // A rigid quarter turn remains visible in world measurements but cancels in the co-moving frame.
+        var rigidTurn = Snapshot();
+        rigidTurn.bodies[0].orientation = new[] { 0d, 0, Math.Sqrt(.5), Math.Sqrt(.5) };
+        rigidTurn.bodies[1].relativePosition = new Vec(0, 2, 0);
+        rigidTurn.bodies[1].orientation = new[] { 0d, 0, Math.Sqrt(.5), Math.Sqrt(.5) };
+        rigidTurn.bodies[0].normalizedVelocity = new Vec(0, 10, 0);
+        rigidTurn.bodies[1].normalizedVelocity = new Vec(0, 3, 0);
+        rigidTurn.bodies[0].angularVelocity = new Vec(0, 0, 1);
+        rigidTurn.bodies[1].angularVelocity = new Vec(0, 0, 1);
+        census = Run(Snapshot(), rigidTurn); row = census.Report.intervals[0];
+        Check(row.changedPositions == 1 && row.changedOrientations == 2 && row.changedVelocities == 2);
+        Check(row.changedInternalPositions == 0 && row.changedInternalOrientations == 0 && row.changedInternalVelocities == 0 && row.changedInternalAngularVelocities == 0);
+
+        // Moving one body relative to the reference is retained as internal deformation.
+        var deformed = Snapshot(); deformed.bodies[1].relativePosition = new Vec(2.1, 0, 0);
+        deformed.bodies[1].internalPosition = new Vec(2.1, 0, 0);
+        census = Run(Snapshot(), deformed); row = census.Report.intervals[0];
+        Check(row.changedInternalPositions == 1 && Math.Abs(row.maximumInternalPositionDelta - .1) < 1e-12);
 
         census = Run(Snapshot(), Snapshot(rotationZ: 1, rotationW: 0, angularVelocity: 2));
         row = census.Report.intervals[0];
