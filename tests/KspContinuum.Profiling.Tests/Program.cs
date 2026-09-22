@@ -10,6 +10,15 @@ static class Program
     static void Near(double actual, double expected) { Check(Math.Abs(actual - expected) < 1e-10); }
     static void Main()
     {
+        var scaleSelection = ScaleQualificationSelection.Parse(new[] { "ksp", "--continuum-scale-save", "scenarios",
+            "--continuum-scale-checkpoint", "Space Station 1" });
+        Check(scaleSelection.Save == "scenarios" && scaleSelection.Checkpoint == "Space Station 1");
+        Check(ScaleQualificationSelection.Requested(new[] { "--continuum-scale-save", "scenarios" }));
+        Check(!ScaleQualificationSelection.Requested(new[] { "--continuum-scale-profile" }));
+        Check(Reject(() => ScaleQualificationSelection.Parse(new[] { "--continuum-scale-save", "../saves", "--continuum-scale-checkpoint", "flight" })));
+        Check(Reject(() => ScaleQualificationSelection.Parse(new[] { "--continuum-scale-save", "scenarios", "--continuum-scale-checkpoint", "../persistent" })));
+        Check(Reject(() => ScaleQualificationSelection.Parse(new[] { "--continuum-scale-save", "scenarios", "--continuum-scale-save", "other", "--continuum-scale-checkpoint", "flight" })));
+        Check(Reject(() => ScaleQualificationSelection.Parse(new[] { "--continuum-scale-save", "scenarios" })));
         var distribution = ProfilingSummary.Distribution(new double[] { 10, 1, 4, 2, 3 });
         Check(distribution != null && distribution.count == 5);
         Near(distribution.minimum, 1); Near(distribution.maximum, 10); Near(distribution.mean, 4);

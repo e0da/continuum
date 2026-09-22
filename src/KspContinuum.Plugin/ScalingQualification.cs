@@ -44,10 +44,12 @@ namespace KspContinuum
         public void Update()
         {
             if (!active || capturing) return;
+            if (ScaleCheckpointLoadState.Requested && !ScaleCheckpointLoadState.Ready) return;
             Vessel vessel = FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
             bool eligible = vessel != null && vessel.loaded && !vessel.packed && !FlightDriver.Pause &&
                 TimeWarp.CurrentRate == 1 && vessel.situation == Vessel.Situations.ORBITING &&
                 vessel.ctrlState != null && vessel.ctrlState.mainThrottle < 0.01 &&
+                (!ScaleCheckpointLoadState.Requested || vessel.id == ScaleCheckpointLoadState.VesselId) &&
                 (expectedParts < 1 || vessel.parts.Count == expectedParts);
             if (!eligible) { eligibleSince = 0; return; }
             if (eligibleSince == 0) { eligibleSince = Time.realtimeSinceStartup; return; }
@@ -68,7 +70,13 @@ namespace KspContinuum
             {
                 File.WriteAllText(Path.Combine(directory, "markers.json"), ReportJson.Encode(report));
                 string reason; bool valid = Stable(report, out reason);
-                File.WriteAllText(Path.Combine(directory, "status.txt"), (valid ? "complete" : "invalid") + "\nreason=" + reason + "\n");
+                bool sourceUnchanged = !ScaleCheckpointLoadState.Requested || ScaleCheckpointLoadState.SourceUnchanged();
+                if (!sourceUnchanged)
+                { valid = false; reason = "source-checkpoint-changed"; }
+                File.WriteAllText(Path.Combine(directory, "status.txt"), (valid ? "complete" : "invalid") + "\nreason=" + reason + "\n" +
+                    (ScaleCheckpointLoadState.Requested ? "save=" + ScaleCheckpointLoadState.Save + "\ncheckpoint=" +
+                    ScaleCheckpointLoadState.Checkpoint + "\nsourceSha256=" + ScaleCheckpointLoadState.SourceSha256 +
+                    "\nsourceUnchanged=" + sourceUnchanged + "\n" : ""));
                 Finish(valid ? "complete" : "invalid", valid ? 0 : 2);
             }
             catch (Exception error) { Fail(error); }
