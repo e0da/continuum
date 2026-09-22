@@ -21,12 +21,14 @@ internal static class AeroCompareCommand
             "only stock-flight-integrator body-drag labels are supported");
 
         var rows = new List<Row>();
+        var scalarRows = new List<StockDragScalarRow>();
         var abstentions = new Dictionary<string, int>(StringComparer.Ordinal);
         var bodyLiftLabels = 0;
         foreach (var report in reports)
         foreach (var publication in report.Publications)
         {
             if (publication.Kind == AeroPublicationKind.BodyLift) { bodyLiftLabels++; continue; }
+            scalarRows.Add(new StockDragScalarRow(publication));
             var candidate = AeroDragCubeBaseline.Evaluate(publication.Context);
             if (candidate.Disposition == AeroBaselineDisposition.Abstained)
             {
@@ -58,9 +60,11 @@ internal static class AeroCompareCommand
             },
             ["abstentionsByReason"] = Object(abstentions),
             ["errors"] = Metrics(rows),
+            ["stockDragScalarDiagnostics"] = StockDragScalarMetrics(scalarRows),
             ["regimes"] = new JsonArray(Regimes(rows).Select(item => (JsonNode)item).ToArray()),
             ["incompleteness"] = new JsonArray(
                 "One-step body-drag force labels only; body lift and lifting surfaces are excluded.",
+                "Stock drag scalar reconstruction evaluates the no-ocean-multiplier product for every body-drag row because capture v2 cannot identify submerged samples; disagreement may reflect the omitted ocean multiplier.",
                 "The baseline omits Mach curves, pseudo-Reynolds corrections, stock drag-cube interpolation details, shielding transitions, heating, and provider-specific clamps.",
                 "Application-point torque is compared, but no angular impulse or trajectory behavior is qualified.",
                 "Receipt-wide provenance detects mixed input receipts; the capture schema has no per-publication provider fingerprint.",
@@ -78,6 +82,30 @@ internal static class AeroCompareCommand
         ["forceVectorNormNewtons"] = Distribution(rows.Select(row => row.ForceVectorError)),
         ["forceDirectionDegrees"] = Distribution(rows.Where(row => row.HasDirection).Select(row => row.DirectionErrorDegrees)),
         ["torqueVectorNormNewtonMeters"] = Distribution(rows.Select(row => row.TorqueError))
+    };
+
+    private static JsonObject StockDragScalarMetrics(IReadOnlyList<StockDragScalarRow> rows) => new()
+    {
+        ["scope"] = "all body-drag rows; no-ocean-multiplier product; submerged samples indistinguishable",
+        ["count"] = rows.Count,
+        ["reconstructedForceMagnitudeNewtons"] = Distribution(rows.Select(row => row.ReconstructedMagnitudeNewtons)),
+        ["dragScalarForceMagnitudeNewtons"] = Distribution(rows.Select(row => row.DragScalarMagnitudeNewtons)),
+        ["observedForceMagnitudeNewtons"] = Distribution(rows.Select(row => row.ObservedMagnitudeNewtons)),
+        ["reconstructedToDragScalar"] = Comparison(
+            rows.Select(row => row.ReconstructedToDragScalarAbsoluteErrorNewtons),
+            rows.Select(row => row.ReconstructedToDragScalarAgreementRatio)),
+        ["reconstructedToObserved"] = Comparison(
+            rows.Select(row => row.ReconstructedToObservedAbsoluteErrorNewtons),
+            rows.Select(row => row.ReconstructedToObservedAgreementRatio)),
+        ["dragScalarToObserved"] = Comparison(
+            rows.Select(row => row.DragScalarToObservedAbsoluteErrorNewtons),
+            rows.Select(row => row.DragScalarToObservedAgreementRatio))
+    };
+
+    private static JsonObject Comparison(IEnumerable<double> absoluteErrors, IEnumerable<double> agreementRatios) => new()
+    {
+        ["absoluteErrorNewtons"] = Distribution(absoluteErrors),
+        ["agreementRatio"] = Distribution(agreementRatios)
     };
 
     private static IEnumerable<JsonObject> Regimes(IReadOnlyList<Row> rows)
@@ -261,8 +289,47 @@ internal static class AeroCompareCommand
     { public JsonObject ToJson() => new() { ["name"] = Name, ["version"] = Version, ["assembly"] = Assembly, ["assemblySha256"] = Sha256, ["assemblyMvid"] = Mvid }; }
     private sealed class Publication
     {
-        public Publication(AeroBodyPublication value) { Context = value.context; Kind = value.kind; Force = value.forceNewtons; Torque = value.torqueAboutPartCenterOfMassNewtonMeters; }
+        public Publication(AeroBodyPublication value) { Context = value.context; Kind = value.kind; Force = value.forceNewtons; Torque = value.torqueAboutPartCenterOfMassNewtonMeters; DragScalars = value.stockDragScalars; }
         public AeroPartContext Context { get; } public AeroPublicationKind Kind { get; } public Vec Force { get; } public Vec Torque { get; }
+        public AeroStockDragScalars? DragScalars { get; }
+    }
+    private sealed class StockDragScalarRow
+    {
+        public StockDragScalarRow(Publication label)
+        {
+            var scalars = label.DragScalars ?? throw new ToolException("body-drag publication is missing stock drag scalars");
+            ReconstructedMagnitudeNewtons = scalars.dynamicPressurePascals * scalars.areaDragSquareMeters *
+                scalars.pseudoReynoldsDragMultiplier * scalars.cachedDragCubeMultiplier * scalars.cachedGlobalDragMultiplier;
+            DragScalarMagnitudeNewtons = scalars.dragScalarKilonewtons * 1000;
+            ObservedMagnitudeNewtons = Length(label.Force);
+            ReconstructedToDragScalarAbsoluteErrorNewtons = Math.Abs(ReconstructedMagnitudeNewtons - DragScalarMagnitudeNewtons);
+            ReconstructedToObservedAbsoluteErrorNewtons = Math.Abs(ReconstructedMagnitudeNewtons - ObservedMagnitudeNewtons);
+            DragScalarToObservedAbsoluteErrorNewtons = Math.Abs(DragScalarMagnitudeNewtons - ObservedMagnitudeNewtons);
+            ReconstructedToDragScalarAgreementRatio = AgreementRatio(ReconstructedMagnitudeNewtons, DragScalarMagnitudeNewtons);
+            ReconstructedToObservedAgreementRatio = AgreementRatio(ReconstructedMagnitudeNewtons, ObservedMagnitudeNewtons);
+            DragScalarToObservedAgreementRatio = AgreementRatio(DragScalarMagnitudeNewtons, ObservedMagnitudeNewtons);
+            foreach (var value in new[] { ReconstructedMagnitudeNewtons, DragScalarMagnitudeNewtons, ObservedMagnitudeNewtons,
+                ReconstructedToDragScalarAbsoluteErrorNewtons, ReconstructedToObservedAbsoluteErrorNewtons,
+                DragScalarToObservedAbsoluteErrorNewtons, ReconstructedToDragScalarAgreementRatio,
+                ReconstructedToObservedAgreementRatio, DragScalarToObservedAgreementRatio })
+                Tooling.Require(double.IsFinite(value), "stock drag scalar diagnostic is nonfinite");
+        }
+        public double ReconstructedMagnitudeNewtons { get; }
+        public double DragScalarMagnitudeNewtons { get; }
+        public double ObservedMagnitudeNewtons { get; }
+        public double ReconstructedToDragScalarAbsoluteErrorNewtons { get; }
+        public double ReconstructedToObservedAbsoluteErrorNewtons { get; }
+        public double DragScalarToObservedAbsoluteErrorNewtons { get; }
+        public double ReconstructedToDragScalarAgreementRatio { get; }
+        public double ReconstructedToObservedAgreementRatio { get; }
+        public double DragScalarToObservedAgreementRatio { get; }
+
+        private static double AgreementRatio(double left, double right)
+        {
+            var maximum = Math.Max(left, right);
+            return maximum == 0 ? 1 : Math.Min(left, right) / maximum;
+        }
+        private static double Length(Vec value) => Math.Sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
     }
     private sealed class Row
     {
