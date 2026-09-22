@@ -1,31 +1,19 @@
-# Bounded live-dynamics canary
+# Bounded live-dynamics candidate
 
-`--continuum-live-dynamics-canary` is the first Continuum probe that computes and publishes nonempty vessel dynamics while stock `PhysicsFixedUpdate` is absent. It is a destructive qualification mode for an owned disposable KSP copy, not a gameplay setting.
+Continuum now has a portable rigid-cluster step suitable for a contact-free orbital candidate. `RigidCluster6Dof.AdvanceFrozenAcceleration` applies a half impulse at the center of mass, advances translation and rotation for one fixed interval, then applies the second half impulse. This preserves rigidity and angular momentum while producing the constant-acceleration position and velocity update.
 
-The canary admits only a loaded, unpacked, unheld, unpaused, zero-throttle active vessel in normal-rate orbit after the existing ten-second scaling qualification. It requires the same survey, immutable checkpoint, scale-profile, PlayerLoop, and writer-census controls as the empty substitution canary. The two substitution flags are mutually exclusive.
+The candidate is deliberately not connected to a KSP flag. Replacing Unity's global `PhysicsFixedUpdate` node suppresses native integration, but it does not suppress KSP or mod callbacks that queued forces before that node. Unity does not expose those native accumulators through the current adapter. Writing a plausible pose and restoring native physics on the next frame would therefore risk applying deferred work after the Continuum step.
 
-For each native physics callback already cached in the first qualifying render-frame batch, the candidate:
+## A023 deferred-impulse result
 
-1. deduplicates the active vessel's physical `Rigidbody` owners and captures their mass, center of mass, principal inertia frame, pose, and velocity;
-2. constructs one six-degree-of-freedom rigid cluster;
-3. samples KSP's central gravitational acceleration at the cluster center of mass;
-4. advances the cluster for `Time.fixedDeltaTime` with a frozen-acceleration kick-drift-kick step;
-5. reconstructs every body pose and velocity, publishes them, calls `Physics.SyncTransforms`, and reads them all back;
-6. restores the exact native PlayerLoop node for the following render frame.
+The existing `CSP-0002-A023` receipt supplies direct installed evidence. It skipped two cached native physics callbacks in render frame `13827` and restored the exact native node. Both skipped intervals reported zero state change. The first restored native physics interval in frame `13828` then reported a maximum normalized velocity change of `0.00768149287685242 m/s`.
 
-Unity can cache more than one fixed callback in a render frame. The candidate permits one through four callbacks only in the first frame and computes one dynamics step for each callback. This matches the bounded-frame ownership discovered by `CSP-0002-A023`; it does not silently discard cached physical time.
+Across the other 125 nonzero native physics intervals in the same bounded receipt, excluding that recovery frame, the largest change was `0.0038697041186702783 m/s`; frame `13831` measured `0.0038685197461813471 m/s`. The recovery interval was therefore about 1.99 times the largest ordinary interval. This is evidence that work queued during the two skipped callbacks survived and was applied when native physics resumed. The receipt does not identify each force provider, but it falsifies the assumption that replacing the native node makes its preceding inputs disappear.
 
-The receipt records callback count and frame, body count, timestep, sampled acceleration, compute/publication/whole-callback time, maximum readback errors, before/after writer snapshots, and exact native-node restoration. Publication exceptions attempt a complete before-image restoration. A failed restoration is reported as indeterminate. Context or topology drift, an unverified write, no observable dynamics, a callback outside the bounded frame, or inexact PlayerLoop restoration invalidates the run.
+## Required ownership gate
 
-## Frozen experiment boundary
+A live dynamics candidate must own or explicitly drain every input that otherwise reaches the native solver. At minimum, the gate must account for stock `FlightIntegrator`, part force and torque deposits, direct `Rigidbody` force calls, aerodynamics, joints, contacts, frame corrections, and installed integration mods. It must also bound every loaded body affected by the global physics node. Merely restricting the active vessel to vacuum orbit does not satisfy this contract.
 
-This candidate deliberately approximates the whole active vessel as one rigid cluster. It excludes thrust, aerodynamics, contacts, robotics, joint flex and breakage, other loaded vessels, and sustained trajectory ownership. Central gravity is held constant within each step. Its current readback gates are `1e-4 m` position, `1e-5 m/s` linear velocity, `1e-4` degrees attitude, and `1e-5 rad/s` angular velocity. These gates prove that the values written reached Unity; they are not stock-trajectory tolerances.
+The next useful live substitution should target a narrower provider with a real ownership seam, such as the independently reconstructed stock aerodynamic calculation, while leaving native integration active. Live rigid-cluster publication can resume when an earlier force-provider boundary or an isolated physics world gives Continuum exclusive ownership without deferred native work.
 
-The first installed experiment must use paired immutable-checkpoint runs:
-
-- stock physics, retaining full per-frame physics and PlayerLoop timings;
-- the bounded Continuum candidate, retaining the same timings plus its callback receipt.
-
-Run each side repeatedly and preserve run order. Compare the physical state after the same number of fixed intervals, including center-of-mass position/velocity, vessel attitude/angular velocity, and internal-body deformation. Report complete tick and rendered-frame distributions rather than only candidate kernel time. One bounded batch can establish useful live dynamics and measure immediate cost; it cannot establish sustained orbital parity, ordinary-craft FPS improvement, or compatibility with other integrator owners.
-
-Portable coverage verifies the kick-drift-kick rigid-cluster step, lifecycle rejection, nonempty dynamics requirement, publication receipt, and report serialization. Native addon compilation verifies the KSP/Unity API surface. Installed qualification remains pending.
+Portable tests verify the kick-drift-kick arithmetic, rigidity, linear impulse, angular-momentum preservation, covariance, and deterministic replay. They do not exercise Unity or KSP publication.
