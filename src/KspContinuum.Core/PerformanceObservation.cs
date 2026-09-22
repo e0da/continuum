@@ -113,8 +113,10 @@ namespace KspContinuum
             {
                 double baselineAllocation = Median(baseline.total.allocations.bytes.Select(value => (double)value).ToArray());
                 double candidateAllocation = Median(candidate.total.allocations.bytes.Select(value => (double)value).ToArray());
-                allocationRatio = baselineAllocation == 0 ? (candidateAllocation == 0 ? 1 : null)
-                    : candidateAllocation / baselineAllocation;
+                if (baselineAllocation == 0)
+                    allocationRatio = candidateAllocation == 0 ? (double?)1 : null;
+                else
+                    allocationRatio = candidateAllocation / baselineAllocation;
                 if (allocationRatio.HasValue && !Finite(allocationRatio.Value))
                     throw new ArgumentException("Performance comparison produced a nonfinite allocation ratio.");
             }
