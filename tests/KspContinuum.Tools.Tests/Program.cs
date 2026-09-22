@@ -37,6 +37,13 @@ try
     Require(aeroComparison["counts"]!["capturedSamples"]!.GetValue<int>() == 1 && aeroComparison["counts"]!["bodyDragLabels"]!.GetValue<int>() == 2, "aero comparison lost labels");
     Require(aeroComparison["counts"]!["finiteCompared"]!.GetValue<int>() == 1 && aeroComparison["counts"]!["abstentions"]!.GetValue<int>() == 1, "aero comparison hid abstention");
     Require(aeroComparison["errors"]!["forceVectorNormNewtons"]!["maximum"]!.GetValue<double>() == 0, "exact baseline label diverged");
+    var setDragMetrics = aeroComparison["setDragAreaReconstruction"]!;
+    Require(setDragMetrics["finiteCompared"]!.GetValue<int>() == 2 &&
+        setDragMetrics["absoluteErrorSquareMeters"]!["maximum"]!.GetValue<double>() == 0,
+        "independent SetDrag area reconstruction diverged");
+    Require(setDragMetrics["meetsNumericGate"]!.GetValue<bool>() &&
+        !setDragMetrics["qualifiedHeldOutGate"]!.GetValue<bool>(),
+        "portable SetDrag fixture either missed its numeric gate or overstated held-out qualification");
     var scalarDiagnostics = aeroComparison["stockDragScalarDiagnostics"]!;
     Require(scalarDiagnostics["count"]!.GetValue<int>() == 2, "stock diagnostics did not cover every body-drag label");
     Require(scalarDiagnostics["scope"]!.ToString() ==
@@ -127,11 +134,14 @@ AeroCaptureReport AeroReceipt(string version)
     AeroCaptureContext Step(int ordinal) => new("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", "frame", 1, 1, 1, 1, 1, ordinal, 100, 2, .02);
     var faces = new[] { 1d, 1, 1, 1, 1, 1 };
     var curve = new AeroFloatCurveDefinition(0, 0, [new AeroCurveKey(0, 1, 0, 0, 0, 0, 0)]);
-    var setDragInputs = new AeroSetDragInputs(new double[6], new double[6],
+    var setDragInputs = new AeroSetDragInputs([0, 3, 0, 0, 0, 0], faces,
+        new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
+    var emptySetDragInputs = new AeroSetDragInputs(new double[6], faces,
         new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
     AeroPartContext Part(long id, int ordinal, bool cubes) => new(Step(ordinal), id, (int)id + 10, (int)id + 20, 10, 1.2, 100000, 280, 330, .5, 1, 1, false,
         new Vec(id, 0, 0), new Vec(-10, 0, 0), new Vec(10, 0, 0), new Vec(), new Vec(), 1,
-        cubes ? [new AeroDragCubeState("Default", 1, new Vec(), new Vec(1, 1, 1), faces, faces, faces, faces)] : [], setDragInputs);
+        cubes ? [new AeroDragCubeState("Default", 1, new Vec(), new Vec(1, 1, 1), faces, faces, faces, faces)] : [],
+        cubes ? setDragInputs : emptySetDragInputs);
     var dragContext = Part(1, 0, true); var exact = AeroDragCubeBaseline.Evaluate(dragContext);
     var drag = new AeroBodyPublication(dragContext, AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
         exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters,
