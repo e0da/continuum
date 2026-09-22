@@ -42,6 +42,8 @@ namespace KspContinuum
         public string comparisonScope =
             "Zero-force baseline versus observed raw-coordinate KSP motion: discrepancy telemetry including gravity, thrust, contacts, constraints and Krakensbane frame adjustment; not solver accuracy or native-force validation.";
         public string gravityStrategy = CentralGravityShadow.ModelId;
+        public string workerStrategy = "independent-constant-force/v1";
+        public string workerStrategyScope = "Each captured body advances independently under its captured force.";
         public string gravityExecution =
             "synchronous bounded main-thread counterfactual; observer overhead, not worker acceleration";
         public string gravityFrameAdjustedScope =

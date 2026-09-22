@@ -28,6 +28,7 @@ portable() {
     tests/KspContinuum.LifecycleOrderQualification.Tests \
     tests/KspContinuum.Shadow.Tests \
     tests/KspContinuum.StructuralResponse.Tests \
+    tests/KspContinuum.RigidCluster.Tests \
     tests/KspContinuum.StructuralExperiment.Tests \
     src/KspContinuum.Mission/Tests/Mission.Tests.csproj
   do

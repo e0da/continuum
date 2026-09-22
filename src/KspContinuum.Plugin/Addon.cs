@@ -32,7 +32,8 @@ namespace KspContinuum
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
         public void Start()
         {
-            if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-shadow") >= 0) BeginShadowCapture();
+            if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-rigid-cluster-shadow") >= 0) BeginRigidClusterShadowCapture();
+            else if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-shadow") >= 0) BeginShadowCapture();
             if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-lifecycle-trace") >= 0) BeginLifecycleTrace();
             if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-qualify-physics-boundary") >= 0) BeginPhysicsBoundaryQualification();
             if (!IsMenu || Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-bench") < 0) return;
@@ -70,6 +71,15 @@ namespace KspContinuum
             if (ShadowRunning) throw new InvalidOperationException("Shadow capture is already active.");
             ShadowReportPath = null;
             shadow = new ShadowCapture(report => ShadowReportPath = Write("shadow", report));
+        }
+        public void BeginRigidClusterShadowCapture()
+        {
+            if (IsMenu || !Supported) throw new InvalidOperationException("Flight shadow requires KSP 1.12.5 flight.");
+            if (ShadowRunning) throw new InvalidOperationException("Shadow capture is already active.");
+            ShadowReportPath = null;
+            shadow = new ShadowCapture(new RigidClusterBackend(), "translational-rigid-cluster/v1",
+                "All captured vessel bodies share one mass-weighted linear velocity and retain their captured relative position for the predicted step; rotation is not simulated.",
+                false, report => ShadowReportPath = Write("rigid-cluster-shadow", report));
         }
         public void StopShadowCapture() { if (shadow != null) shadow.Dispose(); }
         public void BeginLifecycleTrace()
@@ -279,6 +289,11 @@ namespace KspContinuum
                 if (GUILayout.Button("Start read-only worker shadow capture"))
                 {
                     try { BeginShadowCapture(); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                if (GUILayout.Button("Start translational rigid-cluster shadow"))
+                {
+                    try { BeginRigidClusterShadowCapture(); }
                     catch (Exception ex) { status = ex.Message; }
                 }
                 if (GUILayout.Button("Stop shadow capture")) StopShadowCapture();
