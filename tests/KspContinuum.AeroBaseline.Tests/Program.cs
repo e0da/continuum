@@ -15,7 +15,7 @@ static class Program
         "00000000-0000-0000-0000-000000000002", "frame", 1, 1, 1, 1, 1, ordinal, 0, 0, .02);
     static AeroDragCubeState Cube(Vec center, double weight = 1) => new AeroDragCubeState("cube", weight, center,
         new Vec(1, 1, 1), new[] { 2d, 3, 5, 7, 11, 13 }, new[] { .5, .4, .3, .2, .1, .05 },
-        new[] { 1d, 1, 1, 1, 1, 1 }, new[] { 1d, .9, .8, .7, .6, .5 });
+        new[] { 1d, 1, 1, 1, 1, 1 }, new double[6]);
     static AeroPartContext Part(long id, Vec center, Vec air, Rotation attitude, double density = 1.2,
         bool shielded = false, AeroDragCubeState[] cubes = null, int ordinal = 0) => new AeroPartContext(Step(ordinal), id,
         checked((int)id + 10), checked((int)id + 20), 10, density, 100000, 280, 330, .5, 1, 1, shielded,
@@ -26,11 +26,11 @@ static class Program
     {
         var result = AeroDragCubeBaseline.Evaluate(Part(1, new Vec(), new Vec(10, 0, 0), Rotation.Identity));
         Near(60, result.DynamicPressurePascals, "dynamic pressure");
-        Near(1, result.WeightedProjectedAreaSquareMeters, "positive X projected coefficient-area");
-        Near(new Vec(60, 0, 0), result.ForceNewtons, "force follows relative airflow");
+        Near(1.2, result.WeightedProjectedAreaSquareMeters, "positive X motion selects negative X airflow face");
+        Near(new Vec(-72, 0, 0), result.ForceNewtons, "force opposes relative motion");
         var reverse = AeroDragCubeBaseline.Evaluate(Part(1, new Vec(), new Vec(-10, 0, 0), Rotation.Identity));
-        Near(1.08, reverse.WeightedProjectedAreaSquareMeters, "negative X face selection");
-        Near(new Vec(-64.8, 0, 0), reverse.ForceNewtons, "reverse force");
+        Near(1, reverse.WeightedProjectedAreaSquareMeters, "negative X motion selects positive X airflow face");
+        Near(new Vec(60, 0, 0), reverse.ForceNewtons, "reverse force");
     }
 
     static void MetamorphicBehavior()

@@ -92,12 +92,14 @@ The strongest outcome may be a faster deterministic stock-style kernel. Machine 
 ### First deterministic baseline
 
 `AeroDragCubeBaseline` is the first portable candidate, identified as
-`continuum-drag-cube-projection/v1`. It projects relative airflow onto the six
-captured drag-cube faces, blends each cube's weight, area, drag coefficient and
-modifier, applies dynamic pressure, and maps the weighted cube center back into
+`continuum-drag-cube-projection/v2`. It projects relative airflow onto the six
+captured drag-cube faces, blends each cube's weight, area and drag coefficient,
+applies dynamic pressure, and maps the weighted cube center back into
 the world frame. Scalar and bounded parallel entry points run the identical
 per-part calculation; the parallel path preserves input order and performs no
-shared reduction.
+shared reduction. KSP's runtime `DragCubeList` weights the cube `Drag` arrays;
+the separately captured `DragModifiers` values describe generation inputs and
+are retained as provenance rather than multiplied into the runtime coefficient.
 
 This is a deliberately falsifiable baseline, not a reproduction of KSP's stock
 algorithm. It does not yet model Mach curves, pseudo-Reynolds corrections, body
