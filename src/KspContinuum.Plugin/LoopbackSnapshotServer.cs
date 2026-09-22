@@ -13,7 +13,7 @@ namespace KspContinuum
     {
         sealed class Pending
         {
-            public string Command, Response;
+            public string Command, RequestId, Response;
             public bool Canceled;
             public readonly ManualResetEvent Done = new ManualResetEvent(false);
         }
@@ -51,7 +51,7 @@ namespace KspContinuum
             }
             if (pending == null) return false;
             try { pending.Response = handle(pending.Command); }
-            catch { pending.Response = Error("handler-failed"); }
+            catch { pending.Response = Error("handler-failed", pending.RequestId); }
             finally { pending.Done.Set(); }
             return true;
         }
@@ -84,11 +84,12 @@ namespace KspContinuum
                             if (command == null) response = Error("invalid-frame");
                             else
                             {
-                                var pending = new Pending { Command = command };
+                                var pending = new Pending { Command = command,
+                                    RequestId = LiveControlRequest.Parse(command).requestId };
                                 lock (sync)
                                 {
                                     if (stopped || queue.Count >= 8)
-                                        response = Error(stopped ? "stopped" : "busy", LiveControlRequest.Parse(command).requestId);
+                                        response = Error(stopped ? "stopped" : "busy", pending.RequestId);
                                     else { queue.Enqueue(pending); response = null; }
                                 }
                                 if (response == null)
@@ -97,7 +98,7 @@ namespace KspContinuum
                                     else
                                     {
                                         lock (sync) pending.Canceled = true;
-                                        response = Error("game-thread-timeout", LiveControlRequest.Parse(command).requestId);
+                                        response = Error("game-thread-timeout", pending.RequestId);
                                     }
                                 }
                             }
@@ -139,7 +140,7 @@ namespace KspContinuum
                 while (queue.Count != 0)
                 {
                     Pending pending = queue.Dequeue();
-                    pending.Response = Error("stopped", LiveControlRequest.Parse(pending.Command).requestId);
+                    pending.Response = Error("stopped", pending.RequestId);
                     pending.Done.Set();
                 }
             }

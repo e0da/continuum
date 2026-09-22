@@ -61,19 +61,27 @@ static class Program
         Task pump = Task.Run(() => {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(4));
             int handled = 0;
-            while (handled < 2)
+            while (handled < 3)
             {
-                if (server.DrainOne(command => ReportJson.Encode(Execute(control, command, 30 + handled, 8, capture)))) handled++;
+                if (server.DrainOne(command => {
+                    if (LiveControlRequest.Parse(command).requestId == "persisted2")
+                        throw new InvalidOperationException("Simulated main-thread failure");
+                    return ReportJson.Encode(Execute(control, command, 30 + handled, 8, capture));
+                })) handled++;
                 else { deadline.Token.ThrowIfCancellationRequested(); Thread.Yield(); }
             }
         });
-        foreach (string command in new[] { "hello 1.0.0 persisted1", "snapshot 1.0.0 persisted2 " + Session + " 6 7" })
+        foreach (string command in new[] { "hello 1.0.0 persisted1", "snapshot 1.0.0 persisted2 " + Session + " 6 7",
+            "snapshot 1.0.0 persisted3 " + Session + " 6 7" })
         {
             byte[] bytes = Encoding.ASCII.GetBytes(command + "\n");
             stream.Write(bytes);
             using var json = JsonDocument.Parse(reader.ReadLine() ?? throw new Exception("Missing persistent reply"));
             Check(json.RootElement.GetProperty("requestId").GetString() == command.Split(' ')[2], "persistent request correlation");
-            if (command.StartsWith("snapshot", StringComparison.Ordinal))
+            if (command.Contains("persisted2", StringComparison.Ordinal))
+                Check(json.RootElement.GetProperty("reason").GetString() == "handler-failed",
+                    "handler failure stays correlated");
+            else if (command.StartsWith("snapshot", StringComparison.Ordinal))
                 Check(json.RootElement.GetProperty("snapshot").GetProperty("parts").GetInt32() == 14,
                     "persistent snapshot reached source");
         }
