@@ -189,6 +189,57 @@ static class Program
             new[] { new StructuralAttachmentFact("edge", "a", "b", null, AttachmentBehavior.Rigid) }),
             "one captured body was allowed to cross a proposed seam");
 
+        var captureContext = new StructuralVesselCaptureContext("11111111-1111-1111-1111-111111111111",
+            "FLIGHT", 123, 45, .9, 123456.75, "continuum-qualification", "checkpoint-007");
+        var censusReport = StructuralVesselCensus.Build(captureContext, new StructuralCensusResult(3, 2, 7),
+            new[] {
+                new StructuralPartObservation("z", 3, null, null),
+                new StructuralPartObservation("a", 1, null, null),
+                new StructuralPartObservation("middle", 2, null, null),
+                new StructuralPartObservation("physicsless", null, null, "missing-part-rigidbody") },
+            new[] {
+                new StructuralAttachmentObservation("edge-z", "middle", "z", 22, null, null),
+                new StructuralAttachmentObservation("edge-a", "a", "middle", 11, null, null),
+                new StructuralAttachmentObservation("edge-omitted", "middle", "physicsless", null, null, null) });
+        Check(censusReport.parts[0].logicalId == "a" && censusReport.parts[3].logicalId == "z"
+            && censusReport.attachments[0].logicalId == "edge-a", "vessel census rows are not deterministically ordered");
+        Check(censusReport.candidate.status == "compiled-read-only-candidate"
+            && censusReport.candidate.mappedBodies == 3 && censusReport.candidate.mappedJoints == 2,
+            "vessel census did not account for observed bodies and joints");
+        Check(censusReport.candidate.projectedBodies == 3 && censusReport.candidate.bodyReduction == 0
+            && censusReport.candidate.abstentions.Length == 5,
+            "unknown live semantics were not retained as abstentions");
+        Check(censusReport.context.vesselId == "11111111-1111-1111-1111-111111111111"
+            && censusReport.context.scene == "FLIGHT" && censusReport.context.frame == 123
+            && censusReport.context.physicsTick == 45 && censusReport.context.fixedTimeSeconds == .9
+            && censusReport.context.universalTimeSeconds == 123456.75
+            && censusReport.context.saveIdentity == "continuum-qualification"
+            && censusReport.context.checkpointIdentity == "checkpoint-007",
+            "vessel census lost durable capture attribution");
+        Check(censusReport.attachments[1].omissionReason == "endpoint-without-native-body",
+            "attachment with an unmapped endpoint was not explicitly omitted");
+        string firstEncoding = ReportJson.Encode(censusReport);
+        string secondEncoding = ReportJson.Encode(StructuralVesselCensus.Build(captureContext, new StructuralCensusResult(3, 2, 7),
+            new[] { new StructuralPartObservation("physicsless", null, null, "missing-part-rigidbody"),
+                new StructuralPartObservation("middle", 2, null, null), new StructuralPartObservation("a", 1, null, null),
+                new StructuralPartObservation("z", 3, null, null) },
+            new[] { new StructuralAttachmentObservation("edge-omitted", "middle", "physicsless", null, null, null),
+                new StructuralAttachmentObservation("edge-a", "a", "middle", 11, null, null),
+                new StructuralAttachmentObservation("edge-z", "middle", "z", 22, null, null) }));
+        Check(firstEncoding == secondEncoding, "vessel census encoding changed with source enumeration order");
+
+        var crossingReport = StructuralVesselCensus.Build(captureContext, new StructuralCensusResult(1, 0, 0),
+            new[] { new StructuralPartObservation("a", 1, null, null),
+                new StructuralPartObservation("b", 1, null, null) },
+            new[] { new StructuralAttachmentObservation("edge", "a", "b", null, null, null) });
+        Check(crossingReport.candidate.status == "rejected-read-only-candidate"
+            && crossingReport.candidate.rejectionReason.Contains("crosses proposed semantic seams"),
+            "same-body semantic conflict was not retained as a rejected observation");
+        Reject<ArgumentException>(() => new StructuralVesselCaptureContext(Guid.Empty.ToString(), "FLIGHT", 1,
+            1, .02, 0, "save", null), "empty vessel GUID was accepted");
+        Reject<ArgumentException>(() => new StructuralVesselCaptureContext(Guid.NewGuid().ToString(), "FLIGHT", 1,
+            1, .02, 0, new string('s', 129), null), "unbounded save identity was accepted");
+
         Console.WriteLine("PASS " + checks + " semantic cluster compiler assertions");
         return 0;
     }

@@ -28,6 +28,7 @@ namespace KspContinuum
         public string LifecycleTraceReportPath { get; private set; }
         public string PhysicsBoundaryReportPath { get; private set; }
         public string StructuralExperimentReportPath { get; private set; }
+        public string StructuralVesselCensusReportPath { get; private set; }
         public string AeroCaptureReportPath { get; private set; }
         string replayFile = "replay.csv";
         protected abstract bool IsMenu { get; }
@@ -315,6 +316,15 @@ namespace KspContinuum
                     catch (Exception ex) { status = ex.Message; }
                 }
                 if (GUILayout.Button("Stop structural experiment")) StopStructuralExperiment();
+                if (GUILayout.Button("Capture structural vessel census (read only)"))
+                {
+                    try
+                    {
+                        StructuralVesselCensusReportPath = Write("structural-vessel-census",
+                            StructuralVesselCensusCapture.Capture(FlightGlobals.ActiveVessel));
+                    }
+                    catch (Exception ex) { status = "Structural census failed: " + ex.GetType().Name; Debug.LogException(ex); }
+                }
                 GUILayout.Label(ShadowStatus);
                 if (GUILayout.Button("Start read-only stock aero capture"))
                 {

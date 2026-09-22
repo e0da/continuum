@@ -81,7 +81,10 @@ namespace KspContinuum
                 type != typeof(AeroCaptureContext) && type != typeof(AeroPartContext) && type != typeof(AeroBodyPublication) &&
                 type != typeof(AeroDragCubeState) && type != typeof(AeroStockDragScalars) &&
                 type != typeof(AeroSetDragInputs) && type != typeof(AeroSurfaceCurveDefinitions) &&
-                type != typeof(AeroFloatCurveDefinition) && type != typeof(AeroCurveKey))
+                type != typeof(AeroFloatCurveDefinition) && type != typeof(AeroCurveKey) &&
+                type != typeof(StructuralVesselCensusReport) && type != typeof(StructuralVesselPartRow) &&
+                type != typeof(StructuralVesselAttachmentRow) && type != typeof(StructuralVesselCandidateSummary) &&
+                type != typeof(StructuralVesselCaptureContextReport))
                 throw new ArgumentException("Unsupported report type: " + type.FullName);
             output.Append('{'); bool firstField = true;
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
