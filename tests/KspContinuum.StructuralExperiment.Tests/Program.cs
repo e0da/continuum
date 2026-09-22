@@ -26,13 +26,27 @@ static class Program
                 bodyBVelocity = new[] { velocity, 0, 0 }, bodyBAngularVelocity = new[] { 0.0, 0, 0 },
             };
         }
+        var lifecycle = new LifecycleOrderQualificationReport {
+            evidence = "portable-helper-fixture", status = "qualified", integrityStatus = "verified-at-every-boundary",
+            cleanupStatus = "removed-owned-hooks-probe-destroy-requested", installedBeforeCallbacks = 1, installedAfterCallbacks = 1,
+            retainedTrials = 3, unity = "fixture-unity", ksp = "fixture-ksp", plugin = "fixture-plugin",
+            trials = new LifecycleOrderTrial[3]
+        };
+        for (int i = 0; i < lifecycle.trials.Length; i++) lifecycle.trials[i] = new LifecycleOrderTrial {
+            trial = i + 1, unityFrameBefore = 9, unityFrameAfter = 9, fixedTimeBefore = i, fixedTimeAfter = i,
+            fixedDeltaSeconds = step, initialPosition = new[] { 0.0, 0, 0 }, requestedVelocity = new[] { 1.0, 0, 0 },
+            positionBeforeTarget = new[] { 0.0, 0, 0 }, positionAfterTarget = new[] { step, 0, 0 },
+            velocityAfterTarget = new[] { 1.0, 0, 0 }
+        };
+        lifecycle.qualificationId = LifecycleOrderQualification.ComputeId(lifecycle);
         return new StructuralExperimentReport {
             evidence = "portable-helper-fixture", status = "complete", receiptValidity = "valid",
             runEligibility = "eligible", experimentQualified = "not-evaluated", cleanupStatus = "complete",
             contactObservationStatus = "observed-none", vesselId = "fixture-vessel", bodyAInstanceId = 1,
+            unity = lifecycle.unity, ksp = lifecycle.ksp, plugin = lifecycle.plugin,
             topology = "fixture-config-sha256",
-            injectionCallback = "fixture-pre-solver", observationCallback = "fixture-post-solver",
-            lifecycleQualificationId = "fixture-lifecycle-sha256",
+            injectionCallback = lifecycle.injectionCallback, observationCallback = lifecycle.observationCallback,
+            lifecycleQualificationId = lifecycle.qualificationId, lifecycleQualification = lifecycle,
             bodyBInstanceId = 2, jointInstanceId = 3, retainedSamples = trace.Length, stepSeconds = step,
             impulseMagnitude = .01, worldAxis = new[] { 1.0, 0, 0 },
             baselineBodyAWorldCenterOfMass = new[] { 0.0, 0, 0 },
@@ -61,6 +75,10 @@ static class Program
         changed = Fixture(); changed.experimentQualified = "true"; Reject(() => StructuralExperiment.Validate(changed), "capture claimed qualification");
         changed = Fixture(); changed.trace.evidence = "native-adapter-observation";
         Reject(() => StructuralExperiment.Validate(changed), "nested provenance mismatch accepted");
+        changed = Fixture(); changed.lifecycleQualification.evidence = "native-isolated-rigidbody-observation";
+        changed.lifecycleQualification.qualificationId = LifecycleOrderQualification.ComputeId(changed.lifecycleQualification);
+        changed.lifecycleQualificationId = changed.lifecycleQualification.qualificationId;
+        Reject(() => StructuralExperiment.Validate(changed), "native qualification accepted for a portable receipt");
         changed = Fixture(); changed.referenceRelativeCenterOfMass[0] += .1;
         for (int i = 0; i < changed.trace.samples.Length; i++) changed.trace.samples[i].relativeDisplacement -= .1;
         Reject(() => StructuralExperiment.Validate(changed), "shifted displacement reference accepted");

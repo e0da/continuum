@@ -18,6 +18,7 @@ namespace KspContinuum
         public string injectionCallback;
         public string observationCallback;
         public string lifecycleQualificationId;
+        public LifecycleOrderQualificationReport lifecycleQualification;
         public string contactObservationStatus = "unavailable";
         public string coordinateSchema = "ksp-continuum-structural-relative-coordinate/v1";
         public string startedUtc;
@@ -126,6 +127,18 @@ namespace KspContinuum
             Require(!String.IsNullOrEmpty(report.injectionCallback) && !String.IsNullOrEmpty(report.observationCallback)
                 && !String.IsNullOrEmpty(report.lifecycleQualificationId),
                 "Installed callback qualification is missing.");
+            LifecycleOrderQualification.Validate(report.lifecycleQualification);
+            Require(report.lifecycleQualification.status == "qualified"
+                && (report.evidence == "portable-helper-fixture" && report.lifecycleQualification.evidence == "portable-helper-fixture"
+                    || report.evidence == "native-adapter-observation"
+                    && report.lifecycleQualification.evidence == "native-isolated-rigidbody-observation")
+                && report.lifecycleQualification.qualificationId == report.lifecycleQualificationId
+                && report.lifecycleQualification.injectionCallback == report.injectionCallback
+                && report.lifecycleQualification.observationCallback == report.observationCallback
+                && report.lifecycleQualification.unity == report.unity
+                && report.lifecycleQualification.ksp == report.ksp
+                && report.lifecycleQualification.plugin == report.plugin,
+                "Installed callback qualification does not bind this structural experiment.");
             Vector(report.worldAxis, 3, "world axis");
             Vector(report.baselineBodyAWorldCenterOfMass, 3, "baseline body A center of mass");
             Vector(report.baselineBodyBWorldCenterOfMass, 3, "baseline body B center of mass");

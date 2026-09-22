@@ -63,6 +63,7 @@ namespace KspContinuum
                 type != typeof(ForceObservationReport) && type != typeof(ForceObservationContext) &&
                 type != typeof(LifecycleTraceReport) && type != typeof(LifecycleTraceEvent) &&
                 type != typeof(LifecycleTraceContext) && type != typeof(LifecyclePartSample) &&
+                type != typeof(LifecycleOrderQualificationReport) && type != typeof(LifecycleOrderTrial) &&
                 type != typeof(ForceObservationBatch) && type != typeof(ForcePartObservation) &&
                 type != typeof(ForceAtPositionObservation) && type != typeof(Vec) &&
                 type != typeof(ShadowReport) && type != typeof(ShadowSample) && type != typeof(ShadowBody) &&

@@ -25,6 +25,7 @@ portable() {
     tests/KspContinuum.ForceObservation.Tests \
     tests/KspContinuum.AeroCapture.Tests \
     tests/KspContinuum.LifecycleTrace.Tests \
+    tests/KspContinuum.LifecycleOrderQualification.Tests \
     tests/KspContinuum.Shadow.Tests \
     tests/KspContinuum.StructuralResponse.Tests \
     tests/KspContinuum.StructuralExperiment.Tests \

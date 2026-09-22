@@ -17,6 +17,7 @@ static class Program
         new PlayerLoopSystem { type = typeof(Late), subSystemList = new[] { Native(typeof(Late.ScriptRunBehaviourLateUpdate)) } }
     } }; }
     static void Dispatch(PlayerLoopSystem node) { if (node.updateDelegate != null) node.updateDelegate(); if (node.subSystemList != null) foreach (var child in node.subSystemList) Dispatch(child); }
+    static void DispatchPhysics(PlayerLoopSystem node) { if (node.updateDelegate != null) node.updateDelegate(); if (node.type == typeof(Fixed.PhysicsFixedUpdate)) UnityEngine.Rigidbody.Integrate(); if (node.subSystemList != null) foreach (var child in node.subSystemList) DispatchPhysics(child); }
     static PlayerLoopSystem Find(PlayerLoopSystem node, Type type) { if (node.type == type) return node; if (node.subSystemList != null) foreach (var child in node.subSystemList) { try { return Find(child, type); } catch (InvalidOperationException) { } } throw new InvalidOperationException(); }
 
     static void Main()
@@ -60,6 +61,19 @@ static class Program
         var result = buffer.Finish(true); Check(result.samples.Length == 2 && result.droppedSamples == 1); Check(result.milliseconds.mean == 37.5 && result.samples[0].elapsedTicks == 25);
         buffer = new LoopTimingBuffer("bad", 2, 1000); buffer.Begin(100, 1, 0, .02); buffer.End(110, 2); result = buffer.Finish(true); Check(result.status == "invalid" && result.milliseconds == null);
         buffer = new LoopTimingBuffer("missing", 2, 1000); buffer.Begin(100, 1, 0, .02); Check(buffer.Finish(true).status == "invalid");
+
+        PlayerLoop.Current = Tree(); UnityEngine.GameObject.Bodies.Clear(); UnityEngine.Time.frameCount = 30;
+        var qualification = new PhysicsBoundaryQualification(); qualification.Start();
+        for (int i = 0; i < 3; i++) { UnityEngine.Time.fixedTime = i * UnityEngine.Time.fixedDeltaTime; DispatchPhysics(PlayerLoop.Current); }
+        Check(!qualification.IsRunning); qualification.Dispose();
+        Check(qualification.Report.status == "qualified" && qualification.Report.retainedTrials == 3);
+        LifecycleOrderQualification.Validate(qualification.Report);
+        Check(Find(PlayerLoop.Current, typeof(Fixed)).subSystemList.Length == 2);
+
+        PlayerLoop.Current = Tree(); UnityEngine.GameObject.Bodies.Clear(); qualification = new PhysicsBoundaryQualification(); qualification.Start();
+        for (int i = 0; i < 3; i++) Dispatch(PlayerLoop.Current);
+        qualification.Dispose(); Check(qualification.Report.status == "invalid" && qualification.Report.retainedTrials == 0);
+        LifecycleOrderQualification.Validate(qualification.Report);
         Console.WriteLine("PlayerLoop: " + checks + " assertions passed.");
     }
 }

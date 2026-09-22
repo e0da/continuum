@@ -15,12 +15,15 @@ namespace KspContinuum
         FlightTimeline timeline;
         ShadowCapture shadow;
         LifecycleTraceCapture lifecycleTrace;
+        PhysicsBoundaryQualification physicsBoundary;
         Coroutine lifecycleContinuation;
         bool lifecycleExportAttempted;
+        bool physicsBoundaryExportAttempted;
         public bool ShadowRunning { get { return shadow != null && shadow.IsRunning; } }
         public string ShadowStatus { get { return shadow == null ? "Shadow not started." : shadow.Status; } }
         public string ShadowReportPath { get; private set; }
         public string LifecycleTraceReportPath { get; private set; }
+        public string PhysicsBoundaryReportPath { get; private set; }
         string replayFile = "replay.csv";
         protected abstract bool IsMenu { get; }
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
@@ -28,6 +31,7 @@ namespace KspContinuum
         {
             if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-shadow") >= 0) BeginShadowCapture();
             if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-lifecycle-trace") >= 0) BeginLifecycleTrace();
+            if (!IsMenu && Supported && Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-qualify-physics-boundary") >= 0) BeginPhysicsBoundaryQualification();
             if (!IsMenu || Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-bench") < 0) return;
             automatedBench = true;
             if (!Supported) { Application.Quit(2); return; }
@@ -39,6 +43,11 @@ namespace KspContinuum
             {
                 lifecycleTrace.ObserveUpdate();
                 FinishLifecycleTrace();
+            }
+            if (physicsBoundary != null)
+            {
+                physicsBoundary.Audit();
+                FinishPhysicsBoundaryQualification();
             }
             if (shadow != null) shadow.Tick(true);
             if (timeline == null) return;
@@ -110,6 +119,24 @@ namespace KspContinuum
                 Debug.LogException(error);
             }
         }
+        public void BeginPhysicsBoundaryQualification()
+        {
+            if (IsMenu || !Supported) throw new InvalidOperationException("Physics-boundary qualification requires KSP 1.12.5 flight.");
+            if (physicsBoundary != null && physicsBoundary.IsRunning) throw new InvalidOperationException("Physics-boundary qualification is already active.");
+            FinishPhysicsBoundaryQualification(); PhysicsBoundaryReportPath = null; physicsBoundaryExportAttempted = false;
+            physicsBoundary = new PhysicsBoundaryQualification(); physicsBoundary.Start(); FinishPhysicsBoundaryQualification();
+        }
+        public void StopPhysicsBoundaryQualification()
+        {
+            if (physicsBoundary != null) physicsBoundary.Dispose(); FinishPhysicsBoundaryQualification();
+        }
+        void FinishPhysicsBoundaryQualification()
+        {
+            if (physicsBoundary == null || physicsBoundary.IsRunning || physicsBoundaryExportAttempted) return;
+            physicsBoundaryExportAttempted = true; physicsBoundary.Dispose();
+            try { PhysicsBoundaryReportPath = Write("physics-boundary", physicsBoundary.Report); }
+            catch (Exception error) { status = "Physics-boundary export failed: " + error.GetType().Name; Debug.LogException(error); }
+        }
         void RunBench()
         {
             bench = new Bench();
@@ -129,7 +156,7 @@ namespace KspContinuum
             try
             {
                 string encoded = ReportJson.Encode(report);
-                if ((kind == "shadow" || kind == "lifecycle") && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
+                if ((kind == "shadow" || kind == "lifecycle" || kind == "physics-boundary") && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
                     throw new InvalidOperationException("Observation receipt exceeds its 4 MiB export bound.");
                 File.WriteAllText(temporary, encoded);
                 File.Move(temporary, path);
@@ -186,6 +213,13 @@ namespace KspContinuum
                     catch (Exception ex) { status = ex.Message; }
                 }
                 if (GUILayout.Button("Stop lifecycle trace")) StopLifecycleTrace();
+                GUILayout.Label(physicsBoundary == null ? "Physics boundary not qualified." : "Physics boundary: " + physicsBoundary.Report.status);
+                if (GUILayout.Button("Qualify native physics boundary"))
+                {
+                    try { BeginPhysicsBoundaryQualification(); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                if (GUILayout.Button("Stop physics-boundary qualification")) StopPhysicsBoundaryQualification();
                 GUILayout.Label(ShadowStatus);
                 if (GUILayout.Button("Start read-only worker shadow capture"))
                 {
@@ -228,10 +262,11 @@ namespace KspContinuum
             }
             GUI.enabled = old; GUILayout.EndArea();
         }
-        public void OnDisable() { StopLifecycleTrace(); }
+        public void OnDisable() { StopLifecycleTrace(); StopPhysicsBoundaryQualification(); }
         public void OnDestroy()
         {
             StopLifecycleTrace();
+            StopPhysicsBoundaryQualification();
             StopShadowCapture();
             StopAllCoroutines();
             if (bench != null) bench.Dispose();

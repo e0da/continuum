@@ -10,6 +10,14 @@ The trace can arm while the vessel is not yet ready. It starts retaining events 
 
 The host supplies ordinary `Update`, `FixedUpdate` and a coroutine continuation after `WaitForFixedUpdate`. The capture also registers its own delegates with `FashionablyLate`, `FlightIntegrator` and `BetterLateThanNever`. Registration is checked against the retained concrete native stage objects; cleanup removes only the capture's delegates. Stopping, disabling or destroying the host stops its owned trace coroutine and finalizes the receipt. A finished trace is exported before another one replaces it.
 
+## Native physics-boundary qualification
+
+`--continuum-qualify-physics-boundary` or **Qualify native physics boundary** runs a separate opt-in qualification. It does not infer solver order from KSP callback names. It installs owned callbacks immediately before and after the single `UnityEngine.PlayerLoop.FixedUpdate.PhysicsFixedUpdate` node, creates a hidden collider-free rigidbody with gravity and collision disabled, and performs three one-step axis trials. Each trial records the requested velocity and raw position before and after the native target. A receipt qualifies only when all three displacements equal one fixed step, both callbacks remain uniquely installed at every boundary, and cleanup removes the hooks and requests destruction of the probe object.
+
+The probe does not touch the active vessel or save. Its content-derived qualification ID binds the target, callback identities, installed build versions, clocks and raw observations. `StructuralExperimentReport` embeds that complete receipt and rejects a free-form ID, mismatched callback pair or mismatched provenance. Portable fixture evidence can test the validator but cannot unlock a native experiment.
+
+This qualifies the installed direct PlayerLoop bracket for that build. It does not qualify KSP's named `TimingManager` stages, structural response, deterministic replay, or a replacement solver. The installed run is still required; a native build and portable test only establish API and contract compatibility.
+
 Each capture has one session ID and monotonically increasing event sequence. Stage names record where observations occurred. The host FixedUpdate counter is **not** a certified native physics-step identity, and the final group can be partial. Equal counters from separate providers are not joined.
 
 ## Observation boundary
