@@ -326,7 +326,7 @@ fn verify_layout(root: &Path) -> Result {
         "tools/KspContinuum.LayoutBench",
         &["--bodies", "32", "--samples", "3", "--seed", "73"],
     )?;
-    eq_str(&r, "schema", "ksp-continuum-layout-bench/v1")?;
+    eq_str(&r, "schema", "ksp-continuum-layout-bench/v2")?;
     truth(&r, "immutableLogicalCaptures")?;
     falsity(&r, "poolingUsed")?;
     falsity(&r, "stockPhysicsSpeedupMeasured")?;
@@ -341,6 +341,24 @@ fn verify_layout(root: &Path) -> Result {
             row["maxVelocityError"].as_f64().unwrap_or(f64::INFINITY) <= 1e-12,
             "layout velocity error exceeded tolerance",
         )?;
+        let observation = &row["observation"];
+        eq_str(observation, "schema", "continuum-performance-observation/v1")?;
+        require(observation["workload"]["items"] == 32, "performance workload identity changed")?;
+        require(observation["workload"]["stepSeconds"] == 0.02,
+            "performance workload timestep changed")?;
+        require(observation["workload"]["configurationSha256"] == r["configurationSha256"],
+            "performance configuration identity changed")?;
+        require(observation["environmentSha256"] == r["environmentSha256"],
+            "performance environment identity changed")?;
+        require(observation["strategy"] == row["strategy"], "performance strategy identity changed")?;
+        for phase in ["capture", "pack", "compute", "synchronize", "publish", "total"] {
+            require(array(&observation[phase], "milliseconds")?.len() == 3,
+                &format!("performance phase {phase} sample count changed"))?;
+            require(observation[phase]["allocations"]["available"] == true,
+                &format!("performance phase {phase} allocation availability changed"))?;
+            require(array(&observation[phase]["allocations"], "bytes")?.len() == 3,
+                &format!("performance phase {phase} allocation count changed"))?;
+        }
     }
     Ok(())
 }

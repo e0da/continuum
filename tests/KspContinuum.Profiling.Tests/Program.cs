@@ -44,6 +44,47 @@ static class Program
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[] { 1 }, blocks = new int[] { 0 }, available = new bool[] { true } })));
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[0], blocks = new int[] { 1 }, available = new bool[] { true } })));
 
+        var baselinePerformance = Observation("scalar", new[] { 2.0, 4.0, 3.0 }, new long[] { 100, 120, 110 });
+        var candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        PerformanceObservations.Validate(baselinePerformance);
+        PerformanceComparison performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
+        Near(performance.speedup, 2); Near(performance.candidateToBaselineAllocationRatio.GetValueOrDefault(), 0.5);
+        Check(performance.withinMaximumRegression && performance.baselineStrategy == "scalar" && performance.candidateStrategy == "simd");
+        Check(performance.environmentSha256 == baselinePerformance.environmentSha256 &&
+            performance.measurementProtocol == "test-clock-v1" && performance.sampleProtocol == "test-samples-v1" &&
+            performance.samples == 3 && performance.maximumRegressionFraction == 0.05 &&
+            performance.allocationKind == "managed-allocated-bytes" && performance.allocationScope == "current-thread");
+        candidatePerformance.workload.items = 65;
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance.workload.items = 64;
+        candidatePerformance.compute.milliseconds = new[] { double.NaN, 1.0, 1.0 };
+        Check(Reject(() => PerformanceObservations.Validate(candidatePerformance)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.environmentSha256 = new string('b', 64);
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.workload.configurationSha256 = new string('c', 64);
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0 }, new long[] { 50, 60 });
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.sampleProtocol = "different-protocol";
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.total.allocations = new PerformanceAllocationSamples();
+        performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
+        Check(!performance.candidateToBaselineAllocationRatio.HasValue && performance.allocationKind == "unavailable" && performance.allocationScope == "unavailable");
+        candidatePerformance.workload.fixtureSha256 = new string('z', 64);
+        Check(Reject(() => PerformanceObservations.Validate(candidatePerformance)));
+        baselinePerformance = Observation("scalar", new[] { double.MaxValue, double.MaxValue }, new long[] { 1, 1 });
+        candidatePerformance = Observation("simd", new[] { double.MaxValue, double.MaxValue }, new long[] { 1, 1 });
+        performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
+        Check(performance.baselineMedianMilliseconds == double.MaxValue && performance.speedup == 1);
+        candidatePerformance = Observation("simd", new[] { double.Epsilon, double.Epsilon }, new long[] { 1, 1 });
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        baselinePerformance = Observation("scalar", new[] { double.Epsilon, double.Epsilon }, new long[] { 1, 1 });
+        candidatePerformance = Observation("simd", new[] { double.MaxValue, double.MaxValue }, new long[] { 1, 1 });
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
         marker.summary = summary;
         var report = new ProbeReport { markers = new[] { marker }, frames = new[] { new ProfileFrame {
             contextFrame = 10, markerFrame = 10, observedFrame = 11, contextAligned = true, wallMilliseconds = 16.7,
@@ -127,4 +168,21 @@ static class Program
     }
     static LoopTimingScope Scope(string name, double value) { return new LoopTimingScope { name = name, status = "observed", milliseconds = Dist(value), samples = new LoopTimingSample[1] }; }
     static ProfileDistribution Dist(double value) { return new ProfileDistribution { count = 1, minimum = value, maximum = value, mean = value, p50 = value, p95 = value, p99 = value }; }
+    static PerformanceObservation Observation(string strategy, double[] totals, long[] allocations)
+    {
+        var workload = new PerformanceWorkloadIdentity { system = "test-system", workload = "free-body",
+            fixtureSha256 = new string('a', 64), configurationSha256 = new string('b', 64),
+            items = 64, steps = 1, stepSeconds = 0.02 };
+        PerformancePhaseSamples Phase(double value)
+        {
+            var milliseconds = new double[totals.Length]; Array.Fill(milliseconds, value);
+            return new PerformancePhaseSamples { milliseconds = milliseconds, allocations = new PerformanceAllocationSamples {
+                available = true, kind = "managed-allocated-bytes", scope = "current-thread", bytes = new long[totals.Length] } };
+        }
+        return new PerformanceObservation { workload = workload, strategy = strategy, environmentSha256 = new string('c', 64),
+            measurementProtocol = "test-clock-v1", sampleProtocol = "test-samples-v1",
+            capture = Phase(0.1), pack = Phase(0.2), compute = Phase(0.5), synchronize = Phase(0), publish = Phase(0.2),
+            total = new PerformancePhaseSamples { milliseconds = totals, allocations = new PerformanceAllocationSamples {
+                available = true, kind = "managed-allocated-bytes", scope = "current-thread", bytes = allocations } } };
+    }
 }

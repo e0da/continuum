@@ -1,5 +1,11 @@
 # Data layout benchmark
 
+Version 2 results include a `continuum-performance-observation/v1` record. Version 1 totals excluded logical capture and used fewer instrumentation reads, so v1 and v2 timings are not comparable. Each v2 observation binds raw samples to the system, workload, fixture and configuration hashes, environment hash, item count, step count and duration, measurement and sample protocols, and strategy. The fixed phases are `capture`, `pack`, `compute`, `synchronize`, `publish`, and directly measured `total`. Every phase records elapsed milliseconds and explicitly identifies whether allocation bytes were available, what counter produced them, and its scope.
+
+This benchmark's `capture` is a synthetic array clone rather than extraction from KSP game state. `synchronize` is an instrumented in-process no-op and can be at the timer floor. Per-phase timestamp and allocation-counter reads occur inside the total interval, so they perturb these small workloads; totals compare strategies under the same instrumentation but do not estimate an uninstrumented hot loop. The stable phase shape allows later native, device, and sidecar strategies to report real synchronization costs and unavailable allocation counters without encoding unknown as zero.
+
+`PerformanceObservations.Compare` compares total medians only when workload, environment, configuration, measurement protocol, sample protocol, and sample count match. It returns speedup, an allocation ratio only for matching available counters, and a caller-selected maximum-regression verdict. It does not add phase timings to manufacture a total, set a universal threshold, or claim stock KSP performance.
+
 `KspContinuum.LayoutBench` is a bounded synthetic experiment for deciding whether a different simulation capture layout deserves further testing. It compares the current immutable object representation with two private experimental representations:
 
 - `object-aos` builds the existing `SimulationBody` and `SimulationBatch` objects for both input and output.
