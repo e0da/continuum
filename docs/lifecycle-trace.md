@@ -37,7 +37,7 @@ Final receipts use `ksp-continuum-lifecycle-trace/v1` and are written to the plu
 The offline consumer summarizes observed stage order without asserting what the correct order should be:
 
 ```sh
-python3 scripts/lifecycle_report.py --input /path/to/lifecycle.json --output artifacts/lifecycle-summary.json
+dotnet run --project tools/KspContinuum.Tools -c Release -- lifecycle-report --input /path/to/lifecycle.json --output artifacts/lifecycle-summary.json
 ```
 
 The output path must be new. The reader rejects malformed or oversized input and inconsistent sequence/context evidence. It preserves test-double provenance and terminal status. Grouping by the observed host counter is a viewing convenience, not proof that those records form a complete physics step.

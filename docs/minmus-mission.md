@@ -7,7 +7,7 @@ Build against your installed MechJeb 2.15.3.0 package (assembly version 2.15.0.0
 ```sh
 export MECHJEB_DLL="/path/to/MechJeb2/Plugins/MechJeb2.dll"
 dotnet build src/KspContinuum.Mission -c Release
-python3 scripts/package.py --mission
+dotnet run --project tools/KspContinuum.Tools -c Release -- package --mission
 ```
 
 The optional addon targets .NET Framework 4.8 to match that MechJeb release. The base plugin remains net472. Package output includes only our DLLs, docs and example inputs. Install dependencies and the local experiment with CKAN in an exclusively owned disposable instance; do not copy game libraries into the package.

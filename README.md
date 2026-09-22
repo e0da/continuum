@@ -51,7 +51,7 @@ To compile the addon, point `KSP_MANAGED` at the `Managed` directory in your own
 ```sh
 export KSP_MANAGED="/path/to/your/KSP/Managed"
 dotnet build src/KspContinuum.Plugin -c Release
-python3 scripts/package.py
+dotnet run --project tools/KspContinuum.Tools -c Release -- package
 ```
 
 The build reads game references but never copies them or installs anything. The local archive in `artifacts/` contains this project's plugin, documentation and an example input track; mission packages add the optional project-owned mission DLL. There is no published CKAN release yet. The local experiment was installed through CKAN in an independent test copy; public release metadata and gameplay qualification remain incomplete. Do not deploy into an instance another process or agent is using.

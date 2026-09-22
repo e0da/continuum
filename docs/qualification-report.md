@@ -1,13 +1,13 @@
 # Flight qualification report
 
-`qualification_report.py` turns one terminal native qualification directory into a portable JSON summary and a standalone HTML report. It reads evidence only. It does not start KSP, control a vessel, modify the source receipts or add the report to the space-program catalog.
+the `qualification-report` .NET command turns one terminal native qualification directory into a portable JSON summary and a standalone HTML report. It reads evidence only. It does not start KSP, control a vessel, modify the source receipts or add the report to the space-program catalog.
 
 An optional `shutdown.txt` (`ksp-continuum-shutdown/v1`) records callback outcomes separately from collection status. The summary validates its capture status, unique bounded handler IDs and matching error counts, includes its source hash, and displays shutdown errors even when all three capture windows completed. Missing shutdown receipts remain explicitly unqualified, including historical A007 evidence. Callback completion does not independently prove restored native settings or game state.
 
 Run it after the native qualification has written `status.txt`:
 
 ```sh
-python3 scripts/qualification_report.py \
+dotnet run --project tools/KspContinuum.Tools -c Release -- qualification-report \
   /path/to/qualification-SESSION \
   --output artifacts/qualification-reports/SESSION
 ```
