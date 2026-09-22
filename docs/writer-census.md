@@ -1,0 +1,7 @@
+# PlayerLoop writer census
+
+Add `--continuum-writer-census` to a profiling run to enable a bounded, read-only census around the already audited `PhysicsFixedUpdate` and `ScriptRunBehaviourFixedUpdate` brackets. The option also enables PlayerLoop timing. Its result is embedded as `writerCensus` in the marker receipt.
+
+Each retained interval compares active-vessel rigidbody centers, orientations, linear velocities, and angular velocities immediately before and after one named subtree. Positions are expressed relative to the first ordered vessel rigidbody, so a common FloatingOrigin translation cancels. Linear velocities include the captured Krakensbane frame velocity. Quaternion comparison normalizes both inputs and treats `q` and `-q` as the same orientation. The interval is rejected if an orientation is nonfinite or degenerate, or if the active vessel, ordered part-to-body topology, rigidbody membership, FloatingOrigin generation, or frame velocity changes across the bracket.
+
+`state-changed-within-interval` means only that pose or velocity differed across that interval. It does not identify a writer inside the subtree. A clean physics-only change is evidence for where to place the next experiment; it is not proof that PhysX was the writer. The capture retains at most 1,024 intervals and reports overflow.

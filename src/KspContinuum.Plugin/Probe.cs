@@ -21,6 +21,7 @@ namespace KspContinuum
         readonly Stopwatch clock = new Stopwatch();
         ProbeReport report;
         PlayerLoopTiming playerLoop;
+        ActiveVesselWriterCensus writerCensus;
         PartForceObservation partForces;
         Action<ProbeReport> completion;
         bool started, finished;
@@ -52,9 +53,15 @@ namespace KspContinuum
                     report.markers[i] = row;
                     Acquire(row);
                 }
-                if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-playerloop") >= 0)
+                if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-playerloop") >= 0 ||
+                    Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-writer-census") >= 0)
                 {
-                    playerLoop = new PlayerLoopTiming();
+                    if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-writer-census") >= 0)
+                    {
+                        writerCensus = new ActiveVesselWriterCensus();
+                        report.writerCensus = writerCensus.Census.Report;
+                    }
+                    playerLoop = new PlayerLoopTiming(writerCensus == null ? null : writerCensus.Census);
                     playerLoop.Start();
                     report.playerLoop = playerLoop.Report;
                 }
@@ -173,6 +180,12 @@ namespace KspContinuum
                 catch (Exception error) { errors.Add("PlayerLoop: " + error.GetType().Name); }
                 if (playerLoop.Report.cleanupStatus == "cleanup-error") errors.Add("PlayerLoop: cleanup-error");
                 playerLoop = null;
+            }
+            if (writerCensus != null)
+            {
+                try { writerCensus.Dispose(); }
+                catch (Exception error) { errors.Add("WriterCensus: " + error.GetType().Name); }
+                writerCensus = null;
             }
             if (partForces != null)
             {
