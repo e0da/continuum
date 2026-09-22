@@ -41,7 +41,7 @@ jobs:
     uses: e0da/actions/.github/workflows/ci-command.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
-      system-deps: cmake build-essential ninja-build
+      system-deps: cmake build-essential ninja-build python3
       command: scripts/check structural
 
   hosted-drift:
