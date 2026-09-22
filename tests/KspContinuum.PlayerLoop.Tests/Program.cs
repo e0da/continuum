@@ -74,6 +74,19 @@ static class Program
         for (int i = 0; i < 3; i++) Dispatch(PlayerLoop.Current);
         qualification.Dispose(); Check(qualification.Report.status == "invalid" && qualification.Report.retainedTrials == 0);
         LifecycleOrderQualification.Validate(qualification.Report);
+
+        PlayerLoop.Current = Tree(); int beforeCalls = 0, afterCalls = 0;
+        var firstHooks = new PhysicsBoundaryHooks(() => beforeCalls++, () => afterCalls++);
+        var secondHooks = new PhysicsBoundaryHooks(() => { }, () => { }); firstHooks.Start();
+        bool rejectedOwner = false; try { secondHooks.Start(); } catch (InvalidOperationException) { rejectedOwner = true; }
+        Check(rejectedOwner); Dispatch(PlayerLoop.Current); Check(beforeCalls == 1 && afterCalls == 1);
+        firstHooks.Dispose(); secondHooks = new PhysicsBoundaryHooks(() => { }, () => { }); secondHooks.Start(); secondHooks.Dispose();
+        Check(firstHooks.CleanupStatus == "removed-owned-hooks" && secondHooks.CleanupStatus == "removed-owned-hooks");
+
+        PlayerLoop.Current = Tree(); var failedHooks = new PhysicsBoundaryHooks(() => { }, () => { });
+        PlayerLoop.FailAfterWrite = true; bool setterRejected = false; try { failedHooks.Start(); } catch (InvalidOperationException) { setterRejected = true; }
+        Check(setterRejected && failedHooks.CleanupStatus == "removed-owned-hooks");
+        Check(Find(PlayerLoop.Current, typeof(Fixed)).subSystemList.Length == 2);
         Console.WriteLine("PlayerLoop: " + checks + " assertions passed.");
     }
 }

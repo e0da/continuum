@@ -1,34 +1,25 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
-using UnityEngine.LowLevel;
-using FixedLoop = UnityEngine.PlayerLoop.FixedUpdate;
 
 namespace KspContinuum
 {
     internal sealed class PhysicsBoundaryQualification : IDisposable
     {
-        sealed class BeforePhysicsHook { }
-        sealed class AfterPhysicsHook { }
         static PhysicsBoundaryQualification owner;
         readonly int thread = Thread.CurrentThread.ManagedThreadId;
-        readonly PlayerLoopSystem.UpdateFunction before;
-        readonly PlayerLoopSystem.UpdateFunction after;
-        readonly List<LifecycleOrderTrial> trials = new List<LifecycleOrderTrial>();
-        PlayerLoopSystem original;
-        PlayerLoopSystem target;
+        readonly System.Collections.Generic.List<LifecycleOrderTrial> trials = new System.Collections.Generic.List<LifecycleOrderTrial>();
+        readonly PhysicsBoundaryHooks hooks;
         GameObject probeObject;
         Rigidbody probe;
-        bool installed, active, finished, disposed, valid = true;
+        bool active, finished, disposed, valid = true;
         LifecycleOrderTrial current;
         public LifecycleOrderQualificationReport Report { get; private set; }
         public bool IsRunning { get { return active && !finished; } }
 
         public PhysicsBoundaryQualification()
         {
-            before = BeforePhysics;
-            after = AfterPhysics;
+            hooks = new PhysicsBoundaryHooks(BeforePhysics, AfterPhysics);
             Report = new LifecycleOrderQualificationReport {
                 unity = Application.unityVersion,
                 ksp = Versioning.version_major + "." + Versioning.version_minor + "." + Versioning.Revision,
@@ -39,23 +30,17 @@ namespace KspContinuum
         public void Start()
         {
             RequireThread();
-            if (installed || disposed) throw new InvalidOperationException("Physics-boundary qualification supports one installation.");
+            if (active || disposed) throw new InvalidOperationException("Physics-boundary qualification supports one installation.");
             if (owner != null) throw new InvalidOperationException("Another physics-boundary qualification owns the PlayerLoop.");
             owner = this;
             try
             {
-                original = Clone(PlayerLoop.GetCurrentPlayerLoop());
-                if (Count(original, n => n.type == typeof(FixedLoop.PhysicsFixedUpdate)) != 1)
-                    throw new InvalidOperationException("Expected one native physics target.");
-                var parent = FindDirectParent(original, typeof(FixedLoop.PhysicsFixedUpdate));
-                if (parent.type != typeof(FixedLoop)) throw new InvalidOperationException("Native physics target has an unexpected parent.");
                 probeObject = new GameObject("KSP Continuum physics-boundary qualification probe");
                 probeObject.hideFlags = HideFlags.HideAndDontSave;
                 probe = probeObject.AddComponent<Rigidbody>();
                 probe.useGravity = false; probe.drag = 0; probe.angularDrag = 0; probe.detectCollisions = false;
                 probe.constraints = RigidbodyConstraints.FreezeRotation;
-                var modified = Insert(original); target = Clone(Find(modified, typeof(FixedLoop.PhysicsFixedUpdate)));
-                installed = true; PlayerLoop.SetPlayerLoop(modified); active = true;
+                hooks.Start(); active = true;
                 Report.status = "running"; Report.integrityStatus = "installed-pending-observation";
                 Audit();
             }
@@ -103,12 +88,11 @@ namespace KspContinuum
         public void Audit()
         {
             RequireThread();
-            if (!installed || disposed || !valid) return;
+            if (disposed || !valid) return;
             try
             {
-                var loop = PlayerLoop.GetCurrentPlayerLoop();
-                if (!PreservesOriginal(loop, original) || CountCallbacks(loop, before) != 1 || CountCallbacks(loop, after) != 1
-                    || !Intact(loop)) Invalidate("Native physics target or owned bracket changed, moved, duplicated or removed.");
+                hooks.Audit();
+                if (!hooks.IsValid) Invalidate(hooks.Detail ?? "Native physics boundary became invalid.");
                 else Report.integrityStatus = "verified-at-every-boundary";
             }
             catch (Exception error) { Invalidate("Loop audit failed: " + error.GetType().Name); }
@@ -124,20 +108,11 @@ namespace KspContinuum
         {
             if (disposed) return;
             if (!finished && valid) Invalidate("Qualification interrupted before all trials completed.");
-            if (installed && valid) Audit();
+            if (valid) Audit();
             active = false; disposed = true;
             bool clean = true;
-            if (installed)
-            {
-                try
-                {
-                    int removed = 0; var latest = Strip(PlayerLoop.GetCurrentPlayerLoop(), ref removed);
-                    if (removed > 0) PlayerLoop.SetPlayerLoop(latest);
-                    var verified = PlayerLoop.GetCurrentPlayerLoop();
-                    clean = CountCallbacks(verified, before) == 0 && CountCallbacks(verified, after) == 0;
-                }
-                catch { clean = false; }
-            }
+            try { hooks.Dispose(); clean = hooks.CleanupStatus == "removed-owned-hooks"; }
+            catch { clean = false; }
             try { if (probeObject != null) UnityEngine.Object.Destroy(probeObject); }
             catch { clean = false; }
             probe = null; probeObject = null; if (owner == this) owner = null;
@@ -163,51 +138,6 @@ namespace KspContinuum
 
         void ClearEvidence() { Report.trials = new LifecycleOrderTrial[0]; Report.retainedTrials = 0; Report.qualificationId = null; }
         void RequireThread() { if (Thread.CurrentThread.ManagedThreadId != thread) throw new InvalidOperationException("Physics-boundary qualification changed threads."); }
-        bool Intact(PlayerLoopSystem root)
-        {
-            var parent = FindDirectParent(root, typeof(FixedLoop.PhysicsFixedUpdate)); var children = parent.subSystemList;
-            for (int i = 1; i + 1 < children.Length; i++) if (children[i].type == typeof(FixedLoop.PhysicsFixedUpdate))
-                return PreservesOriginal(children[i], target) && Hook(children[i - 1], before, typeof(BeforePhysicsHook))
-                    && Hook(children[i + 1], after, typeof(AfterPhysicsHook));
-            return false;
-        }
-        static bool Hook(PlayerLoopSystem node, PlayerLoopSystem.UpdateFunction callback, Type type) { return node.type == type && node.updateDelegate == callback && node.updateFunction == IntPtr.Zero && node.loopConditionFunction == IntPtr.Zero && (node.subSystemList == null || node.subSystemList.Length == 0); }
-        PlayerLoopSystem Insert(PlayerLoopSystem node)
-        {
-            if (node.subSystemList == null) return node; var children = new List<PlayerLoopSystem>();
-            foreach (var raw in node.subSystemList) { var child = Insert(raw); if (node.type == typeof(FixedLoop) && raw.type == typeof(FixedLoop.PhysicsFixedUpdate)) children.Add(new PlayerLoopSystem { type = typeof(BeforePhysicsHook), updateDelegate = before }); children.Add(child); if (node.type == typeof(FixedLoop) && raw.type == typeof(FixedLoop.PhysicsFixedUpdate)) children.Add(new PlayerLoopSystem { type = typeof(AfterPhysicsHook), updateDelegate = after }); }
-            node.subSystemList = children.ToArray(); return node;
-        }
-        PlayerLoopSystem Strip(PlayerLoopSystem node, ref int removed)
-        {
-            if (node.updateDelegate != null)
-            {
-                foreach (PlayerLoopSystem.UpdateFunction callback in node.updateDelegate.GetInvocationList())
-                    if (callback == before || callback == after) { node.updateDelegate -= callback; removed++; }
-            }
-            if (node.subSystemList != null)
-            {
-                var children = new List<PlayerLoopSystem>();
-                foreach (var child in node.subSystemList)
-                {
-                    var stripped = Strip(child, ref removed);
-                    bool emptyOwnedMarker = (stripped.type == typeof(BeforePhysicsHook) || stripped.type == typeof(AfterPhysicsHook))
-                        && stripped.updateDelegate == null && stripped.updateFunction == IntPtr.Zero
-                        && stripped.loopConditionFunction == IntPtr.Zero
-                        && (stripped.subSystemList == null || stripped.subSystemList.Length == 0);
-                    if (!emptyOwnedMarker) children.Add(stripped);
-                }
-                node.subSystemList = children.ToArray();
-            }
-            return node;
-        }
-        static bool PreservesOriginal(PlayerLoopSystem current, PlayerLoopSystem expected) { if (!SameHeader(current, expected)) return false; var wanted = expected.subSystemList; if (wanted == null || wanted.Length == 0) return true; var actual = current.subSystemList; if (actual == null) return false; int matched = 0; for (int i = 0; i < actual.Length && matched < wanted.Length; i++) if (actual[i].type == wanted[matched].type && PreservesOriginal(actual[i], wanted[matched])) matched++; return matched == wanted.Length; }
-        static bool SameHeader(PlayerLoopSystem a, PlayerLoopSystem b) { return a.type == b.type && a.updateDelegate == b.updateDelegate && a.updateFunction == b.updateFunction && a.loopConditionFunction == b.loopConditionFunction; }
-        static int CountCallbacks(PlayerLoopSystem node, PlayerLoopSystem.UpdateFunction callback) { int result = 0; if (node.updateDelegate != null) foreach (Delegate entry in node.updateDelegate.GetInvocationList()) if (entry.Equals(callback)) result++; if (node.subSystemList != null) foreach (var child in node.subSystemList) result += CountCallbacks(child, callback); return result; }
-        static int Count(PlayerLoopSystem node, Predicate<PlayerLoopSystem> predicate) { int result = predicate(node) ? 1 : 0; if (node.subSystemList != null) foreach (var child in node.subSystemList) result += Count(child, predicate); return result; }
-        static PlayerLoopSystem Find(PlayerLoopSystem node, Type type) { if (node.type == type) return node; if (node.subSystemList != null) foreach (var child in node.subSystemList) if (Count(child, n => n.type == type) > 0) return Find(child, type); throw new InvalidOperationException("Missing loop node."); }
-        static PlayerLoopSystem FindDirectParent(PlayerLoopSystem node, Type type) { if (node.subSystemList != null) { foreach (var child in node.subSystemList) if (child.type == type) return node; foreach (var child in node.subSystemList) if (Count(child, n => n.type == type) > 0) return FindDirectParent(child, type); } throw new InvalidOperationException("Missing loop parent."); }
-        static PlayerLoopSystem Clone(PlayerLoopSystem node) { if (node.subSystemList != null) { var children = new PlayerLoopSystem[node.subSystemList.Length]; for (int i = 0; i < children.Length; i++) children[i] = Clone(node.subSystemList[i]); node.subSystemList = children; } return node; }
         static double[] Vector(Vector3 value) { return new[] { (double)value.x, (double)value.y, (double)value.z }; }
     }
 }
