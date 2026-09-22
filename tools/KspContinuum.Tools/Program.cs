@@ -11,6 +11,7 @@ internal static class Program
             ["compare-inputs"] = CompareInputsCommand.Run,
             ["lifecycle-report"] = LifecycleReportCommand.Run,
             ["package"] = PackageCommand.Run,
+            ["profile-compare"] = ProfileCompareCommand.Run,
             ["qualification-report"] = QualificationReportCommand.Run,
             ["shadow-report"] = ShadowReportCommand.Run,
             ["space-program"] = SpaceProgramCommand.Run,
