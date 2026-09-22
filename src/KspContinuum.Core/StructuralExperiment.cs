@@ -194,6 +194,7 @@ namespace KspContinuum
             Require(!String.IsNullOrEmpty(report.injectionCallback) && !String.IsNullOrEmpty(report.observationCallback)
                 && !String.IsNullOrEmpty(report.lifecycleQualificationId),
                 "Installed callback qualification is missing.");
+            Require(report.lifecycleQualification != null, "Installed lifecycle qualification is missing.");
             LifecycleOrderQualification.Validate(report.lifecycleQualification);
             Require(report.lifecycleQualification.status == "qualified"
                 && (report.evidence == "portable-helper-fixture" && report.lifecycleQualification.evidence == "portable-helper-fixture"
@@ -237,6 +238,7 @@ namespace KspContinuum
                 "Structural body sample count is inconsistent.");
             ValidateBaselineAndInjection(report);
             ValidateAdmission(report);
+            Require(report.trace != null, "Structural trace is missing.");
             StructuralResponse.Validate(report.trace);
             Require(report.trace.evidence == report.evidence, "Structural trace provenance does not match its receipt.");
             Require(report.trace.topology == report.topology, "Structural trace topology does not match its receipt.");
@@ -333,7 +335,8 @@ namespace KspContinuum
                     && value.installedContactSentinels == 0 && value.removedContactSentinels == 0
                     && value.contactWindowFirstEpoch == -1 && value.contactWindowLastEpoch == -1
                     && value.contactObservationCount == 0 && value.detectedContactCount == 0
-                    && value.jointBreakCount == 0,
+                    && value.jointBreakCount == 0 && value.bodyASentinelTargetInstanceId == 0
+                    && value.bodyBSentinelTargetInstanceId == 0,
                     "Provisional structural capture contains contradictory contact evidence.");
             }
             Require(value.hookCleanupStatus == "removed-owned-hooks",

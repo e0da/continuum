@@ -123,7 +123,10 @@ static class Program
         provisional.admission.installedContactSentinels = provisional.admission.removedContactSentinels = 0;
         provisional.admission.contactWindowFirstEpoch = provisional.admission.contactWindowLastEpoch = -1;
         provisional.admission.contactObservationCount = 0;
+        provisional.admission.bodyASentinelTargetInstanceId = provisional.admission.bodyBSentinelTargetInstanceId = 0;
         StructuralExperiment.Validate(provisional); Check(true, "valid provisional capture rejected");
+        provisional.admission.bodyASentinelTargetInstanceId = 1;
+        Reject(() => StructuralExperiment.Validate(provisional), "provisional capture retained sentinel identity");
         var changed = Fixture(); changed.bodySamples[8].originEventCount++; Reject(() => StructuralExperiment.Validate(changed), "origin change accepted");
         changed = Fixture(); changed.bodySamples[8].fixedTimeSeconds += .001; Reject(() => StructuralExperiment.Validate(changed), "time drift accepted");
         changed = Fixture(); changed.trace.samples[8].physicsEpoch++; Reject(() => StructuralExperiment.Validate(changed), "epoch gap accepted");
@@ -136,6 +139,10 @@ static class Program
         changed = Fixture(); changed.experimentQualified = "true"; Reject(() => StructuralExperiment.Validate(changed), "capture claimed qualification");
         changed = Fixture(); changed.trace.evidence = "native-adapter-observation";
         Reject(() => StructuralExperiment.Validate(changed), "nested provenance mismatch accepted");
+        changed = Fixture(); changed.lifecycleQualification = null;
+        Reject(() => StructuralExperiment.Validate(changed), "missing lifecycle qualification accepted");
+        changed = Fixture(); changed.trace = null;
+        Reject(() => StructuralExperiment.Validate(changed), "missing structural trace accepted");
         changed = Fixture(); changed.lifecycleQualification.evidence = "native-isolated-rigidbody-observation";
         changed.lifecycleQualification.qualificationId = LifecycleOrderQualification.ComputeId(changed.lifecycleQualification);
         changed.lifecycleQualificationId = changed.lifecycleQualification.qualificationId;
