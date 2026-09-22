@@ -76,7 +76,15 @@ static class Program
         Check(!performance.candidateToBaselineAllocationRatio.HasValue && performance.allocationKind == "unavailable" && performance.allocationScope == "unavailable");
         candidatePerformance.workload.fixtureSha256 = new string('z', 64);
         Check(Reject(() => PerformanceObservations.Validate(candidatePerformance)));
-
+        baselinePerformance = Observation("scalar", new[] { double.MaxValue, double.MaxValue }, new long[] { 1, 1 });
+        candidatePerformance = Observation("simd", new[] { double.MaxValue, double.MaxValue }, new long[] { 1, 1 });
+        performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
+        Check(performance.baselineMedianMilliseconds == double.MaxValue && performance.speedup == 1);
+        candidatePerformance = Observation("simd", new[] { double.Epsilon, double.Epsilon }, new long[] { 1, 1 });
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        baselinePerformance = Observation("scalar", new[] { double.Epsilon, double.Epsilon }, new long[] { 1, 1 });
+        candidatePerformance = Observation("simd", new[] { double.MaxValue, double.MaxValue }, new long[] { 1, 1 });
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
         marker.summary = summary;
         var report = new ProbeReport { markers = new[] { marker }, frames = new[] { new ProfileFrame {
             contextFrame = 10, markerFrame = 10, observedFrame = 11, contextAligned = true, wallMilliseconds = 16.7,
@@ -165,9 +173,12 @@ static class Program
         var workload = new PerformanceWorkloadIdentity { system = "test-system", workload = "free-body",
             fixtureSha256 = new string('a', 64), configurationSha256 = new string('b', 64),
             items = 64, steps = 1, stepSeconds = 0.02 };
-        PerformancePhaseSamples Phase(double value) => new PerformancePhaseSamples {
-            milliseconds = new[] { value, value, value }, allocations = new PerformanceAllocationSamples {
-                available = true, kind = "managed-allocated-bytes", scope = "current-thread", bytes = new long[] { 0, 0, 0 } } };
+        PerformancePhaseSamples Phase(double value)
+        {
+            var milliseconds = new double[totals.Length]; Array.Fill(milliseconds, value);
+            return new PerformancePhaseSamples { milliseconds = milliseconds, allocations = new PerformanceAllocationSamples {
+                available = true, kind = "managed-allocated-bytes", scope = "current-thread", bytes = new long[totals.Length] } };
+        }
         return new PerformanceObservation { workload = workload, strategy = strategy, environmentSha256 = new string('c', 64),
             measurementProtocol = "test-clock-v1", sampleProtocol = "test-samples-v1",
             capture = Phase(0.1), pack = Phase(0.2), compute = Phase(0.5), synchronize = Phase(0), publish = Phase(0.2),

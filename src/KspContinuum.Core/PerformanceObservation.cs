@@ -103,6 +103,11 @@ namespace KspContinuum
             double candidateMedian = Median(candidate.total.milliseconds);
             if (baselineMedian <= 0 || candidateMedian <= 0)
                 throw new ArgumentException("Comparison requires positive total medians.");
+            double speedup = baselineMedian / candidateMedian;
+            double candidateToBaselineLatencyRatio = candidateMedian / baselineMedian;
+            double maximumRatio = 1 + maximumRegressionFraction;
+            if (!Finite(speedup) || !Finite(candidateToBaselineLatencyRatio) || !Finite(maximumRatio))
+                throw new ArgumentException("Performance comparison produced a nonfinite latency ratio.");
             double? allocationRatio = null;
             if (ComparableAllocations(baseline.total.allocations, candidate.total.allocations))
             {
@@ -110,6 +115,8 @@ namespace KspContinuum
                 double candidateAllocation = Median(candidate.total.allocations.bytes.Select(value => (double)value).ToArray());
                 allocationRatio = baselineAllocation == 0 ? (candidateAllocation == 0 ? 1 : null)
                     : candidateAllocation / baselineAllocation;
+                if (allocationRatio.HasValue && !Finite(allocationRatio.Value))
+                    throw new ArgumentException("Performance comparison produced a nonfinite allocation ratio.");
             }
             return new PerformanceComparison {
                 workload = candidate.workload,
@@ -121,12 +128,12 @@ namespace KspContinuum
                 samples = candidate.total.milliseconds.Length,
                 baselineMedianMilliseconds = baselineMedian,
                 candidateMedianMilliseconds = candidateMedian,
-                speedup = baselineMedian / candidateMedian,
+                speedup = speedup,
                 candidateToBaselineAllocationRatio = allocationRatio,
                 allocationKind = allocationRatio.HasValue ? candidate.total.allocations.kind : "unavailable",
                 allocationScope = allocationRatio.HasValue ? candidate.total.allocations.scope : "unavailable",
                 maximumRegressionFraction = maximumRegressionFraction,
-                withinMaximumRegression = candidateMedian <= baselineMedian * (1 + maximumRegressionFraction)
+                withinMaximumRegression = candidateToBaselineLatencyRatio <= maximumRatio
             };
         }
 
@@ -174,7 +181,11 @@ namespace KspContinuum
         {
             double[] sorted = (double[])values.Clone(); Array.Sort(sorted);
             int middle = sorted.Length / 2;
-            return sorted.Length % 2 == 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+            return sorted.Length % 2 == 0
+                ? sorted[middle - 1] + (sorted[middle] - sorted[middle - 1]) / 2
+                : sorted[middle];
         }
+
+        static bool Finite(double value) => !Double.IsNaN(value) && !Double.IsInfinity(value);
     }
 }
