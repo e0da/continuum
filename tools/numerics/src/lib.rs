@@ -2,6 +2,7 @@ pub mod curve;
 pub mod field;
 pub mod modal;
 pub mod execution_view;
+pub mod persistent_execution_view;
 
 use serde::Serialize;
 use std::{fs::OpenOptions, io::Write, path::Path};
