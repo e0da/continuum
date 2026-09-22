@@ -107,8 +107,10 @@ try
     File.WriteAllText(alteredCurve, alteredRoot.ToJsonString());
     Require(Run("aero-compare", alteredCurve) != 0, "curve parameters changed without a matching content address");
 
-    var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]); var package = Path.Combine(temporary, "continuum.zip"); var download = "https://packages.example.invalid/ksp-continuum.zip";
-    Require(Run("package", "--plugin", plugin, "--output", package, "--download-url", download) == 0, "package generation failed");
+    var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]);
+    var nativeLibrary = Path.Combine(temporary, "libcontinuum_native_boundary.dylib"); WriteMachO(nativeLibrary, 0x01000007);
+    var package = Path.Combine(temporary, "continuum.zip"); var download = "https://packages.example.invalid/ksp-continuum.zip";
+    Require(Run("package", "--plugin", plugin, "--native-library", nativeLibrary, "--output", package, "--download-url", download) == 0, "package generation failed");
     var packageMetadata = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(package, ".ckan")))!.AsObject();
     Require(packageMetadata["identifier"]!.ToString() == "KspContinuum", "package identifier changed");
     Require(packageMetadata["version"]!.ToString().StartsWith("0.2.0-aero.", StringComparison.Ordinal), "qualification package version is not above the installed 0.1.x line");
@@ -120,9 +122,17 @@ try
     Require(packageMetadata["download_size"]!.GetValue<long>() == new FileInfo(package).Length, "metadata archive size changed");
     Require(packageMetadata["download_hash"]!["sha256"]!.ToString() == Sha256(package).ToUpperInvariant(), "metadata does not bind exact archive with CKAN-compatible hash casing");
     Require(packageMetadata["download_hash"]!["sha1"]!.ToString().All(character => !char.IsLetter(character) || char.IsUpper(character)), "CKAN SHA-1 hash is not uppercase");
-    using (var packaged = ZipFile.OpenRead(package)) Require(!packaged.Entries.Any(entry => string.Equals(Path.GetFileName(entry.FullName), "0Harmony.dll", StringComparison.OrdinalIgnoreCase)), "package bundled Harmony runtime");
+    using (var packaged = ZipFile.OpenRead(package))
+    {
+        Require(!packaged.Entries.Any(entry => string.Equals(Path.GetFileName(entry.FullName), "0Harmony.dll", StringComparison.OrdinalIgnoreCase)), "package bundled Harmony runtime");
+        var native = packaged.GetEntry("GameData/KspContinuum/Plugins/libcontinuum_native_boundary.dylib") ?? throw new InvalidOperationException("package omitted native boundary");
+        using var nativeStream = native.Open(); using var nativeBytes = new MemoryStream(); nativeStream.CopyTo(nativeBytes);
+        var nativeManifest = packaged.GetEntry("GameData/KspContinuum/Plugins/libcontinuum_native_boundary.dylib.sha256") ?? throw new InvalidOperationException("package omitted native boundary hash");
+        using var reader = new StreamReader(nativeManifest.Open());
+        Require(reader.ReadToEnd() == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(nativeBytes.ToArray())).ToLowerInvariant() + "  libcontinuum_native_boundary.dylib\n", "native boundary hash does not bind packaged bytes");
+    }
     var localPackageHint = Path.Combine(temporary, "local-package.zip");
-    Require(Run("package", "--plugin", plugin, "--output", localPackageHint) == 0, "local package generation failed");
+    Require(Run("package", "--plugin", plugin, "--native-library", nativeLibrary, "--output", localPackageHint) == 0, "local package generation failed");
     var firstLocalArchive = Directory.GetFiles(temporary, "local-package-*.zip").Single();
     var firstLocalMetadata = Path.ChangeExtension(firstLocalArchive, ".ckan");
     var firstLocalHash = Sha256(firstLocalArchive);
@@ -130,7 +140,7 @@ try
     Require(Path.GetFileNameWithoutExtension(firstLocalArchive).EndsWith(firstLocalHash, StringComparison.Ordinal), "local archive name is not content-addressed");
     Require(firstLocalCkan["download"]!.ToString() == new Uri(firstLocalArchive).AbsoluteUri, "local metadata does not download its content-addressed archive");
     File.WriteAllBytes(plugin, [7, 8, 9]);
-    Require(Run("package", "--plugin", plugin, "--output", localPackageHint) == 0, "changed local package generation failed");
+    Require(Run("package", "--plugin", plugin, "--native-library", nativeLibrary, "--output", localPackageHint) == 0, "changed local package generation failed");
     var localArchives = Directory.GetFiles(temporary, "local-package-*.zip").Order().ToArray();
     Require(localArchives.Length == 2, "changed package bytes reused or replaced the prior local archive path");
     Require(localArchives.All(path => File.Exists(Path.ChangeExtension(path, ".ckan"))), "content-addressed archive is missing sibling metadata");
@@ -144,8 +154,12 @@ try
         Require(localCkan["download_hash"]!["sha256"]!.ToString() == localHash.ToUpperInvariant(), "local metadata hash does not match its named archive");
     }
     var rejectedPackage = Path.Combine(temporary, "invalid-download.zip");
-    Require(Run("package", "--plugin", plugin, "--output", rejectedPackage, "--download-url", "relative/package.zip") != 0 && !File.Exists(rejectedPackage), "package accepted a relative download URL");
-    Require(Run("package", "--plugin", plugin, "--output", rejectedPackage, "--download-url", "ftp://packages.example.invalid/continuum.zip") != 0 && !File.Exists(rejectedPackage), "package accepted an unsupported download URL scheme");
+    Require(Run("package", "--plugin", plugin, "--native-library", nativeLibrary, "--output", rejectedPackage, "--download-url", "relative/package.zip") != 0 && !File.Exists(rejectedPackage), "package accepted a relative download URL");
+    Require(Run("package", "--plugin", plugin, "--native-library", nativeLibrary, "--output", rejectedPackage, "--download-url", "ftp://packages.example.invalid/continuum.zip") != 0 && !File.Exists(rejectedPackage), "package accepted an unsupported download URL scheme");
+    var armLibrary = Path.Combine(temporary, "arm64.dylib"); WriteMachO(armLibrary, 0x0100000c);
+    Require(Run("package", "--plugin", plugin, "--native-library", armLibrary, "--output", rejectedPackage) != 0 && !File.Exists(rejectedPackage), "package accepted an arm64 native boundary for x86_64 KSP");
+    var executable = Path.Combine(temporary, "executable"); WriteMachO(executable, 0x01000007, 2);
+    Require(Run("package", "--plugin", plugin, "--native-library", executable, "--output", rejectedPackage) != 0 && !File.Exists(rejectedPackage), "package accepted a Mach-O executable as its native library");
     Console.WriteLine("KspContinuum.Tools.Tests passed"); return 0;
 }
 finally { Directory.Delete(temporary, true); }
@@ -153,6 +167,7 @@ finally { Directory.Delete(temporary, true); }
 int Run(params string[] arguments) { var start = new ProcessStartInfo("dotnet") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true }; start.ArgumentList.Add("run"); start.ArgumentList.Add("--project"); start.ArgumentList.Add(project); start.ArgumentList.Add("-c"); start.ArgumentList.Add("Release"); start.ArgumentList.Add("--no-build"); start.ArgumentList.Add("--"); foreach (var argument in arguments) start.ArgumentList.Add(argument); using var process = Process.Start(start)!; process.WaitForExit(); if (process.ExitCode != 0) Console.Error.Write(process.StandardError.ReadToEnd()); return process.ExitCode; }
 void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 string FindRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current is not null && !File.Exists(Path.Combine(current.FullName, "README.md"))) current = current.Parent; return current?.FullName ?? throw new InvalidOperationException("repository root not found"); }
+void WriteMachO(string path, uint cpuType, uint fileType = 6) { var bytes = new byte[32]; System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes, 0xfeedfacf); System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), cpuType); System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(12), fileType); File.WriteAllBytes(path, bytes); }
 AeroCaptureReport AeroReceipt(string version, string sessionId = "00000000-0000-0000-0000-000000000001", int sampleCount = 1)
 {
     const string hash = "8a20892953fc14c02f352b393eb6712c665156d94a7d846d16c20a7de3e22f27";

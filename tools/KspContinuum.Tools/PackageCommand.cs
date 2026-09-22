@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace KspContinuum.Tools;
@@ -14,6 +16,8 @@ internal static class PackageCommand
         var mission = parsed.Has("--mission");
         var plugin = parsed.Optional("--plugin") ?? Path.Combine(root, "src/KspContinuum.Plugin/bin/Release/net472/KspContinuum.dll");
         Tooling.Require(File.Exists(plugin), "Build the Release plugin first.");
+        var nativeLibrary = parsed.Optional("--native-library") ?? Path.Combine(root, "tools/native-boundary/target/x86_64-apple-darwin/release/libcontinuum_native_boundary.dylib");
+        VerifyX86_64MachO(nativeLibrary);
         var addon = parsed.Optional("--mission-addon") ?? Path.Combine(root, "src/KspContinuum.Mission/bin/Release/net48/KspContinuum.Mission.dll");
         Tooling.Require(!mission || File.Exists(addon), "Build the Release mission addon first.");
         var outputHint = Path.GetFullPath(parsed.Optional("--output") ?? Path.Combine(root, "artifacts", mission ? "ksp-continuum-0.2.0-mission.zip" : "ksp-continuum-0.2.0-experiment.zip"));
@@ -28,6 +32,8 @@ internal static class PackageCommand
             using (var archive = ZipFile.Open(staging, ZipArchiveMode.Create))
             {
                 Add(archive, plugin, "GameData/KspContinuum/Plugins/KspContinuum.dll");
+                Add(archive, nativeLibrary, "GameData/KspContinuum/Plugins/libcontinuum_native_boundary.dylib");
+                AddText(archive, Tooling.Sha256(nativeLibrary) + "  libcontinuum_native_boundary.dylib\n", "GameData/KspContinuum/Plugins/libcontinuum_native_boundary.dylib.sha256");
                 if (mission) Add(archive, addon, "GameData/KspContinuum/Plugins/KspContinuum.Mission.dll");
                 Add(archive, Path.Combine(root, "README.md"), "GameData/KspContinuum/README.md");
                 foreach (var name in Docs) Add(archive, Path.Combine(root, "docs", name), "GameData/KspContinuum/docs/" + name);
@@ -55,6 +61,23 @@ internal static class PackageCommand
     {
         Tooling.Require(File.Exists(source), "missing package input: " + source);
         archive.CreateEntryFromFile(source, destination, CompressionLevel.Optimal);
+    }
+
+    private static void AddText(ZipArchive archive, string value, string destination)
+    {
+        using var writer = new StreamWriter(archive.CreateEntry(destination, CompressionLevel.Optimal).Open(), new UTF8Encoding(false));
+        writer.Write(value);
+    }
+
+    private static void VerifyX86_64MachO(string path)
+    {
+        Tooling.Require(File.Exists(path), "Build the x86_64 native boundary first: cargo build --release --target x86_64-apple-darwin --manifest-path tools/native-boundary/Cargo.toml");
+        using var stream = File.OpenRead(path);
+        Span<byte> header = stackalloc byte[16];
+        Tooling.Require(stream.Read(header) == header.Length, "native boundary is not a Mach-O dylib");
+        Tooling.Require(BinaryPrimitives.ReadUInt32LittleEndian(header) == 0xfeedfacf, "native boundary must be a little-endian 64-bit Mach-O dylib");
+        Tooling.Require(BinaryPrimitives.ReadUInt32LittleEndian(header[4..]) == 0x01000007, "native boundary must target x86_64 for KSP 1.12.5 on macOS");
+        Tooling.Require(BinaryPrimitives.ReadUInt32LittleEndian(header[12..]) == 6, "native boundary Mach-O must be a dynamically linked shared library");
     }
 
     private static void VerifyArchive(string path)
