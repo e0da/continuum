@@ -61,7 +61,7 @@ namespace KspContinuum
                     throw new InvalidOperationException("native and managed results differ");
                 rows.Add(new NativeBoundaryMonoRow
                 {
-                    bodies = count, steps = stepCount, managed = managedTiming, native = nativeTiming,
+                    bodies = count, steps = checked((int)stepCount), managed = managedTiming, native = nativeTiming,
                     managedToNativeRatio = managedTiming.medianNanoseconds / nativeTiming.medianNanoseconds
                 });
             }
@@ -161,22 +161,4 @@ namespace KspContinuum
         }
     }
 
-    public sealed class NativeBoundaryMonoTiming
-    {
-        public double medianNanoseconds, p95Nanoseconds, nanosecondsPerBodyAtMedian;
-    }
-    public sealed class NativeBoundaryMonoRow
-    {
-        public int bodies; public uint steps;
-        public NativeBoundaryMonoTiming managed, native;
-        public double managedToNativeRatio;
-    }
-    public sealed class NativeBoundaryMonoReport
-    {
-        public string schema, runtime, processArchitecture, operatingSystem, scope;
-        public int samplesPerCase, warmupsPerCase;
-        public double stepSeconds;
-        public NativeBoundaryMonoTiming noop;
-        public NativeBoundaryMonoRow[] rows;
-    }
 }

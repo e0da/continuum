@@ -95,6 +95,19 @@ static class Program
                 count++;
                 Near(0, json.RootElement.GetProperty("markers")[0].GetProperty("blocks").GetArrayLength());
             }
+            using (var json = JsonDocument.Parse(ReportJson.Encode(new NativeBoundaryMonoReport {
+                schema = "continuum-native-boundary-mono/v1", samplesPerCase = 101, warmupsPerCase = 12,
+                stepSeconds = 1.0 / 60.0, noop = new NativeBoundaryMonoTiming { medianNanoseconds = 42 },
+                rows = new[] { new NativeBoundaryMonoRow { bodies = 256, steps = 4,
+                    managed = new NativeBoundaryMonoTiming { medianNanoseconds = 900 },
+                    native = new NativeBoundaryMonoTiming { medianNanoseconds = 450 }, managedToNativeRatio = 2 } } })))
+            {
+                if (json.RootElement.GetProperty("schema").GetString() != "continuum-native-boundary-mono/v1" ||
+                    json.RootElement.GetProperty("rows")[0].GetProperty("steps").GetInt32() != 4 ||
+                    json.RootElement.GetProperty("rows")[0].GetProperty("native").GetProperty("medianNanoseconds").GetDouble() != 450)
+                    throw new Exception("Native-boundary Mono receipt changed");
+                count++;
+            }
             Reject(() => ReportJson.Encode(new Sample { millisecondsPerStep = double.NaN }));
             Reject(() => ReportJson.Encode(new object()));
         }

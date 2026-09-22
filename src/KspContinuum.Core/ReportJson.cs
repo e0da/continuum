@@ -86,7 +86,9 @@ namespace KspContinuum
                 type != typeof(StructuralVesselAttachmentRow) && type != typeof(StructuralVesselCandidateSummary) &&
                 type != typeof(StructuralVesselCaptureContextReport) &&
                 type != typeof(LiveControlIdentity) && type != typeof(LiveVesselSnapshot) &&
-                type != typeof(LiveControlReply))
+                type != typeof(LiveControlReply) &&
+                type != typeof(NativeBoundaryMonoReport) && type != typeof(NativeBoundaryMonoRow) &&
+                type != typeof(NativeBoundaryMonoTiming))
                 throw new ArgumentException("Unsupported report type: " + type.FullName);
             output.Append('{'); bool firstField = true;
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
