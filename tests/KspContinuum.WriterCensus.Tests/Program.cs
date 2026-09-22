@@ -138,6 +138,29 @@ static class Program
         Check(canary.CandidateCallback(10)); Check(canary.Observe(Snapshot(), Snapshot(), unchanged)); canary.Restored("cleanup-error");
         Check(canaryReport.status == "invalid" && canaryReport.reason == "native-node-restoration-failed");
 
+        var dynamicsReport = new PhysicsDynamicsCanaryReport();
+        var dynamics = new PhysicsDynamicsCanary(dynamicsReport);
+        var dynamicsBefore = Snapshot(); var dynamicsAfter = Snapshot(secondVelocity: 3.1);
+        var changed = Run(dynamicsBefore, dynamicsAfter).Report;
+        dynamics.Admit(dynamicsBefore); dynamics.Installed(); Check(dynamics.Enter(dynamicsBefore));
+        Check(dynamics.CandidateCallback(12));
+        Check(dynamics.CandidateContext(dynamicsBefore));
+        dynamics.Published(2, .02, new Vec(0, -9.81, 0), .1, .2, .3, 0, 0);
+        dynamics.Restored("native-node-restored");
+        Check(dynamics.Observe(dynamicsBefore, dynamicsAfter, changed));
+        Check(dynamicsReport.status == "observed-bounded-dynamics" && dynamicsReport.publicationStatus == "verified-readback");
+        Check(dynamicsReport.bodiesWritten == 2 && dynamicsReport.callbackMilliseconds == .3);
+        Check(dynamics.CandidateCallback(12) && dynamicsReport.candidateCallbacks == 2);
+        using (var json = JsonDocument.Parse(ReportJson.Encode(dynamicsReport)))
+            Check(json.RootElement.GetProperty("schema").GetString() == "ksp-continuum-physics-dynamics-canary/v1");
+
+        dynamicsReport = new PhysicsDynamicsCanaryReport(); dynamics = new PhysicsDynamicsCanary(dynamicsReport);
+        dynamics.Admit(Snapshot()); dynamics.Installed(); Check(dynamics.Enter(Snapshot())); Check(dynamics.CandidateCallback(1));
+        Check(dynamics.CandidateContext(Snapshot()));
+        dynamics.Published(2, .02, new Vec(0, -9.81, 0), 0, 0, 0, 0, 0);
+        dynamics.Restored("native-node-restored"); Check(!dynamics.Observe(Snapshot(), Snapshot(), unchanged));
+        Check(dynamicsReport.reason == "candidate-produced-no-observable-dynamics");
+
         Console.WriteLine("WriterCensus: " + checks + " assertions passed.");
     }
 }

@@ -82,6 +82,7 @@ namespace KspContinuum
         public WriterCensusReport writerCensus;
         public ForceObservationReport partForces;
         public PhysicsSubstitutionCanaryReport substitutionCanary;
+        public PhysicsDynamicsCanaryReport dynamicsCanary;
     }
 
     [Serializable] public sealed class PhysicsSubstitutionCanaryReport
@@ -95,5 +96,23 @@ namespace KspContinuum
         public Vec frameVelocity;
         public WriterCensusSnapshot before, after;
         public WriterCensusReport skippedInterval;
+    }
+
+    [Serializable] public sealed class PhysicsDynamicsCanaryReport
+    {
+        public string schema = "ksp-continuum-physics-dynamics-canary/v1";
+        public string status = "not-started";
+        public string limitation = "A contact-free active vessel is approximated as one rigid cluster under frozen central gravity for only the native physics callbacks already cached in one render frame. This does not cover thrust, aerodynamics, contacts, robotics, joint flex, other loaded vessels, or sustained trajectory parity.";
+        public string reason, vesselId, topologyKey, installationStatus = "not-installed",
+            restorationStatus = "not-attempted", publicationStatus = "not-attempted";
+        public int candidateCallbacks, candidateFrame = -1, bodiesWritten;
+        public long originGeneration;
+        public Vec frameVelocity, acceleration;
+        public double stepSeconds, computeMilliseconds, publicationMilliseconds,
+            callbackMilliseconds, maxPositionReadbackErrorMeters,
+            maxVelocityReadbackErrorMetersPerSecond, maxRotationReadbackErrorDegrees,
+            maxAngularVelocityReadbackErrorRadiansPerSecond;
+        public WriterCensusSnapshot before, after;
+        public WriterCensusReport substitutedInterval;
     }
 }

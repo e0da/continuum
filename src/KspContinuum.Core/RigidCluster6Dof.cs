@@ -182,6 +182,15 @@ namespace KspContinuum
             return new RigidCluster6Dof(TotalMass, nextCenter, nextOrientation, LinearMomentum, AngularMomentum, localInertia, members);
         }
 
+        public RigidCluster6Dof AdvanceFrozenAcceleration(Vec acceleration, double stepSeconds)
+        {
+            Validate(acceleration); AssemblyModel.Positive(stepSeconds);
+            Vec halfImpulse = acceleration * (TotalMass * stepSeconds * .5);
+            RigidCluster6Dof halfKicked = ApplyImpulse(CenterOfMass, halfImpulse);
+            RigidCluster6Dof advanced = halfKicked.Advance(stepSeconds);
+            return advanced.ApplyImpulse(advanced.CenterOfMass, halfImpulse);
+        }
+
         public IReadOnlyList<RigidPose6Dof> Reconstruct()
         {
             var result = new RigidPose6Dof[members.Length];

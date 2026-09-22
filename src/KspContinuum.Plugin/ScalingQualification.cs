@@ -97,6 +97,14 @@ namespace KspContinuum
                  report.substitutionCanary.restorationStatus != "native-node-restored" ||
                  report.substitutionCanary.candidateCallbacks < 1 || report.substitutionCanary.candidateCallbacks > 4))
             { reason = "physics-substitution-canary-invalid"; return false; }
+            if (report.dynamicsCanary != null &&
+                (report.dynamicsCanary.status != "observed-bounded-dynamics" ||
+                 report.dynamicsCanary.installationStatus != "candidate-installed" ||
+                 report.dynamicsCanary.restorationStatus != "native-node-restored" ||
+                 report.dynamicsCanary.publicationStatus != "verified-readback" ||
+                 report.dynamicsCanary.candidateCallbacks < 1 || report.dynamicsCanary.candidateCallbacks > 4 ||
+                 report.dynamicsCanary.bodiesWritten < 1))
+            { reason = "physics-dynamics-canary-invalid"; return false; }
             return true;
         }
 
