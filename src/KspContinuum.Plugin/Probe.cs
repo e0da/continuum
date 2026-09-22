@@ -22,6 +22,7 @@ namespace KspContinuum
         ProbeReport report;
         PlayerLoopTiming playerLoop;
         ActiveVesselWriterCensus writerCensus;
+        ActiveVesselPhysicsSubstitutionCanary substitutionCanary;
         PartForceObservation partForces;
         Action<ProbeReport> completion;
         bool started, finished;
@@ -53,17 +54,29 @@ namespace KspContinuum
                     report.markers[i] = row;
                     Acquire(row);
                 }
-                if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-playerloop") >= 0 ||
-                    Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-writer-census") >= 0)
+                string[] arguments = Environment.GetCommandLineArgs();
+                string canaryReason;
+                bool canaryRequested = ActiveVesselPhysicsSubstitutionCanary.RequestedAndQualified(arguments, out canaryReason);
+                if (canaryRequested && canaryReason != null)
                 {
-                    if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-writer-census") >= 0)
-                    {
-                        writerCensus = new ActiveVesselWriterCensus();
-                        report.writerCensus = writerCensus.Census.Report;
-                    }
-                    playerLoop = new PlayerLoopTiming(writerCensus == null ? null : writerCensus.Census);
-                    playerLoop.Start();
-                    report.playerLoop = playerLoop.Report;
+                    report.substitutionCanary = new PhysicsSubstitutionCanaryReport { status = "invalid", reason = canaryReason };
+                    throw new InvalidOperationException(canaryReason);
+                }
+                if (Array.IndexOf(arguments, "--continuum-writer-census") >= 0)
+                {
+                    writerCensus = new ActiveVesselWriterCensus(); report.writerCensus = writerCensus.Census.Report;
+                }
+                if (canaryRequested)
+                {
+                    substitutionCanary = new ActiveVesselPhysicsSubstitutionCanary(writerCensus);
+                    report.substitutionCanary = substitutionCanary.Report;
+                }
+                if (Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null)
+                {
+                    IPlayerLoopBracketObserver observer = writerCensus == null ? null : writerCensus.Census;
+                    if (substitutionCanary != null) observer = new CompositePlayerLoopObserver(observer, substitutionCanary);
+                    playerLoop = new PlayerLoopTiming(observer); playerLoop.Start(); report.playerLoop = playerLoop.Report;
+                    if (substitutionCanary != null) substitutionCanary.Start();
                 }
                 if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-part-forces") >= 0)
                 {
@@ -174,6 +187,12 @@ namespace KspContinuum
             if (finished) return;
             finished = true;
             var errors = new List<string>();
+            if (substitutionCanary != null)
+            {
+                try { substitutionCanary.Dispose(); }
+                catch (Exception error) { errors.Add("SubstitutionCanary: " + error.GetType().Name); }
+                substitutionCanary = null;
+            }
             if (playerLoop != null)
             {
                 try { playerLoop.Dispose(); }

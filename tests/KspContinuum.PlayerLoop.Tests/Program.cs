@@ -8,6 +8,14 @@ using Late = UnityEngine.PlayerLoop.PreLateUpdate;
 
 static class Program
 {
+    sealed class RecordingObserver : IPlayerLoopBracketObserver
+    {
+        readonly string name; readonly System.Collections.Generic.List<string> events;
+        public RecordingObserver(string name, System.Collections.Generic.List<string> events) { this.name = name; this.events = events; }
+        public void Before(string scope, int frame, double time) { if (scope == typeof(Fixed.PhysicsFixedUpdate).FullName) events.Add(name + "-before"); }
+        public void After(string scope, int frame, double time) { if (scope == typeof(Fixed.PhysicsFixedUpdate).FullName) events.Add(name + "-after"); }
+        public void Fault(string scope, Exception error) { events.Add(name + "-fault"); }
+    }
     static int checks;
     static void Check(bool ok) { checks++; if (!ok) throw new Exception("PlayerLoop assertion " + checks); }
     static PlayerLoopSystem Native(Type type) { return new PlayerLoopSystem { type = type, updateFunction = (IntPtr)37, loopConditionFunction = (IntPtr)42 }; }
@@ -102,6 +110,14 @@ static class Program
         Check(substitution.CleanupStatus == "native-node-restored");
         Check(Find(PlayerLoop.Current, typeof(Fixed.PhysicsFixedUpdate)).updateFunction == (IntPtr)37);
         DispatchPhysics(PlayerLoop.Current); Check(candidateCalls == 1);
+
+        PlayerLoop.Current = Tree(); var events = new System.Collections.Generic.List<string>();
+        capture = new PlayerLoopTiming(new CompositePlayerLoopObserver(new RecordingObserver("a", events), new RecordingObserver("b", events)));
+        capture.Start(); substitution = null;
+        substitution = new PhysicsBoundarySubstitution(() => { events.Add("candidate"); substitution.Dispose(); }); substitution.Start();
+        DispatchPhysics(PlayerLoop.Current); capture.Dispose();
+        Check(string.Join(",", events) == "a-before,b-before,candidate,a-after,b-after");
+        Check(substitution.CleanupStatus == "native-node-restored" && Find(PlayerLoop.Current, typeof(Fixed.PhysicsFixedUpdate)).updateFunction == (IntPtr)37);
 
         PlayerLoop.Current = Tree(); substitution = new PhysicsBoundarySubstitution(() => { }); substitution.Start();
         current = PlayerLoop.Current; current.subSystemList[0].subSystemList[1].updateDelegate += () => { }; PlayerLoop.Current = current;

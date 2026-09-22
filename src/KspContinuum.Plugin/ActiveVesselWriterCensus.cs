@@ -81,6 +81,8 @@ namespace KspContinuum
             };
         }
 
+        internal WriterCensusSnapshot Snapshot() { return Capture(); }
+
         static Rigidbody Body(Part part)
         {
             if (part == null) return null;

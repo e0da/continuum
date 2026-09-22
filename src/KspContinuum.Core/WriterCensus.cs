@@ -34,7 +34,7 @@ namespace KspContinuum
             maximumInternalVelocityDelta, maximumInternalAngularVelocityDelta;
     }
 
-    public sealed class WriterCensusSnapshot
+    [Serializable] public sealed class WriterCensusSnapshot
     {
         public string vesselId, topologyKey;
         public long originGeneration;
@@ -42,7 +42,7 @@ namespace KspContinuum
         public WriterCensusBody[] bodies;
     }
 
-    public sealed class WriterCensusBody
+    [Serializable] public sealed class WriterCensusBody
     {
         public string id;
         public Vec relativePosition, normalizedVelocity, angularVelocity;
