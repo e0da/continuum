@@ -845,6 +845,8 @@ static class Program
         ShadowPhysicalInput.Validate(physical);
         Check(true, "valid structural link rejected");
         Check(ReportJson.Encode(physical).Contains("\"breakForceStatus\":\"unbreakable\""), "structural link did not serialize");
+        Check(StructuralThreshold.Status(double.PositiveInfinity) == "unbreakable"
+            && StructuralThreshold.Value(double.PositiveInfinity) == 0, "unbreakable threshold canonicalization");
         physical.firstAcceptedLinks[0].connectedBodyId = 0;
         Reject(() => ShadowPhysicalInput.Validate(physical));
         ShadowPhysicalInput.Validate(

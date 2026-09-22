@@ -453,7 +453,10 @@ namespace KspContinuum
                     .Append(joint.GetType().FullName).Append(':')
                     .Append(host == null ? 0 : host.GetInstanceID()).Append(':')
                     .Append(joint.connectedBody == null ? 0 : joint.connectedBody.GetInstanceID()).Append(':')
-                    .Append(F(joint.breakForce)).Append(':').Append(F(joint.breakTorque)).Append(':')
+                    .Append(StructuralThreshold.Status(joint.breakForce)).Append(':')
+                    .Append(F(StructuralThreshold.Value(joint.breakForce))).Append(':')
+                    .Append(StructuralThreshold.Status(joint.breakTorque)).Append(':')
+                    .Append(F(StructuralThreshold.Value(joint.breakTorque))).Append(':')
                     .Append(joint.enableCollision).Append(':').Append(joint.enablePreprocessing).Append(':')
                     .Append(F(joint.massScale)).Append(':').Append(F(joint.connectedMassScale));
                 Append(signature, joint.anchor); Append(signature, joint.connectedAnchor); Append(signature, joint.axis);
@@ -546,8 +549,8 @@ namespace KspContinuum
                     nativeInstanceId = joint.GetInstanceID(), bodyId = hostId, connectedBodyId = connectedId,
                     jointType = joint.GetType().FullName, anchor = A(joint.anchor), connectedAnchor = A(joint.connectedAnchor),
                     axis = A(joint.axis), secondaryAxis = A(joint is ConfigurableJoint ? ((ConfigurableJoint)joint).secondaryAxis : Vector3.zero),
-                    breakForce = ThresholdValue(joint.breakForce), breakTorque = ThresholdValue(joint.breakTorque),
-                    breakForceStatus = ThresholdStatus(joint.breakForce), breakTorqueStatus = ThresholdStatus(joint.breakTorque),
+                    breakForce = StructuralThreshold.Value(joint.breakForce), breakTorque = StructuralThreshold.Value(joint.breakTorque),
+                    breakForceStatus = StructuralThreshold.Status(joint.breakForce), breakTorqueStatus = StructuralThreshold.Status(joint.breakTorque),
                     collisionEnabled = joint.enableCollision,
                     preprocessingEnabled = joint.enablePreprocessing, massScale = joint.massScale,
                     connectedMassScale = joint.connectedMassScale,
@@ -555,9 +558,6 @@ namespace KspContinuum
             }
             return links.ToArray();
         }
-
-        static double ThresholdValue(float value) { return Single.IsPositiveInfinity(value) ? 0 : value; }
-        static string ThresholdStatus(float value) { return Single.IsPositiveInfinity(value) ? "unbreakable" : "finite"; }
 
         static double Distance(Vec a, Vec b)
         {

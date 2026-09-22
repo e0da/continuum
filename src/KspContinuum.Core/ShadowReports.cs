@@ -1,5 +1,24 @@
+using System;
+
 namespace KspContinuum
 {
+    public static class StructuralThreshold
+    {
+        public static double Value(double value)
+        {
+            if (Double.IsPositiveInfinity(value)) return 0;
+            if (Double.IsNaN(value) || Double.IsInfinity(value) || value < 0)
+                throw new ArgumentOutOfRangeException("value");
+            return value;
+        }
+
+        public static string Status(double value)
+        {
+            Value(value);
+            return Double.IsPositiveInfinity(value) ? "unbreakable" : "finite";
+        }
+    }
+
     public sealed class ShadowReport
     {
         public string evidence = "native-adapter-observation";
