@@ -6,7 +6,7 @@ This standalone experiment calls Jolt's synchronous `PhysicsSystem::Update` on t
 
 ## Build and run
 
-Requirements: CMake 3.24+, a C++17 compiler, Python 3, and network access for the first source download. Ninja is optional if another single-configuration generator is selected. Run from the repository root:
+Requirements: CMake 3.24+, a C++17 compiler, and network access for the first source download. Ninja is optional if another single-configuration generator is selected. Run from the repository root:
 
 ```sh
 cmake -S tools/structural-bench -B artifacts/structural-bench/build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -16,22 +16,7 @@ ctest --test-dir artifacts/structural-bench/build --output-on-failure
 
 CMake downloads Jolt v5.6.0, commit `e77f175595e64cb44218cc9d9d56fc365ad0e36a`, and verifies archive SHA-256 `1f32328fb763135de10a244568d6ccb2ed9b1e6593fafe6dc6db5b2719d330bd`. Downloaded sources and compiled products remain in ignored `artifacts/`; there is no vendored source or install target. CMake rejects build directories outside the repository's artifacts directory. This pins inputs and selected options, not bit-for-bit binary reproducibility across toolchains.
 
-The executable takes no arguments and writes JSON to stdout. Preserve a unique report without overwriting earlier evidence:
-
-```sh
-python3 - <<'PY'
-import datetime, pathlib, subprocess
-result = subprocess.run(['artifacts/structural-bench/build/continuum-structural'], capture_output=True)
-stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-destination = pathlib.Path('artifacts/structural-bench') / ('jolt-' + stamp + '.json')
-with destination.open('xb') as output:
-    output.write(result.stdout)
-print(destination)
-if result.stderr:
-    print(result.stderr.decode(), end='')
-raise SystemExit(result.returncode)
-PY
-```
+The executable takes no arguments and writes JSON to stdout. The Rust task runner executes it and validates the resulting report. Preserve separately named reports under `artifacts/structural-bench/` when retaining local evidence.
 
 Exit 0 means all three repetitions of the finest oscillator configuration and the drop meet their frozen criteria. Exit 2 means the completed report failed that qualification; coarser configurations may fail without making the whole experiment fail. Exit 1 reports an execution/configuration error on stderr. A report file from an execution error is not necessarily valid JSON. Keep failure evidence rather than interpreting every created file as a successful receipt.
 
@@ -48,7 +33,7 @@ q(t) = q0 * exp(-a*t) * (cos(w*t) + a/w*sin(w*t))
 v(t) = -q0 * (k/mu)/w * exp(-a*t) * sin(w*t)
 ```
 
-The source computes errors; the Python test independently recomputes this oracle from raw output and verifies every summary and pass flag. The chosen law includes genuine elastic motion and damping. Error means disagreement with that motion, not failure to keep the joint rigid.
+The source computes errors; the Rust task runner independently recomputes this oracle from raw output and verifies every summary and pass flag. The chosen law includes genuine elastic motion and damping. Error means disagreement with that motion, not failure to keep the joint rigid.
 
 Each run advances 250 nominal 0.02-second macro steps (approximately five seconds). Jolt receives a float timestep. Collision-step settings 1, 2, 4, 8 and 16 subdivide each update, keeping physical parameters and solver iterations fixed: 10 velocity iterations and 2 position iterations. All Jolt physics settings not explicitly changed retain the pinned release defaults. Positions use double precision; local solver arithmetic still uses floats. The build enables deterministic compiler settings, disables assertions, LTO, renderer/profiler and GPU backends, and uses `JobSystemSingleThreaded` with zero worker threads. This does not test multicore scaling or prove cross-platform determinism.
 

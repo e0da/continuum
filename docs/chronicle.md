@@ -120,7 +120,7 @@ dotnet run --project tools/KspContinuum.Tools -c Release -- space-program \
   --output artifacts/space-program/site
 ```
 
-Serve the archive root and open `/site/index.html`; attempt pages link back to immutable reports alongside `site/`. For example, `python3 -m http.server 18762 --bind 127.0.0.1 --directory artifacts/space-program` keeps both the connected routes and original-report links available on the local machine. Serving only the `site/` directory leaves those original-report links outside the server root.
+Serve the archive root with a static file server and open `/site/index.html`; attempt pages link back to immutable reports alongside `site/`. Serving only the `site/` directory leaves those original-report links outside the server root.
 
 New chronicle manifests bind `telemetry.html` to the hashed `mission/mission.csv` source and record the generated player hash and row count. Archive and connected-site generators validate that descriptor before linking or copying it. Older manifests without the additive descriptor remain valid and simply have no playback link. The connected site adds its shared navigation to a derived player copy; `site-manifest.json` records both the immutable source-player hash and the navigation-enhanced output hash.
 

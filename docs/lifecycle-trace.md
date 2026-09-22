@@ -46,7 +46,7 @@ The output path must be new. The reader rejects malformed or oversized input and
 
 ```sh
 dotnet run --project tests/KspContinuum.LifecycleTrace.Tests -c Release
-python3 -m unittest discover -s tests -p test_lifecycle_report.py -v
+dotnet run --project tests/KspContinuum.Tools.Tests -c Release
 ```
 
 The portable capture test can export an explicitly labeled fixture with `--export-fixture NEW_PATH`. That fixture verifies serialization and the real offline consumer path. It is not a KSP recording. Native Plugin/Mission builds use the same locally owned game references as the existing [build instructions](../README.md#build); they do not install the result.
