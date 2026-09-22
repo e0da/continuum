@@ -39,3 +39,7 @@ path = "src/bin/orbit_fixture.rs"
 [[bin]]
 name = "execution-view-bench"
 path = "src/bin/execution_view_bench.rs"
+
+[[bin]]
+name = "persistent-execution-view-bench"
+path = "src/bin/persistent_execution_view_bench.rs"

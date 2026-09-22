@@ -50,6 +50,9 @@ fn run() -> Result {
         Some("execution-bench") if arguments.len() == 2 => {
             execution_bench(&root, &arguments[1])
         }
+        Some("persistent-execution-bench") if arguments.len() == 2 => {
+            persistent_execution_bench(&root, &arguments[1])
+        }
         Some("all") => {
             portable(&root)?;
             field(&root)?;
@@ -61,7 +64,7 @@ fn run() -> Result {
         Some("verify-checkpoint-report") if arguments.len() == 2 => {
             verify_checkpoint_report(&root, Path::new(&arguments[1]))
         }
-        _ => Err("usage: cargo run --manifest-path tools/xtask/Cargo.toml -- {portable|field|structural|all|execution-bench NEW_REPORT.json|verify-structural-report BINARY|verify-checkpoint-report BINARY}".into()),
+        _ => Err("usage: cargo run --manifest-path tools/xtask/Cargo.toml -- {portable|field|structural|all|execution-bench NEW_REPORT.json|persistent-execution-bench NEW_REPORT.json|verify-structural-report BINARY|verify-checkpoint-report BINARY}".into()),
     }
 }
 
@@ -76,6 +79,24 @@ fn execution_bench(root: &Path, output: &str) -> Result {
             "tools/numerics/Cargo.toml",
             "--bin",
             "execution-view-bench",
+            "--",
+            "--output",
+            output,
+        ],
+    )
+}
+
+fn persistent_execution_bench(root: &Path, output: &str) -> Result {
+    checked(
+        root,
+        "cargo",
+        &[
+            "run",
+            "--release",
+            "--manifest-path",
+            "tools/numerics/Cargo.toml",
+            "--bin",
+            "persistent-execution-view-bench",
             "--",
             "--output",
             output,
