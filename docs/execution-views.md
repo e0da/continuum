@@ -6,7 +6,7 @@ Continuum keeps canonical entity identity and ownership separate from kernel lay
 
 The first typed view contains position, velocity, force, and mass because those fields already have a measured workload and ownership contract. This is not a universal ECS, archetype store, scheduler, or mutable world. New systems should add typed views only when a real kernel proves its column set and ordering. The prior layout benchmark found sealed SoA best in most measured cases and did not justify making AoSoA the world representation.
 
-`IMotionExecutionBackend` is the backend seam. A managed scalar or SIMD implementation can consume the view now. The experimental Rust benchmark measures CPU and Metal GPU kernels over private dense columns, including cold transfer and device-resident cases. A live adapter still needs a versioned buffer-lifetime and device-transfer contract across a narrow ABI. Rust must not own canonical identity or publish directly into game state.
+`IMotionExecutionBackend` is the managed backend seam. These compiled queries, routing rules, and publication contracts are currently C#. The Rust experiments separately implement a generation-aware `CanonicalWorld`, persistent dense views, and CPU/Metal kernels, including cold transfer and device-resident cases. They are not yet one integrated Rust ECS/query scheduler. Rust may own Continuum canonical identity; dense kernel row numbers must never replace that identity. The KSP adapter remains the sole publication boundary into host objects. A live Rust adapter still needs measured, architecture-compatible transport and explicit buffer lifetimes.
 
 ## Workload-driven routing
 

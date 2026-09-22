@@ -2,13 +2,15 @@
 
 Continuum can use machine learning and Monte Carlo without making learned output authoritative. The useful pattern is a verified analytic path, a recorded truth-producing path, and optional candidates that compete on the same frozen workloads.
 
-## First learned experiment: frame residual
+## Parked candidate: frame residual
 
-The first candidate should learn only the residual left by the independent Krakensbane frame forecast:
+A possible candidate would learn only the residual left by the independent Krakensbane frame forecast:
 
 ```text
 frame delta = analytic persistence forecast + learned residual
 ```
+
+This is not the selected next experiment. Frame-normalized writer observations and local-coordinate representations must be evaluated first; they may remove the apparent need for this model. The current aero result instead points to deterministic occluded-area/curve reconstruction. Reopen a learned candidate only for an observed residual and a decision-relevant cost or accuracy benefit; see the [roadmap](roadmap.md).
 
 The shadow receipt already records the label as the observed endpoint frame velocity minus the captured frame velocity. Collection should span complete flight attempts, different craft, and distinct regimes. Train, validation, and test splits must be made by attempt and craft rather than by adjacent samples; neighboring physics steps are nearly duplicates.
 
