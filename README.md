@@ -36,7 +36,7 @@ The repository owns the complete automated check contract through `scripts/check
 
 ```sh
 scripts/check portable   # .NET models and standard-library Python checks
-scripts/check field      # pinned NumPy field-gravity checks
+scripts/check field      # Rust field-gravity checks
 scripts/check structural # native Jolt fixture and CTest checks
 scripts/check all        # all three lanes in order
 ```

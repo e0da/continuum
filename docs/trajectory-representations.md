@@ -35,10 +35,10 @@ Set `u=t−10`. The identical curve becomes `y=u²`, with `u∈[-10,10]`, immedi
 
 Neither representation is always tightest. For a quadratic over `[l,h]`, the Bernstein control values are `q(l)`, `q(l)+q′(l)(h−l)/2`, and `q(h)`; their minimum and maximum enclose the curve because the Bernstein basis weights are nonnegative and sum to one. Intersecting independently valid enclosures remains valid.
 
-The exact-rational [toy experiment](../tools/curve-bounds/experiment.py) checks 6,210 coefficient/window combinations against endpoint and stationary-point extrema:
+The exact-rational [toy experiment](../tools/numerics/src/bin/curve_bounds.rs) checks 6,210 coefficient/window combinations against endpoint and stationary-point extrema:
 
 ```sh
-python3 tools/curve-bounds/experiment.py --output artifacts/curve-bounds-NEW.json
+cargo run --manifest-path tools/numerics/Cargo.toml --bin curve-bounds -- --output artifacts/curve-bounds-NEW.json
 ```
 
 The output path must be new. These checks establish the tested rational enclosures, not floating-point correctness or a performance gain. A production version must carry outward rounding through coefficient conversion, remain safe under cancellation/overflow and justify its extra work using actual screening counts and elapsed times. The current planner deliberately remains the baseline until that comparison passes.

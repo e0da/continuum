@@ -1,5 +1,8 @@
 **/bin/
+!tools/numerics/src/bin/
+!tools/numerics/src/bin/*.rs
 **/obj/
+**/target/
 artifacts/
 *.user
 *.dll
