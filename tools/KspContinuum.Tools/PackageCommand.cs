@@ -16,19 +16,32 @@ internal static class PackageCommand
         Tooling.Require(File.Exists(plugin), "Build the Release plugin first.");
         var addon = parsed.Optional("--mission-addon") ?? Path.Combine(root, "src/KspContinuum.Mission/bin/Release/net48/KspContinuum.Mission.dll");
         Tooling.Require(!mission || File.Exists(addon), "Build the Release mission addon first.");
-        var output = Path.GetFullPath(parsed.Optional("--output") ?? Path.Combine(root, "artifacts", mission ? "ksp-continuum-0.2.0-mission.zip" : "ksp-continuum-0.2.0-experiment.zip"));
-        var download = DownloadUri(parsed.Optional("--download-url"), output);
-        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
-        File.Delete(output);
-        using (var archive = ZipFile.Open(output, ZipArchiveMode.Create))
+        var outputHint = Path.GetFullPath(parsed.Optional("--output") ?? Path.Combine(root, "artifacts", mission ? "ksp-continuum-0.2.0-mission.zip" : "ksp-continuum-0.2.0-experiment.zip"));
+        var downloadOverride = parsed.Optional("--download-url");
+        if (downloadOverride is not null) DownloadUri(downloadOverride);
+        var directory = Path.GetDirectoryName(outputHint)!;
+        Directory.CreateDirectory(directory);
+        var staging = Path.Combine(directory, $".{Path.GetFileName(outputHint)}.{Guid.NewGuid():N}.tmp");
+        string output;
+        try
         {
-            Add(archive, plugin, "GameData/KspContinuum/Plugins/KspContinuum.dll");
-            if (mission) Add(archive, addon, "GameData/KspContinuum/Plugins/KspContinuum.Mission.dll");
-            Add(archive, Path.Combine(root, "README.md"), "GameData/KspContinuum/README.md");
-            foreach (var name in Docs) Add(archive, Path.Combine(root, "docs", name), "GameData/KspContinuum/docs/" + name);
-            Add(archive, Path.Combine(root, "examples/neutral-inputs.csv"), "GameData/KspContinuum/examples/neutral-inputs.csv");
+            using (var archive = ZipFile.Open(staging, ZipArchiveMode.Create))
+            {
+                Add(archive, plugin, "GameData/KspContinuum/Plugins/KspContinuum.dll");
+                if (mission) Add(archive, addon, "GameData/KspContinuum/Plugins/KspContinuum.Mission.dll");
+                Add(archive, Path.Combine(root, "README.md"), "GameData/KspContinuum/README.md");
+                foreach (var name in Docs) Add(archive, Path.Combine(root, "docs", name), "GameData/KspContinuum/docs/" + name);
+                Add(archive, Path.Combine(root, "examples/neutral-inputs.csv"), "GameData/KspContinuum/examples/neutral-inputs.csv");
+            }
+            VerifyArchive(staging);
+            output = downloadOverride is null ? ContentAddressedPath(outputHint, Tooling.Sha256(staging)) : outputHint;
+            File.Move(staging, output, true);
         }
-        VerifyArchive(output);
+        finally
+        {
+            File.Delete(staging);
+        }
+        var download = downloadOverride is null ? new Uri(output) : DownloadUri(downloadOverride);
         var metadata = Metadata(output, mission, download);
         var metadataPath = Path.ChangeExtension(output, ".ckan");
         File.Delete(metadataPath);
@@ -50,10 +63,15 @@ internal static class PackageCommand
         Tooling.Require(!archive.Entries.Any(entry => string.Equals(Path.GetFileName(entry.FullName), "0Harmony.dll", StringComparison.OrdinalIgnoreCase)), "package must use shared Harmony2 and cannot bundle 0Harmony.dll");
     }
 
-    private static Uri DownloadUri(string? value, string archive)
+    private static string ContentAddressedPath(string path, string sha256)
     {
-        var candidate = value ?? new Uri(archive).AbsoluteUri;
-        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)) throw new ToolException("--download-url must be an absolute file, http, or https URI");
+        var extension = Path.GetExtension(path);
+        return Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + "-" + sha256 + extension);
+    }
+
+    private static Uri DownloadUri(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) throw new ToolException("--download-url must be an absolute file, http, or https URI");
         Tooling.Require(uri.Scheme == Uri.UriSchemeFile || uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps, "--download-url must be an absolute file, http, or https URI");
         return uri;
     }

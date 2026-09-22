@@ -123,7 +123,8 @@ publishes no partial samples.
 
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
-The metadata defaults to the local archive. `--download-url` accepts an absolute `file`, `http`, or `https` URI when the
+The default archive and metadata filenames include the archive's full SHA-256, and the metadata points to that immutable
+local filename. `--download-url` accepts an absolute `file`, `http`, or `https` URI when the
 CKAN runtime cannot resolve the host path, while the recorded hashes continue to bind the locally built archive. The
 repository does not yet publish release or NetKAN metadata. Source compilation and portable lifecycle tests do not
 establish patch coexistence, callback ordering, field units, or receipt validity in KSP.
