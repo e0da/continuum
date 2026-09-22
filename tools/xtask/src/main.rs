@@ -109,6 +109,15 @@ fn field(root: &Path) -> Result {
         root,
         "cargo",
         &["test", "--manifest-path", "tools/numerics/Cargo.toml"],
+    )?;
+    checked(
+        root,
+        "cargo",
+        &[
+            "test",
+            "--manifest-path",
+            "tools/native-boundary/Cargo.toml",
+        ],
     )
 }
 
