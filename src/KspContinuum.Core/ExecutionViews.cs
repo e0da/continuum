@@ -109,6 +109,8 @@ namespace KspContinuum
     {
         readonly EntityKey[] keys; readonly int[] sourceIndices;
         readonly double[] mass, px, py, pz, vx, vy, vz, fx, fy, fz;
+        readonly IReadOnlyList<EntityKey> keyView;
+        readonly IReadOnlyList<double> massView, pxView, pyView, pzView, vxView, vyView, vzView, fxView, fyView, fzView;
         internal MotionExecutionView(ExecutionSnapshot source, ExecutionQuery query, List<int> selected)
         {
             SourceStamp = source.Stamp; SourceRevision = source.Revision; SystemId = query.SystemId;
@@ -126,6 +128,10 @@ namespace KspContinuum
                 vx[lane] = entity.Velocity.X; vy[lane] = entity.Velocity.Y; vz[lane] = entity.Velocity.Z;
                 fx[lane] = entity.Force.X; fy[lane] = entity.Force.Y; fz[lane] = entity.Force.Z;
             }
+            keyView = Array.AsReadOnly(keys); massView = Array.AsReadOnly(mass);
+            pxView = Array.AsReadOnly(px); pyView = Array.AsReadOnly(py); pzView = Array.AsReadOnly(pz);
+            vxView = Array.AsReadOnly(vx); vyView = Array.AsReadOnly(vy); vzView = Array.AsReadOnly(vz);
+            fxView = Array.AsReadOnly(fx); fyView = Array.AsReadOnly(fy); fzView = Array.AsReadOnly(fz);
         }
         public WorkStamp SourceStamp { get; private set; }
         public long SourceRevision { get; private set; }
@@ -133,17 +139,17 @@ namespace KspContinuum
         public int Count { get; private set; }
         public int PaddedCount { get; private set; }
         public int LaneWidth { get; private set; }
-        public ReadOnlySpan<EntityKey> Keys { get { return keys; } }
-        public ReadOnlySpan<double> Masses { get { return mass; } }
-        public ReadOnlySpan<double> PositionX { get { return px; } }
-        public ReadOnlySpan<double> PositionY { get { return py; } }
-        public ReadOnlySpan<double> PositionZ { get { return pz; } }
-        public ReadOnlySpan<double> VelocityX { get { return vx; } }
-        public ReadOnlySpan<double> VelocityY { get { return vy; } }
-        public ReadOnlySpan<double> VelocityZ { get { return vz; } }
-        public ReadOnlySpan<double> ForceX { get { return fx; } }
-        public ReadOnlySpan<double> ForceY { get { return fy; } }
-        public ReadOnlySpan<double> ForceZ { get { return fz; } }
+        public IReadOnlyList<EntityKey> Keys { get { return keyView; } }
+        public IReadOnlyList<double> Masses { get { return massView; } }
+        public IReadOnlyList<double> PositionX { get { return pxView; } }
+        public IReadOnlyList<double> PositionY { get { return pyView; } }
+        public IReadOnlyList<double> PositionZ { get { return pzView; } }
+        public IReadOnlyList<double> VelocityX { get { return vxView; } }
+        public IReadOnlyList<double> VelocityY { get { return vyView; } }
+        public IReadOnlyList<double> VelocityZ { get { return vzView; } }
+        public IReadOnlyList<double> ForceX { get { return fxView; } }
+        public IReadOnlyList<double> ForceY { get { return fyView; } }
+        public IReadOnlyList<double> ForceZ { get { return fzView; } }
         public EntityKey GetKey(int lane) { Check(lane); return keys[lane]; }
         public double GetMass(int lane) { Check(lane); return mass[lane]; }
         public Vec GetPosition(int lane) { Check(lane); return new Vec(px[lane], py[lane], pz[lane]); }
