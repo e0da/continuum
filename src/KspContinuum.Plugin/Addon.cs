@@ -16,6 +16,8 @@ namespace KspContinuum
         ShadowCapture shadow;
         LifecycleTraceCapture lifecycleTrace;
         PhysicsBoundaryQualification physicsBoundary;
+        StructuralExperimentCapture structuralExperiment;
+        string pendingStructuralMode;
         Coroutine lifecycleContinuation;
         bool lifecycleExportAttempted;
         bool physicsBoundaryExportAttempted;
@@ -24,6 +26,7 @@ namespace KspContinuum
         public string ShadowReportPath { get; private set; }
         public string LifecycleTraceReportPath { get; private set; }
         public string PhysicsBoundaryReportPath { get; private set; }
+        public string StructuralExperimentReportPath { get; private set; }
         string replayFile = "replay.csv";
         protected abstract bool IsMenu { get; }
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
@@ -49,6 +52,7 @@ namespace KspContinuum
                 physicsBoundary.Audit();
                 FinishPhysicsBoundaryQualification();
             }
+            if (structuralExperiment != null) structuralExperiment.Tick();
             if (shadow != null) shadow.Tick(true);
             if (timeline == null) return;
             if (Input.GetKeyDown(KeyCode.Escape) && timeline.IsReplaying) timeline.Stop();
@@ -136,6 +140,44 @@ namespace KspContinuum
             physicsBoundaryExportAttempted = true; physicsBoundary.Dispose();
             try { PhysicsBoundaryReportPath = Write("physics-boundary", physicsBoundary.Report); }
             catch (Exception error) { status = "Physics-boundary export failed: " + error.GetType().Name; Debug.LogException(error); }
+            if (pendingStructuralMode != null)
+            {
+                string mode = pendingStructuralMode; pendingStructuralMode = null;
+                if (physicsBoundary.Report.status == "qualified") BeginQualifiedStructuralExperiment(mode);
+                else status = "Structural experiment stopped: physics boundary did not qualify.";
+            }
+        }
+        public void BeginStructuralExperiment(string mode)
+        {
+            if (IsMenu || !Supported) throw new InvalidOperationException("Structural experiment requires KSP 1.12.5 flight.");
+            if (mode != "sham" && mode != "impulse") throw new ArgumentException("Structural mode must be sham or impulse.");
+            if (structuralExperiment != null && structuralExperiment.IsRunning)
+                throw new InvalidOperationException("A structural experiment is already active.");
+            StopStructuralExperiment(); StructuralExperimentReportPath = null;
+            pendingStructuralMode = mode; BeginPhysicsBoundaryQualification();
+            status = "Qualifying physics boundary before structural " + mode + ".";
+        }
+        void BeginQualifiedStructuralExperiment(string mode)
+        {
+            structuralExperiment = new StructuralExperimentCapture(mode, physicsBoundary.Report, report =>
+            {
+                try
+                {
+                    StructuralExperimentReportPath = Write("structural-experiment", report);
+                    status = "Structural " + mode + " capture saved in PluginData.";
+                }
+                catch (Exception error)
+                {
+                    status = "Structural capture export failed: " + error.GetType().Name;
+                    Debug.LogException(error);
+                }
+            });
+            structuralExperiment.Start(); status = structuralExperiment.Status;
+        }
+        public void StopStructuralExperiment()
+        {
+            pendingStructuralMode = null;
+            if (structuralExperiment != null) structuralExperiment.Dispose();
         }
         void RunBench()
         {
@@ -156,7 +198,8 @@ namespace KspContinuum
             try
             {
                 string encoded = ReportJson.Encode(report);
-                if ((kind == "shadow" || kind == "lifecycle" || kind == "physics-boundary") && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
+                if ((kind == "shadow" || kind == "lifecycle" || kind == "physics-boundary" || kind == "structural-experiment")
+                    && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
                     throw new InvalidOperationException("Observation receipt exceeds its 4 MiB export bound.");
                 File.WriteAllText(temporary, encoded);
                 File.Move(temporary, path);
@@ -193,7 +236,7 @@ namespace KspContinuum
         }
         public void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(20, 80, 430, IsMenu ? 195 : 600), "KSP Continuum — research prototype", GUI.skin.window);
+            GUILayout.BeginArea(new Rect(20, 80, 430, IsMenu ? 195 : 700), "KSP Continuum — research prototype", GUI.skin.window);
             GUILayout.Label(Supported ? status : "Unsupported KSP version; requires 1.12.5.");
             bool old = GUI.enabled; GUI.enabled = old && Supported && !running;
             if (IsMenu)
@@ -220,6 +263,18 @@ namespace KspContinuum
                     catch (Exception ex) { status = ex.Message; }
                 }
                 if (GUILayout.Button("Stop physics-boundary qualification")) StopPhysicsBoundaryQualification();
+                GUILayout.Label(structuralExperiment == null ? "Structural experiment not started." : structuralExperiment.Status);
+                if (GUILayout.Button("Run structural sham on active vessel"))
+                {
+                    try { BeginStructuralExperiment("sham"); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                if (GUILayout.Button("Run structural impulse on active vessel"))
+                {
+                    try { BeginStructuralExperiment("impulse"); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                if (GUILayout.Button("Stop structural experiment")) StopStructuralExperiment();
                 GUILayout.Label(ShadowStatus);
                 if (GUILayout.Button("Start read-only worker shadow capture"))
                 {
@@ -262,9 +317,10 @@ namespace KspContinuum
             }
             GUI.enabled = old; GUILayout.EndArea();
         }
-        public void OnDisable() { StopLifecycleTrace(); StopPhysicsBoundaryQualification(); }
+        public void OnDisable() { StopStructuralExperiment(); StopLifecycleTrace(); StopPhysicsBoundaryQualification(); }
         public void OnDestroy()
         {
+            StopStructuralExperiment();
             StopLifecycleTrace();
             StopPhysicsBoundaryQualification();
             StopShadowCapture();
