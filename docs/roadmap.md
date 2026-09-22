@@ -1,6 +1,6 @@
 # Continuum direction and goal index
 
-Reviewed 2026-09-22. [Linear owns the live roadmap, milestones, priorities and issue state](https://linear.app/e0da/project/continuum-3e8d50ef8c85). This page connects those outcomes to shipped documentation and preserves the full product direction. Implementation is paused for this review; the next work is prepared, not represented as already running.
+Reviewed 2026-09-22. [Linear owns the live roadmap, milestones, priorities and issue state](https://linear.app/e0da/project/continuum-3e8d50ef8c85). This page connects those outcomes to shipped documentation and preserves the full product direction. Implementation is active in parallel across real-vessel structural census, live aerodynamic parity, and end-to-end performance observation.
 
 The immediate goal is a useful Continuum computation controlling a bounded KSP behavior, followed by a reproducible improvement in frame or physics-tick performance. A small positive result in the actual game is more valuable than further generic infrastructure without a consumer. Continuum is the engine; [Gimbal is the game/experience layer](continuum-gimbal-boundary.md). `KspContinuum` remains the adapter namespace.
 
@@ -15,23 +15,31 @@ The immediate goal is a useful Continuum computation controlling a bounded KSP b
 | Local f32 offsets plus f64 anchors reduced the fixture's accumulated error from 11.27 m to 0.00571 m | Local representations are promising; this is not proof of arbitrary large-world accuracy. Per-channel error budgets still apply. |
 | Dirty refresh beat full pack through 10% changed rows for large measured views; full churn favored repacking | Preserve views, but include dirty discovery and publication in real costs. A million-row benchmark does not predict performance for a 400-part craft. |
 | Powered-landing aero baseline missed magnitude while captured scalar-product reconstruction closely matched stock | Prioritize deterministic occluded-face/SetDrag reconstruction. A reconstruction consuming stock outputs is a diagnostic, not a replacement. See [aero](aerodynamics.md). |
+| Independent stock `SetDrag` reconstruction now covers six-face reduction, post-occlusion area, weighted drag, Cd and Mach-power curves | Collect a development and held-out v3 live receipt before provider substitution. Lift and unsupported curve cases remain explicit exclusions. |
+| A representative semantic fixture reduced 10 bodies and 9 joints to 6 bodies and 5 joints while isolating one unknown part | Populate the same facts from a real vessel, then qualify collider geometry and mass properties. The 40% body and 44.4% joint reductions are projections, not a measured KSP speedup. |
+| Four-step x86 KSP-to-Rust transactions beat managed execution at 64 and 256 bodies, while one-step full-copy transactions lost everywhere | Use persistent pinned views, dirty refresh and selective publication. Native compute alone does not justify crossing the boundary. |
+| The first native interval after A023 restoration showed about 1.99 times the largest ordinary normalized velocity delta | Skipping the native callback does not own deferred forces. Keep rigid-cluster publication offline until force producers are owned or isolated. |
+| The repo-scoped `continuum-linux-arm64` ARC lane completed the integrated `fbba8761` main run | Owned CI is operational. Keep stale-run cleanup and bounded capacity separate from product performance claims. |
 | Missions, inputs, checkpoints and the connected chronicle work as fixtures | Preserve attempts and media. Telemetry scrubbing and native save restoration are not deterministic whole-game replay. |
-| PR87 merged while six checks were queued | Local Rust validation passed; CI completion remains unproved. Track the owned-runner failure separately in E0D-1881. |
+| PR87 merged while six checks were queued; the cause was a stale runner label after the ARC lane rename | PR92 aligned the workflow with the installed lane and the integrated main run passed. E0D-1881 is complete. |
 
 ## Next parallel outcomes
 
-The coordinator integrates three independent worker lanes. One writer owns the live KSP instance. Portable work continues if live qualification is blocked; no further landing-precision work is required.
+The coordinator advances independent worker lanes concurrently and integrates them at explicit evidence gates. One writer owns the live KSP instance. Portable work continues if live qualification is blocked; no further landing-precision work is required.
 
 | Lane | Acceptance | Linear |
 | --- | --- | --- |
-| Live physics | Nonempty bounded dynamics, stock/candidate motion comparison, exact restoration, full tick/frame timings | [E0D-1871](https://linear.app/e0da/issue/E0D-1871) |
-| Aerodynamics | Independent SetDrag magnitude reconstruction with held-out error and cost measurements; explicit lift/provider exclusions | [E0D-1872](https://linear.app/e0da/issue/E0D-1872) |
-| Rust execution | Actual architecture-compatible host boundary; one/few-step latency including transport, synchronization and publication | [E0D-1873](https://linear.app/e0da/issue/E0D-1873) |
-| Structural reduction, next free slot | Real vessel graph, projected body/joint reduction, one compound candidate preserving semantic boundaries | [E0D-1874](https://linear.app/e0da/issue/E0D-1874) |
+| Live physics | Select a provider or isolated world with explicit force ownership; then run nonempty bounded dynamics with stock/candidate motion, exact restoration and full tick/frame timings | [E0D-1871](https://linear.app/e0da/issue/E0D-1871) |
+| Aerodynamics | Produce development and held-out v3 captures; report independent SetDrag reconstruction error and total capture-to-publication cost with lift/provider exclusions | [E0D-1872](https://linear.app/e0da/issue/E0D-1872) |
+| Rust execution | Connect the measured x86 in-process boundary to one captured KSP workload through persistent pinned views, dirty refresh and selective publication | [E0D-1873](https://linear.app/e0da/issue/E0D-1873) |
+| Structural reduction | Populate the conservative classifier from a real vessel; then validate one admitted compound candidate's collider and mass properties | [E0D-1874](https://linear.app/e0da/issue/E0D-1874) |
+| Performance observation | Record workload identity plus capture, pack, compute, synchronization, publication and total timings in a regression-friendly report used by one existing benchmark | [E0D-1875](https://linear.app/e0da/issue/E0D-1875) |
 
 Structural graph classification can support the live lane before geometry baking. Live graph mutation follows dynamics ownership. The smallest useful first replacement may be managed C#; Rust/GPU integration is an independent measured strategy, not a gate on showing KSP use our computation.
 
 The three milestone exits are **useful live substitution**, **demonstrated game-performance improvement**, then **simulation beyond the camera**. [E0D-1875](https://linear.app/e0da/issue/E0D-1875) owns the performance outcome: frozen workload/tolerances, stock/candidate repeats, median and tail timings, and honest negative results. More physics fidelity can be a separate opt-in benefit, but cannot be counted as stock speedup without a like-for-like comparison.
+
+Performance is a design input for every replaceable system. Each strategy must make the whole path observable: capture, admission, packing or dirty refresh, transfer or ABI, compute, synchronization, validation, publication and total frame/tick cost. Reports retain workload and machine identity, behavioral error, allocation or transferred-byte evidence where measurable, median and tail latency, throughput and strategy choice. CPU scalar, CPU parallel, SIMD and GPU implementations compete only on workloads for which the entire measured path and precision contract are comparable.
 
 ## Full goal map
 
