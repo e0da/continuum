@@ -1,7 +1,8 @@
 pub mod curve;
-pub mod field;
-pub mod modal;
 pub mod execution_view;
+pub mod field;
+pub mod gpu_execution;
+pub mod modal;
 pub mod persistent_execution_view;
 
 use serde::Serialize;
