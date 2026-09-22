@@ -46,7 +46,11 @@ namespace KspContinuum
             var parts = new List<Part>(representatives.Values);
             parts.Sort((a, b) => a.flightID.CompareTo(b.flightID));
             if (parts.Count == 0) throw new InvalidOperationException("No active-vessel rigidbodies.");
-            Vector3 reference = Body(parts[0]).worldCenterOfMass;
+            Rigidbody referenceBody = Body(parts[0]);
+            Vector3 reference = referenceBody.worldCenterOfMass;
+            Quaternion inverseReferenceRotation = Quaternion.Inverse(referenceBody.rotation);
+            Vector3 referenceVelocity = referenceBody.velocity;
+            Vector3 referenceAngularVelocity = referenceBody.angularVelocity;
             Vector3d frame = Krakensbane.GetFrameVelocity();
             var bodies = new WriterCensusBody[parts.Count];
             for (int i = 0; i < parts.Count; i++)
@@ -54,12 +58,20 @@ namespace KspContinuum
                 Part part = parts[i]; Rigidbody body = Body(part);
                 Vector3 position = body.worldCenterOfMass; Vector3 velocity = body.velocity;
                 Vector3 angularVelocity = body.angularVelocity; Quaternion rotation = body.rotation;
+                Vector3 internalPosition = inverseReferenceRotation * (position - reference);
+                Vector3 internalVelocity = inverseReferenceRotation * (velocity - referenceVelocity);
+                Vector3 internalAngularVelocity = inverseReferenceRotation * (angularVelocity - referenceAngularVelocity);
+                Quaternion internalRotation = inverseReferenceRotation * rotation;
                 bodies[i] = new WriterCensusBody {
                     id = part.flightID.ToString(CultureInfo.InvariantCulture) + ":" + body.GetInstanceID().ToString(CultureInfo.InvariantCulture),
                     relativePosition = new Vec(position.x - reference.x, position.y - reference.y, position.z - reference.z),
                     normalizedVelocity = new Vec(velocity.x + frame.x, velocity.y + frame.y, velocity.z + frame.z),
                     orientation = new double[] { rotation.x, rotation.y, rotation.z, rotation.w },
-                    angularVelocity = new Vec(angularVelocity.x, angularVelocity.y, angularVelocity.z)
+                    angularVelocity = new Vec(angularVelocity.x, angularVelocity.y, angularVelocity.z),
+                    internalPosition = new Vec(internalPosition.x, internalPosition.y, internalPosition.z),
+                    internalVelocity = new Vec(internalVelocity.x, internalVelocity.y, internalVelocity.z),
+                    internalAngularVelocity = new Vec(internalAngularVelocity.x, internalAngularVelocity.y, internalAngularVelocity.z),
+                    internalOrientation = new double[] { internalRotation.x, internalRotation.y, internalRotation.z, internalRotation.w }
                 };
             }
             return new WriterCensusSnapshot {

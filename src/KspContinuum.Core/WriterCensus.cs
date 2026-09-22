@@ -17,6 +17,7 @@ namespace KspContinuum
         public string measurementScope = "Read-only pose and velocity changes across named PlayerLoop intervals; changed state does not identify the writer.";
         public string positionFrame = "Body center of mass relative to the first ordered active-vessel body; invariant to a common FloatingOrigin translation.";
         public string velocityFrame = "Rigidbody velocity plus the captured Krakensbane frame velocity.";
+        public string internalFrame = "Pose and velocity relative to the first ordered physical body, expressed in that body's rotating frame.";
         public int maximumIntervals = 1024, droppedIntervals, invalidIntervals;
         public WriterCensusInterval[] intervals;
     }
@@ -25,9 +26,12 @@ namespace KspContinuum
     {
         public string scope, status, reason, vesselId, topologyKey;
         public int frame, bodyCount, changedPositions, changedOrientations, changedVelocities, changedAngularVelocities;
+        public int changedInternalPositions, changedInternalOrientations, changedInternalVelocities, changedInternalAngularVelocities;
         public long originGeneration, originTransforms;
         public double fixedTimeSeconds, maximumPositionDelta, maximumOrientationDeltaRadians,
             maximumVelocityDelta, maximumAngularVelocityDelta, frameVelocityDelta;
+        public double maximumInternalPositionDelta, maximumInternalOrientationDeltaRadians,
+            maximumInternalVelocityDelta, maximumInternalAngularVelocityDelta;
     }
 
     public sealed class WriterCensusSnapshot
@@ -42,7 +46,8 @@ namespace KspContinuum
     {
         public string id;
         public Vec relativePosition, normalizedVelocity, angularVelocity;
-        public double[] orientation;
+        public Vec internalPosition, internalVelocity, internalAngularVelocity;
+        public double[] orientation, internalOrientation;
     }
 
     public sealed class WriterCensus : IPlayerLoopBracketObserver
@@ -133,14 +138,28 @@ namespace KspContinuum
                     return Reject(result, "invalid-orientation");
                 double velocity = Distance(before.bodies[i].normalizedVelocity, after.bodies[i].normalizedVelocity);
                 double angularVelocity = Distance(before.bodies[i].angularVelocity, after.bodies[i].angularVelocity);
+                double internalPosition = Distance(before.bodies[i].internalPosition, after.bodies[i].internalPosition);
+                double internalOrientation;
+                if (!OrientationDistance(before.bodies[i].internalOrientation, after.bodies[i].internalOrientation, out internalOrientation))
+                    return Reject(result, "invalid-internal-orientation");
+                double internalVelocity = Distance(before.bodies[i].internalVelocity, after.bodies[i].internalVelocity);
+                double internalAngularVelocity = Distance(before.bodies[i].internalAngularVelocity, after.bodies[i].internalAngularVelocity);
                 if (position > 0) result.changedPositions++;
                 if (orientation > 0) result.changedOrientations++;
                 if (velocity > 0) result.changedVelocities++;
                 if (angularVelocity > 0) result.changedAngularVelocities++;
+                if (internalPosition > 0) result.changedInternalPositions++;
+                if (internalOrientation > 0) result.changedInternalOrientations++;
+                if (internalVelocity > 0) result.changedInternalVelocities++;
+                if (internalAngularVelocity > 0) result.changedInternalAngularVelocities++;
                 result.maximumPositionDelta = Math.Max(result.maximumPositionDelta, position);
                 result.maximumOrientationDeltaRadians = Math.Max(result.maximumOrientationDeltaRadians, orientation);
                 result.maximumVelocityDelta = Math.Max(result.maximumVelocityDelta, velocity);
                 result.maximumAngularVelocityDelta = Math.Max(result.maximumAngularVelocityDelta, angularVelocity);
+                result.maximumInternalPositionDelta = Math.Max(result.maximumInternalPositionDelta, internalPosition);
+                result.maximumInternalOrientationDeltaRadians = Math.Max(result.maximumInternalOrientationDeltaRadians, internalOrientation);
+                result.maximumInternalVelocityDelta = Math.Max(result.maximumInternalVelocityDelta, internalVelocity);
+                result.maximumInternalAngularVelocityDelta = Math.Max(result.maximumInternalAngularVelocityDelta, internalAngularVelocity);
             }
             result.reason = result.changedPositions == 0 && result.changedOrientations == 0 &&
                 result.changedVelocities == 0 && result.changedAngularVelocities == 0
