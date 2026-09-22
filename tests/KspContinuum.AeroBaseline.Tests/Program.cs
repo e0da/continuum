@@ -238,6 +238,16 @@ static class Program
             ReconstructionInputs(areas, drag, ConstantCurve(.2, 1)));
         Check(weighted.Disposition == AeroSetDragDisposition.Abstained &&
             weighted.Reason == AeroSetDragReason.UnsupportedWeightedCurve, "weighted curves abstain explicitly");
+        AeroSetDragResult weightedZeroFlow = AeroSetDragReconstruction.Evaluate(new Vec(), .5,
+            ReconstructionInputs(areas, drag, ConstantCurve(.2, 1)));
+        Check(weightedZeroFlow.Disposition == AeroSetDragDisposition.Abstained &&
+            weightedZeroFlow.Reason == AeroSetDragReason.UnsupportedWeightedCurve,
+            "zero flow does not bypass weighted-curve abstention");
+        AeroSetDragResult weightedZeroFlowContext = AeroSetDragReconstruction.Evaluate(Part(1, new Vec(), new Vec(),
+            Rotation.Identity, setDragInputs: ReconstructionInputs(areas, drag, ConstantCurve(.2, 1))));
+        Check(weightedZeroFlowContext.Disposition == AeroSetDragDisposition.Abstained &&
+            weightedZeroFlowContext.Reason == AeroSetDragReason.UnsupportedWeightedCurve,
+            "part-context zero flow does not bypass weighted-curve abstention");
         var bounded = new AeroFloatCurveDefinition(0, 0, new[] {
             new AeroCurveKey(0, .2, 0, 0, 0, 0, 0), new AeroCurveKey(1, .2, 0, 0, 0, 0, 0) });
         AeroSetDragResult outside = AeroSetDragReconstruction.Evaluate(new Vec(1, 0, 0), 2,

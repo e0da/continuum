@@ -25,6 +25,9 @@ namespace KspContinuum
         public static AeroSetDragResult Evaluate(AeroPartContext input)
         {
             if (input == null) throw new ArgumentNullException("input");
+            AeroSetDragReason support = Support(input.setDragInputs);
+            if (support != AeroSetDragReason.None)
+                return new AeroSetDragResult(AeroSetDragDisposition.Abstained, support, 0);
             double speedSquared = Dot(input.relativeAirVelocity, input.relativeAirVelocity);
             if (speedSquared == 0)
                 return new AeroSetDragResult(AeroSetDragDisposition.Valid, AeroSetDragReason.ZeroFlow, 0);
@@ -39,14 +42,13 @@ namespace KspContinuum
             AeroCaptureValidation.Vector(localDragDirection); AeroCaptureValidation.Number(mach);
             if (mach < 0) throw new ArgumentOutOfRangeException("mach");
             if (inputs == null) throw new ArgumentNullException("inputs");
+            AeroSetDragReason support = Support(inputs);
+            if (support != AeroSetDragReason.None)
+                return new AeroSetDragResult(AeroSetDragDisposition.Abstained, support, 0);
             double lengthSquared = Dot(localDragDirection, localDragDirection);
             if (lengthSquared == 0)
                 return new AeroSetDragResult(AeroSetDragDisposition.Valid, AeroSetDragReason.ZeroFlow, 0);
             Vec direction = localDragDirection * (1 / Math.Sqrt(lengthSquared));
-
-            AeroSetDragReason support = Support(inputs);
-            if (support != AeroSetDragReason.None)
-                return new AeroSetDragResult(AeroSetDragDisposition.Abstained, support, 0);
 
             double areaDrag = 0;
             try
