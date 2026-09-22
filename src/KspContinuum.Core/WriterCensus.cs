@@ -25,9 +25,9 @@ namespace KspContinuum
     {
         public string scope, status, reason, vesselId, topologyKey;
         public int frame, bodyCount, changedPositions, changedOrientations, changedVelocities, changedAngularVelocities;
-        public long originGeneration;
+        public long originGeneration, originTransforms;
         public double fixedTimeSeconds, maximumPositionDelta, maximumOrientationDeltaRadians,
-            maximumVelocityDelta, maximumAngularVelocityDelta;
+            maximumVelocityDelta, maximumAngularVelocityDelta, frameVelocityDelta;
     }
 
     public sealed class WriterCensusSnapshot
@@ -119,8 +119,9 @@ namespace KspContinuum
             result.vesselId = before.vesselId; result.topologyKey = before.topologyKey; result.originGeneration = before.originGeneration;
             if (before.vesselId != after.vesselId) return Reject(result, "active-vessel-changed");
             if (before.topologyKey != after.topologyKey) return Reject(result, "topology-changed");
-            if (before.originGeneration != after.originGeneration) return Reject(result, "floating-origin-changed");
-            if (!Same(before.frameVelocity, after.frameVelocity)) return Reject(result, "reference-frame-velocity-changed");
+            if (after.originGeneration < before.originGeneration) return Reject(result, "floating-origin-generation-regressed");
+            result.originTransforms = after.originGeneration - before.originGeneration;
+            result.frameVelocityDelta = Distance(before.frameVelocity, after.frameVelocity);
             if (before.bodies == null || after.bodies == null || before.bodies.Length != after.bodies.Length) return Reject(result, "body-membership-changed");
             result.bodyCount = before.bodies.Length;
             for (int i = 0; i < before.bodies.Length; i++)
@@ -148,7 +149,6 @@ namespace KspContinuum
         }
 
         static WriterCensusInterval Reject(WriterCensusInterval value, string reason) { value.status = "invalid"; value.reason = reason; return value; }
-        static bool Same(Vec a, Vec b) { return a.X == b.X && a.Y == b.Y && a.Z == b.Z; }
         static double Distance(Vec a, Vec b)
         {
             double x = a.X - b.X, y = a.Y - b.Y, z = a.Z - b.Z;

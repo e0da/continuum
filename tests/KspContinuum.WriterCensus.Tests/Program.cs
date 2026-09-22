@@ -56,9 +56,11 @@ static class Program
         Check(census.Report.intervals[0].reason == "invalid-orientation");
 
         census = Run(Snapshot(), Snapshot(origin: 1));
-        Check(census.Report.intervals[0].status == "invalid" && census.Report.intervals[0].reason == "floating-origin-changed");
+        Check(census.Report.intervals[0].status == "observed" && census.Report.intervals[0].originTransforms == 1);
         census = Run(Snapshot(), Snapshot(frameVelocity: 11));
-        Check(census.Report.intervals[0].reason == "reference-frame-velocity-changed");
+        Check(census.Report.intervals[0].status == "observed" && census.Report.intervals[0].frameVelocityDelta == 1);
+        census = Run(Snapshot(origin: 1), Snapshot(origin: 0));
+        Check(census.Report.intervals[0].reason == "floating-origin-generation-regressed");
         census = Run(Snapshot(), Snapshot(vessel: "other"));
         Check(census.Report.intervals[0].reason == "active-vessel-changed");
         census = Run(Snapshot(), Snapshot(topology: "changed"));
