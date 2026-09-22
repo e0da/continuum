@@ -46,6 +46,9 @@ source into the ignored `artifacts/structural-ci` build directory.
 
 To compile the addon, point `KSP_MANAGED` at the `Managed` directory in your own KSP 1.12.5 installation. On macOS this is inside `KSP.app/Contents/Resources/Data`; on Windows/Linux it is typically under `KSP_x64_Data`.
 
+The addon compiles against Lib.Harmony for its opt-in aerodynamic recorder, but the package does not bundle
+`0Harmony.dll`. Install the shared CKAN dependency `Harmony2` before loading this build in KSP.
+
 ```sh
 export KSP_MANAGED="/path/to/your/KSP/Managed"
 dotnet build src/KspContinuum.Plugin -c Release

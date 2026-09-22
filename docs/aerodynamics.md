@@ -93,6 +93,18 @@ The strongest outcome may be a faster deterministic stock-style kernel. Machine 
 
 The first experiment is a bounded read-only truth recorder, not a replacement solver.
 
+The addon now contains the first live capture seam for the pinned stock assembly. It patches `UpdateAerodynamics`,
+`ApplyAeroDrag`, and `ApplyAeroLift` under the unique owner `continuum.capture`, records the direct rigidbody force
+applications without suppressing or changing the stock calls, attests the installed patch graph, and removes only its
+owned patches before exporting. The flight panel starts and stops the recorder. A valid receipt requires the exact
+assembly hash and MVID below, the expected owned hooks at inspection time, and confirmed cleanup; otherwise the run
+publishes no partial samples.
+
+This code compiles against Lib.Harmony but does not package `0Harmony.dll`. Installed qualification therefore requires
+the shared CKAN dependency `Harmony2` from HarmonyKSP. The repository does not yet publish release/NetKAN metadata, so
+that dependency remains an explicit installation gate for the first disposable-instance run. Source compilation and
+portable lifecycle tests do not establish patch coexistence, callback ordering, field units, or receipt validity in KSP.
+
 1. Pin the stock assembly hash/MVID and exact callback dataflow.
 2. Capture at most 64 samples and 128 parts per sample immediately after stock per-part aero calculation.
 3. Record immutable atmosphere, flow, geometry, drag-cube, exposure, force, application-point and torque data with exact frames and units.
