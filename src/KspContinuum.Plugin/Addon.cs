@@ -208,7 +208,7 @@ namespace KspContinuum
             try
             {
                 string encoded = ReportJson.Encode(report);
-                if ((kind == "shadow" || kind == "lifecycle" || kind == "physics-boundary" || kind == "structural-experiment")
+                if ((kind == "shadow" || kind == "rigid-cluster-shadow" || kind == "lifecycle" || kind == "physics-boundary" || kind == "structural-experiment")
                     && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
                     throw new InvalidOperationException("Observation receipt exceeds its 4 MiB export bound.");
                 File.WriteAllText(temporary, encoded);

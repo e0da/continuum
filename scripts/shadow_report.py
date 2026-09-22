@@ -304,6 +304,14 @@ def summary(data):
             'unsupported evidence provenance')
     for field in ('scope', 'framePolicy', 'comparisonScope', 'units'):
         text(data.get(field), field)
+    strategy = data.get('workerStrategy', 'independent-constant-force/v1')
+    require(strategy in ('independent-constant-force/v1', 'translational-rigid-cluster/v1'),
+            'unsupported worker strategy')
+    strategy_scope = data.get('workerStrategyScope')
+    if strategy_scope is None:
+        require(strategy == 'independent-constant-force/v1', 'missing worker strategy scope')
+        strategy_scope = 'Legacy v2 receipt: each captured body advanced independently under its captured force.'
+    text(strategy_scope, 'workerStrategyScope')
     text(data.get('reason'), 'reason', nullable=True)
     for field in ('unity', 'ksp', 'plugin', 'startedUtc'):
         text(data.get(field), field, nullable=True)
@@ -354,6 +362,9 @@ def summary(data):
         finite(sample.get('warpRate'), 'warpRate', 0, 1e9)
         for field in ('analyticMaxPositionError', 'analyticMaxVelocityError'):
             finite(sample.get(field), field, 0, 1e100)
+        require(sample['analyticAvailable'] or
+                (sample['analyticMaxPositionError'] == 0 and sample['analyticMaxVelocityError'] == 0),
+                'unavailable analytic result contains data')
         for field in TIMINGS:
             timings[field].append(finite(sample.get(field), field, 0, 1e9))
         comparison = sample.get('comparisonStatus')
@@ -418,6 +429,7 @@ def summary(data):
         'schema': 'ksp-continuum-shadow-summary/v1', 'sourceSchema': data['schema'],
         'status': data['status'], 'reason': data.get('reason'), 'evidence': evidence,
         'scope': data['scope'], 'comparisonScope': data['comparisonScope'], 'framePolicy': data['framePolicy'],
+        'workerStrategy': strategy, 'workerStrategyScope': strategy_scope,
         'installedComparisonQualified': False, 'solverAccuracyQualified': False,
         'counts': {'submitted': submitted, 'accepted': accepted, 'stale': stale,
                    'abandoned': submitted-accepted-stale},

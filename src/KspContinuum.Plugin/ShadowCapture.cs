@@ -62,7 +62,7 @@ namespace KspContinuum
             if (!constantForceOracle)
             {
                 report.scope = "Read-only alternate-solver probe: captured Unity rigidbody positions, velocities, masses and synthetic zero forces enter the named worker strategy. Its one-step prediction is compared with the next matching stock observation. The worker writes nothing to the vessel.";
-                report.comparisonScope = "Named alternate strategy versus observed raw-coordinate KSP motion. Differences include omitted gravity, thrust, contacts, rotation, constraints and Krakensbane frame adjustment; this is behavioral discrepancy telemetry, not stock equivalence.";
+                report.comparisonScope = "Named alternate strategy versus observed raw-coordinate KSP motion. Stock joint constraints are replaced by one all-body translational cluster; gravity, thrust, contacts, rotation and Krakensbane frame adjustment remain omitted. This is behavioral discrepancy telemetry, not stock equivalence.";
             }
             worker = new SimulationWorker(backend);
             this.constantForceOracle = constantForceOracle;
@@ -489,7 +489,7 @@ namespace KspContinuum
         {
             double maxPosition = 0,
                 maxVelocity = 0;
-            for (int i = 0; i < result.Count; i++)
+            if (constantForceOracle) for (int i = 0; i < result.Count; i++)
             {
                 Vec expected =
                     pending.GetPosition(i) + pending.GetVelocity(i) * pending.StepSeconds;
@@ -500,8 +500,8 @@ namespace KspContinuum
                 );
             }
             pendingSample.analyticAvailable = constantForceOracle;
-            pendingSample.analyticMaxPositionError = maxPosition;
-            pendingSample.analyticMaxVelocityError = maxVelocity;
+            pendingSample.analyticMaxPositionError = constantForceOracle ? maxPosition : 0;
+            pendingSample.analyticMaxVelocityError = constantForceOracle ? maxVelocity : 0;
             if (constantForceOracle && (maxPosition != 0 || maxVelocity != 0))
                 throw new InvalidOperationException("Zero-force transport oracle mismatch.");
             if (report.firstAcceptedBatch.Length == 0)
