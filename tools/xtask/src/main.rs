@@ -109,6 +109,15 @@ fn field(root: &Path) -> Result {
     checked(
         root,
         "cargo",
+        &[
+            "test",
+            "--manifest-path",
+            "tools/live-control-client/Cargo.toml",
+        ],
+    )?;
+    checked(
+        root,
+        "cargo",
         &["test", "--manifest-path", "tools/numerics/Cargo.toml"],
     )?;
     checked(

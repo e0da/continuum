@@ -13,4 +13,49 @@ The snapshot contains bounded scalar fields: vessel identity and name, body, sit
 
 The portable test exercises identity invalidation, invalid data, socket framing, and the socket-to-game-thread queue. A successful portable or addon build does not prove this endpoint works in an installed KSP process. The next qualification is an opt-in live `hello` and snapshot against a known vessel, with observed frame impact and teardown checked. Subsequent control operations need explicit writer ownership and safe-boundary acknowledgements; the read-only endpoint grants neither.
 
+## Live qualification
+
+Build the Rust client before starting any timed run. Then use the binary to
+negotiate one persistent connection and issue bounded,
+sequential snapshot requests. It writes every round-trip duration and the
+server's scoped main-thread `observerNanoseconds`; it stops on the first
+rejection, identity change, timeout, malformed reply, or missing snapshot.
+
+```sh
+cargo build --release --manifest-path tools/live-control-client/Cargo.toml
+tools/live-control-client/target/release/continuum-live-control-client \
+  --address 127.0.0.1:47771 --samples 900 \
+  --ready artifacts/live-control/loaded-ready.json \
+  --output artifacts/live-control/loaded.json
+```
+
+The client creates the readiness marker only after the first accepted snapshot.
+It records that snapshot's render frame and fixed-callback count. Every final
+sample records the same counters, so the client receipt can prove that accepted
+requests bracketed the PlayerLoop capture rather than merely that a client
+process existed.
+
+Qualify overhead from the same settled-flight checkpoint in three fresh runs:
+
+1. Launch without the control flag and capture 300 frames as the baseline.
+2. Launch with `--continuum-control-port=47771`, leave the endpoint idle, and
+   capture 300 frames to isolate listener/identity-check overhead.
+3. Launch with the endpoint enabled and start the prebuilt client for 900
+   snapshots. Wait for the new readiness marker, inspect that it says `ready`,
+   then start the 300-frame capture. Confirm the client is still running when
+   the capture completes.
+
+Keep resolution, graphics settings, timestep, warp, vessel identity and
+topology unchanged. Enable `--continuum-playerloop` in all three runs. Retain
+the raw marker reports, client receipt, KSP log, package hash, source commit and
+checkpoint hash. The client receipt proves transport behavior and reports two
+timing scopes; only the matched PlayerLoop captures can assess whole-frame
+impact. Reject the qualification if any run is incomplete, context differs,
+PlayerLoop integrity or cleanup fails, the client completes fewer than 900
+samples, any response is non-`ok`, or teardown leaves the port accepting
+connections. Also reject unless an accepted client sample has a render frame at
+or before the first PlayerLoop capture frame and another has a render frame at
+or after the last capture frame. The readiness marker alone is insufficient
+evidence for the latter condition.
+
 Donor decisions: [Gimbal replay](https://github.com/e0da/gimbal/blob/main/crates/replay/src/lib.rs) keeps checkpoint payloads semantic; [Gameboard's reducer](https://github.com/e0da/gameboard/blob/main/apps/gameboard/lib/gameboard/room_reducer.ex) rejects stale authority epochs and revisions; [Wildline architecture](https://github.com/e0da/wildline/blob/main/docs/design/02-architecture-draft.2.md) proposes command admission at tick boundaries. These inform identity and future control design. They do not establish that this KSP transport or future replay is qualified.
