@@ -91,3 +91,24 @@ This benchmark does not measure Unity Mono, KSP's actual extraction and publicat
 The opt-in `--continuum-native-boundary-bench` main-menu qualification measures the same f64 managed and Rust kernels from KSP's embedded Mono host. Install the x86_64 `libcontinuum_native_boundary.dylib` beside `KspContinuum.dll` in `GameData/KspContinuum/Plugins`, then launch an owned KSP 1.12.5 qualification copy with the flag. The addon writes `native-boundary-mono-*.json` under `PluginData` and exits with code 0; ABI, layout, load, or exact-result failures exit with code 2.
 
 The receipt reports 101-sample median and p95 latency for 64, 256, 1,024, and 4,096 bodies over one and four steps, plus a 1,001-sample empty-call baseline. This isolates Unity Mono synchronous P/Invoke plus the Rust kernel. It deliberately excludes vessel capture, execution-view refresh, transactional publication, Unity physics, rendering, and live contention, so it can qualify host-specific call cost but cannot establish a game-frame speedup.
+
+### Installed Unity Mono observations
+
+Three fresh headless KSP processes on the M4 Max produced complete receipts on September 22, 2026. CKAN installed package `0.2.0-aero.4a1246e3ace8` built from merged commit `2c16488953b51a443f9faafb3f962f02ac98fa72`. The archive SHA-256 was `4a1246e3ace8052d4350467bdd7705a2e477ef17f3c7cc18bbddb5c56c764dd1`; the installed x86_64 dylib matched its packaged SHA-256 manifest. The host reported Mono runtime `4.0.30319.42000` and process architecture `X64`.
+
+| bodies | steps | managed median (ns) | native median (ns) | managed/native across runs |
+| ---: | ---: | ---: | ---: | ---: |
+| 64 | 1 | 300 | 100 | 3.00x |
+| 64 | 4 | 1,100–1,300 | 200 | 5.50–6.50x |
+| 256 | 1 | 1,200 | 200 | 6.00x |
+| 256 | 4 | 5,000–5,100 | 800–900 | 5.56–6.25x |
+| 1,024 | 1 | 5,000 | 900 | 5.56x |
+| 1,024 | 4 | 20,000 | 3,600 | 5.56x |
+| 4,096 | 1 | 20,000 | 5,200 | 3.85x |
+| 4,096 | 4 | 79,900–81,000 | 20,600–21,200 | 3.82–3.88x |
+
+Every receipt required exact managed/native equality for its fixture, and native p95 was lower in every row of all three runs. Runs two and three returned process exit zero. Run one's receipt completed, but its command wrapper failed while assigning a reserved shell variable after the game exited; its process exit status was not retained. The logs contained no matching exception/error entries.
+
+These compare two Continuum implementations of an independent-body integration loop, not KSP's stock solver against a replacement. Both use one thread and the same array-of-structs representation; this experiment does not exercise rigid clustering, event-driven propagation, explicit SIMD, multicore or GPU execution. At 4,096 bodies the one-step native kernel takes just 5.2 microseconds. Optimizing this kernel further cannot by itself recover milliseconds from a slow vessel frame.
+
+The empty-call median quantized to zero, with p95 of 100 ns in the first run. The smallest rows therefore cannot establish a precise dispatch cost or crossover threshold. Measurements also use fixed managed-then-native order and omit host capture/publication. The larger rows justify an end-to-end Unity Mono trial with representative work; they do not overturn the standalone full-copy measurements or establish an automatic routing policy. The next performance decision must include actual KSP subsystem attribution and total replacement cost.
