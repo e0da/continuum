@@ -72,6 +72,8 @@ namespace KspContinuum
                     throw new InvalidOperationException("Held-out prediction diverged.");
                 errorSquares += error * error;
                 signalSquares += observed * observed;
+                if (!Finite(errorSquares) || !Finite(signalSquares))
+                    throw new InvalidOperationException("Held-out metrics overflowed.");
                 peak = Math.Max(peak, Math.Abs(error));
             }
             int heldOut = prediction.Length - trainingSamples;
@@ -101,7 +103,7 @@ namespace KspContinuum
             for (int i = 0; i < trace.samples.Length; i++)
             {
                 StructuralTraceSample sample = trace.samples[i];
-                if (sample == null || sample.physicsEpoch <= previous || !Finite(sample.relativeDisplacement) || !Finite(sample.relativeVelocity))
+                if (sample == null || (i != 0 && sample.physicsEpoch != previous + 1) || !Finite(sample.relativeDisplacement) || !Finite(sample.relativeVelocity))
                     throw new InvalidOperationException("Structural trace samples are invalid or unordered.");
                 previous = sample.physicsEpoch;
             }

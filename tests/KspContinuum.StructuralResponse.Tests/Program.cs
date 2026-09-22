@@ -30,6 +30,9 @@ static class Program
         Check(StructuralResponse.FitAndPredict(changed, 60).normalizedRms > .05, "held-out change remains visible");
         var duplicate = Oscillator(10); duplicate.samples[5].physicsEpoch = duplicate.samples[4].physicsEpoch;
         Reject(() => StructuralResponse.Validate(duplicate), "duplicate epoch accepted");
+        var skipped = Oscillator(10); skipped.samples[5].physicsEpoch++;
+        for (int i = 6; i < skipped.samples.Length; i++) skipped.samples[i].physicsEpoch++;
+        Reject(() => StructuralResponse.Validate(skipped), "skipped epoch accepted");
         var nan = Oscillator(10); nan.samples[3].relativeVelocity = double.NaN;
         Reject(() => StructuralResponse.Validate(nan), "nonfinite trace accepted");
         var flat = Oscillator(10); foreach (var sample in flat.samples) sample.relativeDisplacement = 0;

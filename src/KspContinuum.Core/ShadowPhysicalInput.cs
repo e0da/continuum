@@ -224,11 +224,9 @@ namespace KspContinuum
                 Vector(link.connectedAnchor, 3, "connected joint anchor");
                 Vector(link.axis, 3, "joint axis");
                 Vector(link.secondaryAxis, 3, "joint secondary axis");
-                Require((Finite(link.breakForce) || Double.IsPositiveInfinity(link.breakForce)) && link.breakForce >= 0,
-                    "Joint break force is invalid.");
-                Require((Finite(link.breakTorque) || Double.IsPositiveInfinity(link.breakTorque)) && link.breakTorque >= 0,
-                    "Joint break torque is invalid.");
-                Require(Finite(link.massScale) && link.massScale > 0 && Finite(link.connectedMassScale) && link.connectedMassScale > 0,
+                Require(Threshold(link.breakForce, link.breakForceStatus), "Joint break force is invalid.");
+                Require(Threshold(link.breakTorque, link.breakTorqueStatus), "Joint break torque is invalid.");
+                Require(Finite(link.massScale) && link.massScale >= 0 && Finite(link.connectedMassScale) && link.connectedMassScale >= 0,
                     "Joint mass scales are invalid.");
             }
         }
@@ -257,6 +255,12 @@ namespace KspContinuum
         static bool Finite(double value)
         {
             return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        static bool Threshold(double value, string status)
+        {
+            return status == "finite" && Finite(value) && value >= 0
+                || status == "unbreakable" && value == 0;
         }
 
         static void Require(bool condition, string message)

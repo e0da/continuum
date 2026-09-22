@@ -166,6 +166,8 @@ namespace KspContinuum
         public double[] secondaryAxis;
         public double breakForce;
         public double breakTorque;
+        public string breakForceStatus;
+        public string breakTorqueStatus;
         public bool collisionEnabled;
         public bool preprocessingEnabled;
         public double massScale;

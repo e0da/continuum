@@ -441,7 +441,30 @@ namespace KspContinuum
                     bodies.Add(rb);
                 }
             }
+            Joint[] joints = vessel.GetComponentsInChildren<Joint>(true);
+            if (joints.Length > 2048)
+                throw new InvalidOperationException("Shadow joint count exceeds 2048; capture is not truncated.");
+            Array.Sort(joints, (left, right) => left.GetInstanceID().CompareTo(right.GetInstanceID()));
+            foreach (Joint joint in joints)
+            {
+                if (joint == null) throw new InvalidOperationException("Vessel contains a missing joint.");
+                Rigidbody host = joint.GetComponent<Rigidbody>();
+                signature.Append("|j:").Append(joint.GetInstanceID()).Append(':')
+                    .Append(joint.GetType().FullName).Append(':')
+                    .Append(host == null ? 0 : host.GetInstanceID()).Append(':')
+                    .Append(joint.connectedBody == null ? 0 : joint.connectedBody.GetInstanceID()).Append(':')
+                    .Append(F(joint.breakForce)).Append(':').Append(F(joint.breakTorque)).Append(':')
+                    .Append(joint.enableCollision).Append(':').Append(joint.enablePreprocessing).Append(':')
+                    .Append(F(joint.massScale)).Append(':').Append(F(joint.connectedMassScale));
+                Append(signature, joint.anchor); Append(signature, joint.connectedAnchor); Append(signature, joint.axis);
+                if (joint is ConfigurableJoint) Append(signature, ((ConfigurableJoint)joint).secondaryAxis);
+            }
             return signature.ToString();
+        }
+
+        static void Append(StringBuilder signature, Vector3 value)
+        {
+            signature.Append(':').Append(F(value.x)).Append(':').Append(F(value.y)).Append(':').Append(F(value.z));
         }
 
         void Accept(SimulationBatch result, string topology, string physicalFrame)
@@ -523,13 +546,18 @@ namespace KspContinuum
                     nativeInstanceId = joint.GetInstanceID(), bodyId = hostId, connectedBodyId = connectedId,
                     jointType = joint.GetType().FullName, anchor = A(joint.anchor), connectedAnchor = A(joint.connectedAnchor),
                     axis = A(joint.axis), secondaryAxis = A(joint is ConfigurableJoint ? ((ConfigurableJoint)joint).secondaryAxis : Vector3.zero),
-                    breakForce = joint.breakForce, breakTorque = joint.breakTorque, collisionEnabled = joint.enableCollision,
+                    breakForce = ThresholdValue(joint.breakForce), breakTorque = ThresholdValue(joint.breakTorque),
+                    breakForceStatus = ThresholdStatus(joint.breakForce), breakTorqueStatus = ThresholdStatus(joint.breakTorque),
+                    collisionEnabled = joint.enableCollision,
                     preprocessingEnabled = joint.enablePreprocessing, massScale = joint.massScale,
                     connectedMassScale = joint.connectedMassScale,
                 });
             }
             return links.ToArray();
         }
+
+        static double ThresholdValue(float value) { return Single.IsPositiveInfinity(value) ? 0 : value; }
+        static string ThresholdStatus(float value) { return Single.IsPositiveInfinity(value) ? "unbreakable" : "finite"; }
 
         static double Distance(Vec a, Vec b)
         {

@@ -838,10 +838,13 @@ static class Program
             nativeInstanceId = -99, bodyId = 0, connectedBodyId = 1, jointType = "UnityEngine.ConfigurableJoint",
             anchor = new double[3], connectedAnchor = new[] { 1.0, 0, 0 }, axis = new[] { 1.0, 0, 0 },
             secondaryAxis = new[] { 0.0, 1, 0 }, breakForce = double.PositiveInfinity,
-            breakTorque = 100, massScale = 1, connectedMassScale = 1,
+            breakTorque = 100, breakForceStatus = "unbreakable", breakTorqueStatus = "finite",
+            massScale = 1, connectedMassScale = 1,
         } };
+        physical.firstAcceptedLinks[0].breakForce = 0;
         ShadowPhysicalInput.Validate(physical);
         Check(true, "valid structural link rejected");
+        Check(ReportJson.Encode(physical).Contains("\"breakForceStatus\":\"unbreakable\""), "structural link did not serialize");
         physical.firstAcceptedLinks[0].connectedBodyId = 0;
         Reject(() => ShadowPhysicalInput.Validate(physical));
         ShadowPhysicalInput.Validate(

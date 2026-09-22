@@ -2,7 +2,7 @@
 
 Continuum's flight shadow now retains the public Unity joint graph alongside its first accepted rigid-body snapshot. Each mapped link records its two captured body IDs, concrete joint type, anchors, axes, break thresholds, collision and preprocessing flags, and mass scales. Joints that do not connect two captured dynamic bodies are counted as unmapped instead of disappearing or being assigned guessed endpoints.
 
-This snapshot closes a data-contract gap; it is not yet a structural replay. It does not contain collider geometry, contacts, PhysX warm-start state, private `PartJoint` setup fields, complete force ownership, or later joint mutations. Stock KSP remains authoritative and the shadow path writes nothing to the vessel.
+This is topology and inventory evidence, not a reconstructable constraint payload or structural replay. It does not contain configurable-joint motions, limits, springs, drives and targets; collider geometry; contacts; PhysX warm-start state; private `PartJoint` setup fields; complete force ownership; or later joint mutations. Stock KSP remains authoritative and the shadow path writes nothing to the vessel.
 
 ## First oracle
 
