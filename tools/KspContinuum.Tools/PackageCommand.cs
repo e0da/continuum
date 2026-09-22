@@ -16,7 +16,8 @@ internal static class PackageCommand
         Tooling.Require(File.Exists(plugin), "Build the Release plugin first.");
         var addon = parsed.Optional("--mission-addon") ?? Path.Combine(root, "src/KspContinuum.Mission/bin/Release/net48/KspContinuum.Mission.dll");
         Tooling.Require(!mission || File.Exists(addon), "Build the Release mission addon first.");
-        var output = Path.GetFullPath(parsed.Optional("--output") ?? Path.Combine(root, "artifacts", mission ? "ksp-continuum-0.1.0-mission.zip" : "ksp-continuum-0.1.0-experiment.zip"));
+        var output = Path.GetFullPath(parsed.Optional("--output") ?? Path.Combine(root, "artifacts", mission ? "ksp-continuum-0.2.0-mission.zip" : "ksp-continuum-0.2.0-experiment.zip"));
+        var download = DownloadUri(parsed.Optional("--download-url"), output);
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         File.Delete(output);
         using (var archive = ZipFile.Open(output, ZipArchiveMode.Create))
@@ -28,7 +29,7 @@ internal static class PackageCommand
             Add(archive, Path.Combine(root, "examples/neutral-inputs.csv"), "GameData/KspContinuum/examples/neutral-inputs.csv");
         }
         VerifyArchive(output);
-        var metadata = Metadata(output, mission);
+        var metadata = Metadata(output, mission, download);
         var metadataPath = Path.ChangeExtension(output, ".ckan");
         File.Delete(metadataPath);
         Tooling.WriteJsonNew(metadataPath, metadata);
@@ -49,7 +50,15 @@ internal static class PackageCommand
         Tooling.Require(!archive.Entries.Any(entry => string.Equals(Path.GetFileName(entry.FullName), "0Harmony.dll", StringComparison.OrdinalIgnoreCase)), "package must use shared Harmony2 and cannot bundle 0Harmony.dll");
     }
 
-    private static JsonObject Metadata(string archive, bool mission)
+    private static Uri DownloadUri(string? value, string archive)
+    {
+        var candidate = value ?? new Uri(archive).AbsoluteUri;
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)) throw new ToolException("--download-url must be an absolute file, http, or https URI");
+        Tooling.Require(uri.Scheme == Uri.UriSchemeFile || uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps, "--download-url must be an absolute file, http, or https URI");
+        return uri;
+    }
+
+    private static JsonObject Metadata(string archive, bool mission, Uri download)
     {
         var sha256 = Tooling.Sha256(archive);
         var sha1 = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(File.ReadAllBytes(archive))).ToLowerInvariant();
@@ -61,15 +70,15 @@ internal static class PackageCommand
             ["name"] = "KSP Continuum local experiment",
             ["abstract"] = "Local qualification build for deterministic, scalable KSP simulation experiments.",
             ["author"] = new JsonArray("e0da"),
-            ["version"] = $"0.1.0-{flavor}.{sha256[..12]}",
+            ["version"] = $"0.2.0-{flavor}.{sha256[..12]}",
             ["ksp_version"] = "1.12.5",
             ["license"] = "restricted",
             ["release_status"] = "testing",
             ["depends"] = new JsonArray(new JsonObject { ["name"] = "Harmony2" }),
             ["install"] = new JsonArray(new JsonObject { ["find"] = "KspContinuum", ["install_to"] = "GameData" }),
-            ["download"] = new Uri(archive).AbsoluteUri,
+            ["download"] = download.AbsoluteUri,
             ["download_size"] = new FileInfo(archive).Length,
-            ["download_hash"] = new JsonObject { ["sha1"] = sha1, ["sha256"] = sha256 },
+            ["download_hash"] = new JsonObject { ["sha1"] = sha1.ToUpperInvariant(), ["sha256"] = sha256.ToUpperInvariant() },
         };
     }
 }
