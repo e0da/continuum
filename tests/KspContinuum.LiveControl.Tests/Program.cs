@@ -1,0 +1,140 @@
+using System;
+using System.IO;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using KspContinuum;
+
+static class Program
+{
+    static int assertions;
+    static readonly string Session = Guid.NewGuid().ToString("D");
+    static readonly string Vessel = Guid.NewGuid().ToString("D");
+
+    static void Check(bool value, string reason)
+    {
+        assertions++;
+        if (!value) throw new Exception(reason);
+    }
+
+    static LiveVesselSnapshot VesselSample() => new LiveVesselSnapshot {
+        vesselId = Vessel, name = "Test craft", body = "Minmus", situation = "LANDED",
+        loaded = true, packed = false, parts = 14, universalTime = 100,
+        altitude = 5, surfaceSpeed = 0, orbitalSpeed = 8, throttle = 0
+    };
+
+    static LiveControlReply Execute(LiveControlPlane control, string command, long frame, long tick,
+        Func<LiveVesselSnapshot> capture) => control.Execute(LiveControlRequest.Parse(command), frame, tick, capture);
+
+    static string Exchange(LoopbackSnapshotServer server, string command, Func<string, string> handle, bool pump)
+    {
+        using var client = new TcpClient();
+        client.Connect("127.0.0.1", server.Port);
+        client.ReceiveTimeout = 5000;
+        using NetworkStream stream = client.GetStream();
+        byte[] input = Encoding.ASCII.GetBytes(command + "\n");
+        stream.Write(input);
+        Task worker = pump ? Task.Run(() => {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            while (!server.DrainOne(handle))
+            {
+                deadline.Token.ThrowIfCancellationRequested();
+                Thread.Yield();
+            }
+        }) : Task.CompletedTask;
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        string line = reader.ReadLine() ?? throw new Exception("Missing reply");
+        worker.GetAwaiter().GetResult();
+        return line;
+    }
+
+    static void PersistentConnection(LoopbackSnapshotServer server, LiveControlPlane control,
+        Func<LiveVesselSnapshot> capture)
+    {
+        using var client = new TcpClient();
+        client.Connect("127.0.0.1", server.Port);
+        client.ReceiveTimeout = 5000;
+        using NetworkStream stream = client.GetStream();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        Task pump = Task.Run(() => {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            int handled = 0;
+            while (handled < 3)
+            {
+                if (server.DrainOne(command => {
+                    if (LiveControlRequest.Parse(command).requestId == "persisted2")
+                        throw new InvalidOperationException("Simulated main-thread failure");
+                    return ReportJson.Encode(Execute(control, command, 30 + handled, 8, capture));
+                })) handled++;
+                else { deadline.Token.ThrowIfCancellationRequested(); Thread.Yield(); }
+            }
+        });
+        foreach (string command in new[] { "hello 1.0.0 persisted1", "snapshot 1.0.0 persisted2 " + Session + " 6 7",
+            "snapshot 1.0.0 persisted3 " + Session + " 6 7" })
+        {
+            byte[] bytes = Encoding.ASCII.GetBytes(command + "\n");
+            stream.Write(bytes);
+            using var json = JsonDocument.Parse(reader.ReadLine() ?? throw new Exception("Missing persistent reply"));
+            Check(json.RootElement.GetProperty("requestId").GetString() == command.Split(' ')[2], "persistent request correlation");
+            if (command.Contains("persisted2", StringComparison.Ordinal))
+                Check(json.RootElement.GetProperty("reason").GetString() == "handler-failed",
+                    "handler failure stays correlated");
+            else if (command.StartsWith("snapshot", StringComparison.Ordinal))
+                Check(json.RootElement.GetProperty("snapshot").GetProperty("parts").GetInt32() == 14,
+                    "persistent snapshot reached source");
+        }
+        pump.GetAwaiter().GetResult();
+    }
+
+    static void Main()
+    {
+        var control = new LiveControlPlane(Session);
+        control.Observe("Flight", Vessel);
+        int captures = 0;
+        LiveVesselSnapshot Capture() { captures++; return VesselSample(); }
+        LiveControlReply hello = Execute(control, "hello 1.0.0 hello1", 20, 3, Capture);
+        Check(hello.status == "ok" && hello.identity.epoch == 1 && hello.snapshot == null &&
+            hello.requestId == "hello1" && hello.protocolVersion == "1.0.0", "hello identity");
+        Check(hello.capabilities.Length == 2 && captures == 0, "read-only capabilities");
+        Check(Execute(control, "snapshot 1.0.0 snap1 " + Session + " 1 3", 21, 4, Capture).snapshot.parts == 14, "snapshot");
+        control.Observe("Flight", Vessel, true);
+        Check(Execute(control, "snapshot 1.0.0 rebound " + Session + " 1 3", 21, 4, Capture).reason == "stale-identity",
+            "same GUID with a replacement runtime object invalidates epoch");
+        control.Observe("Flight", Guid.NewGuid().ToString("D"));
+        Check(Execute(control, "snapshot 1.0.0 snap2 " + Session + " 1 3", 22, 5, Capture).reason == "stale-identity", "vessel switch invalidation");
+        Check(captures == 1, "stale request must not capture");
+        control.Observe("Flight", Vessel);
+        Check(Execute(control, "snapshot 1.0.0 snap3 " + Session + " 4 6", 23, 6, Capture).status == "ok", "new epoch");
+        Check(Execute(control, "snapshot 1.0.0 snap4 " + Guid.NewGuid().ToString("D") + " 4 6", 23, 6, Capture).reason == "stale-identity", "session invalidation");
+        Check(Execute(control, "snapshot 1.0.0 snap5 " + Session + " 4 7", 23, 6, Capture).reason == "tick-not-yet-observed", "tick lower bound");
+        Check(Execute(control, "snapshot 1.0.0 snap6 " + Session + " 4 6 extra", 23, 6, Capture).reason == "invalid-request", "strict fields");
+        Check(Execute(control, "snapshot 2.0.0 snap7 " + Session + " 4 6", 23, 6, Capture).reason == "unsupported-version", "version negotiation");
+        Check(Execute(control, "frobnicate 1.0.0 snap8", 23, 6, Capture).reason == "unknown-operation", "unknown operation");
+        Check(Execute(control, "snapshot 1.0.0 snap9 " + Session + " 4 6", 23, 6, () => new LiveVesselSnapshot { vesselId = Vessel, parts = 1,
+            universalTime = double.NaN }).reason == "capture-changed-or-invalid", "nonfinite capture rejected");
+        Check(Execute(control, "snapshot 1.0.0 snap10 " + Session + " 4 6", 23, 6, () => {
+            LiveVesselSnapshot sample = VesselSample(); sample.name = new string('x', 129); return sample;
+        }).reason == "capture-changed-or-invalid", "unbounded name rejected");
+        control.Observe("Flight", null);
+        Check(Execute(control, "snapshot 1.0.0 snap11 " + Session + " 5 7", 24, 7, Capture).reason == "no-active-vessel", "empty flight");
+        Check(captures == 2, "unavailable request must not capture");
+        using var server = new LoopbackSnapshotServer(0);
+        string wire = Exchange(server, "hello 1.0.0 wire1", command => ReportJson.Encode(Execute(control, command, 25, 7, Capture)), true);
+        using (var json = JsonDocument.Parse(wire))
+            Check(json.RootElement.GetProperty("identity").GetProperty("sessionId").GetString() == Session, "socket reply");
+        int beforeStale = captures;
+        wire = Exchange(server, "snapshot 1.0.0 wire2 " + Session + " 4 7",
+            command => ReportJson.Encode(Execute(control, command, 26, 8, Capture)), true);
+        using (var json = JsonDocument.Parse(wire))
+            Check(json.RootElement.GetProperty("reason").GetString() == "stale-identity", "socket stale rejection");
+        Check(captures == beforeStale, "socket stale request did not touch source");
+        control.Observe("Flight", Vessel);
+        PersistentConnection(server, control, Capture);
+        wire = Exchange(server, new string('x', 257), _ => throw new Exception("Oversized frame reached game thread"), false);
+        using (var json = JsonDocument.Parse(wire))
+            Check(json.RootElement.GetProperty("reason").GetString() == "invalid-frame", "bounded frame");
+        Console.WriteLine("PASS: " + assertions + " live control assertions; loopback handoff exercised without Unity.");
+    }
+}
