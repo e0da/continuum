@@ -31,28 +31,31 @@ namespace KspContinuum
             for (int i = 0; i < topologyParts.Count; i++)
             {
                 Part part = topologyParts[i];
-                if (part == null || part.rb == null) throw new InvalidOperationException("Part rigidbody unavailable.");
+                Rigidbody body = Body(part);
+                if (body == null) throw new InvalidOperationException("Part physical owner unavailable.");
                 topology[i] = part.flightID.ToString(CultureInfo.InvariantCulture) + ":" +
-                    part.rb.GetInstanceID().ToString(CultureInfo.InvariantCulture);
+                    body.GetInstanceID().ToString(CultureInfo.InvariantCulture);
             }
             foreach (Part part in vessel.parts)
             {
-                if (part == null || part.rb == null) throw new InvalidOperationException("Part rigidbody unavailable.");
+                Rigidbody body = Body(part);
+                if (body == null) throw new InvalidOperationException("Part physical owner unavailable.");
                 Part existing;
-                if (!representatives.TryGetValue(part.rb, out existing) || part.flightID < existing.flightID) representatives[part.rb] = part;
+                if (!representatives.TryGetValue(body, out existing) || part.flightID < existing.flightID) representatives[body] = part;
             }
             var parts = new List<Part>(representatives.Values);
             parts.Sort((a, b) => a.flightID.CompareTo(b.flightID));
             if (parts.Count == 0) throw new InvalidOperationException("No active-vessel rigidbodies.");
-            Vector3 reference = parts[0].rb.worldCenterOfMass;
+            Vector3 reference = Body(parts[0]).worldCenterOfMass;
             Vector3d frame = Krakensbane.GetFrameVelocity();
             var bodies = new WriterCensusBody[parts.Count];
             for (int i = 0; i < parts.Count; i++)
             {
-                Part part = parts[i]; Vector3 position = part.rb.worldCenterOfMass; Vector3 velocity = part.rb.velocity;
-                Vector3 angularVelocity = part.rb.angularVelocity; Quaternion rotation = part.rb.rotation;
+                Part part = parts[i]; Rigidbody body = Body(part);
+                Vector3 position = body.worldCenterOfMass; Vector3 velocity = body.velocity;
+                Vector3 angularVelocity = body.angularVelocity; Quaternion rotation = body.rotation;
                 bodies[i] = new WriterCensusBody {
-                    id = part.flightID.ToString(CultureInfo.InvariantCulture) + ":" + part.rb.GetInstanceID().ToString(CultureInfo.InvariantCulture),
+                    id = part.flightID.ToString(CultureInfo.InvariantCulture) + ":" + body.GetInstanceID().ToString(CultureInfo.InvariantCulture),
                     relativePosition = new Vec(position.x - reference.x, position.y - reference.y, position.z - reference.z),
                     normalizedVelocity = new Vec(velocity.x + frame.x, velocity.y + frame.y, velocity.z + frame.z),
                     orientation = new double[] { rotation.x, rotation.y, rotation.z, rotation.w },
@@ -64,6 +67,13 @@ namespace KspContinuum
                 frameVelocity = new Vec(frame.x, frame.y, frame.z), bodies = bodies,
                 topologyKey = string.Join("|", topology)
             };
+        }
+
+        static Rigidbody Body(Part part)
+        {
+            if (part == null) return null;
+            if (part.rb != null) return part.rb;
+            return part.RigidBodyPart == null ? null : part.RigidBodyPart.rb;
         }
 
         public void Dispose()
