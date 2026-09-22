@@ -50,10 +50,17 @@ namespace KspContinuum
         public PerformanceWorkloadIdentity workload { get; set; } = new PerformanceWorkloadIdentity();
         public string baselineStrategy { get; set; } = "";
         public string candidateStrategy { get; set; } = "";
+        public string environmentSha256 { get; set; } = "";
+        public string measurementProtocol { get; set; } = "";
+        public string sampleProtocol { get; set; } = "";
+        public int samples { get; set; }
         public double baselineMedianMilliseconds { get; set; }
         public double candidateMedianMilliseconds { get; set; }
         public double speedup { get; set; }
         public double? candidateToBaselineAllocationRatio { get; set; }
+        public string allocationKind { get; set; } = "unavailable";
+        public string allocationScope { get; set; } = "unavailable";
+        public double maximumRegressionFraction { get; set; }
         public bool withinMaximumRegression { get; set; }
     }
 
@@ -108,10 +115,17 @@ namespace KspContinuum
                 workload = candidate.workload,
                 baselineStrategy = baseline.strategy,
                 candidateStrategy = candidate.strategy,
+                environmentSha256 = candidate.environmentSha256,
+                measurementProtocol = candidate.measurementProtocol,
+                sampleProtocol = candidate.sampleProtocol,
+                samples = candidate.total.milliseconds.Length,
                 baselineMedianMilliseconds = baselineMedian,
                 candidateMedianMilliseconds = candidateMedian,
                 speedup = baselineMedian / candidateMedian,
                 candidateToBaselineAllocationRatio = allocationRatio,
+                allocationKind = allocationRatio.HasValue ? candidate.total.allocations.kind : "unavailable",
+                allocationScope = allocationRatio.HasValue ? candidate.total.allocations.scope : "unavailable",
+                maximumRegressionFraction = maximumRegressionFraction,
                 withinMaximumRegression = candidateMedian <= baselineMedian * (1 + maximumRegressionFraction)
             };
         }

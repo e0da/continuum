@@ -50,6 +50,10 @@ static class Program
         PerformanceComparison performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
         Near(performance.speedup, 2); Near(performance.candidateToBaselineAllocationRatio.GetValueOrDefault(), 0.5);
         Check(performance.withinMaximumRegression && performance.baselineStrategy == "scalar" && performance.candidateStrategy == "simd");
+        Check(performance.environmentSha256 == baselinePerformance.environmentSha256 &&
+            performance.measurementProtocol == "test-clock-v1" && performance.sampleProtocol == "test-samples-v1" &&
+            performance.samples == 3 && performance.maximumRegressionFraction == 0.05 &&
+            performance.allocationKind == "managed-allocated-bytes" && performance.allocationScope == "current-thread");
         candidatePerformance.workload.items = 65;
         Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
         candidatePerformance.workload.items = 64;
@@ -69,7 +73,7 @@ static class Program
         candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
         candidatePerformance.total.allocations = new PerformanceAllocationSamples();
         performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
-        Check(!performance.candidateToBaselineAllocationRatio.HasValue);
+        Check(!performance.candidateToBaselineAllocationRatio.HasValue && performance.allocationKind == "unavailable" && performance.allocationScope == "unavailable");
         candidatePerformance.workload.fixtureSha256 = new string('z', 64);
         Check(Reject(() => PerformanceObservations.Validate(candidatePerformance)));
 
