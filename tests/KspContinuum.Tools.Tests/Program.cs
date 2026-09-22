@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json.Nodes;
 using KspContinuum;
 
@@ -41,6 +42,19 @@ try
     Require(Run("aero-compare", aero, otherAero) != 0, "mixed providers accepted");
     var malformedAero = Path.Combine(temporary, "aero-malformed.json"); File.WriteAllText(malformedAero, "{\"schema\":\"ksp-continuum-aero-capture/v1\",\"disposition\":\"Valid\"}");
     Require(Run("aero-compare", malformedAero) != 0, "malformed aero receipt accepted");
+
+    var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]); var package = Path.Combine(temporary, "continuum.zip");
+    Require(Run("package", "--plugin", plugin, "--output", package) == 0, "package generation failed");
+    var packageMetadata = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(package, ".ckan")))!.AsObject();
+    Require(packageMetadata["identifier"]!.ToString() == "KspContinuum", "package identifier changed");
+    Require(packageMetadata["release_status"]!.ToString() == "testing", "local package was presented as a release");
+    Require(packageMetadata["license"]!.ToString() == "restricted", "package claimed an ungranted license");
+    Require(packageMetadata["depends"]!.AsArray().Any(item => item!["name"]!.ToString() == "Harmony2"), "package omitted shared Harmony2 dependency");
+    Require(packageMetadata["install"]!.AsArray().Single()!["find"]!.ToString() == "KspContinuum", "package install root changed");
+    Require(packageMetadata["download"]!.ToString() == new Uri(package).AbsoluteUri, "metadata does not target the local archive");
+    Require(packageMetadata["download_size"]!.GetValue<long>() == new FileInfo(package).Length, "metadata archive size changed");
+    Require(packageMetadata["download_hash"]!["sha256"]!.ToString() == Sha256(package), "metadata does not bind exact archive");
+    using (var packaged = ZipFile.OpenRead(package)) Require(!packaged.Entries.Any(entry => string.Equals(Path.GetFileName(entry.FullName), "0Harmony.dll", StringComparison.OrdinalIgnoreCase)), "package bundled Harmony runtime");
     Console.WriteLine("KspContinuum.Tools.Tests passed"); return 0;
 }
 finally { Directory.Delete(temporary, true); }
@@ -48,7 +62,6 @@ finally { Directory.Delete(temporary, true); }
 int Run(params string[] arguments) { var start = new ProcessStartInfo("dotnet") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true }; start.ArgumentList.Add("run"); start.ArgumentList.Add("--project"); start.ArgumentList.Add(project); start.ArgumentList.Add("-c"); start.ArgumentList.Add("Release"); start.ArgumentList.Add("--no-build"); start.ArgumentList.Add("--"); foreach (var argument in arguments) start.ArgumentList.Add(argument); using var process = Process.Start(start)!; process.WaitForExit(); if (process.ExitCode != 0) Console.Error.Write(process.StandardError.ReadToEnd()); return process.ExitCode; }
 void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 string FindRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current is not null && !File.Exists(Path.Combine(current.FullName, "README.md"))) current = current.Parent; return current?.FullName ?? throw new InvalidOperationException("repository root not found"); }
-
 AeroCaptureReport AeroReceipt(string version)
 {
     const string hash = "8a20892953fc14c02f352b393eb6712c665156d94a7d846d16c20a7de3e22f27";
@@ -76,3 +89,4 @@ AeroCaptureReport AeroReceipt(string version)
     return new AeroCaptureReport(provenance, AeroCaptureDisposition.Valid, AeroCaptureReason.None,
         AeroCleanupOutcome.RemovedOwnedPatches, [new AeroCaptureSample(Step(3), [drag, lift, absent])]);
 }
+string Sha256(string path) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();

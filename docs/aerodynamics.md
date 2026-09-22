@@ -119,10 +119,20 @@ owned patches before exporting. The flight panel starts and stops the recorder. 
 assembly hash and MVID below, the expected owned hooks at inspection time, and confirmed cleanup; otherwise the run
 publishes no partial samples.
 
-This code compiles against Lib.Harmony but does not package `0Harmony.dll`. Installed qualification therefore requires
-the shared CKAN dependency `Harmony2` from HarmonyKSP. The repository does not yet publish release/NetKAN metadata, so
-that dependency remains an explicit installation gate for the first disposable-instance run. Source compilation and
-portable lifecycle tests do not establish patch coexistence, callback ordering, field units, or receipt validity in KSP.
+This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
+metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
+The metadata points to the local archive; the repository does not yet publish release or NetKAN metadata. Source
+compilation and portable lifecycle tests do not establish patch coexistence, callback ordering, field units, or receipt
+validity in KSP.
+
+The automated entrypoint is `--continuum-aero-capture-001`. Launch an owned qualification instance directly into a
+controlled stock atmospheric flight save with KSP's `-loadfile` argument plus `-batchmode -nographics`. The addon waits
+for one active, unpacked vessel at ordinary time scale, observes a two-second stable eligibility window, captures the
+declared 64-sample bound, writes `aero-capture.json`, `status.txt`, and `shutdown.txt` beneath a uniquely named
+`GameData/KspContinuum/PluginData/aero-capture-001-*` directory, then exits. It exits with code 0 only when the capture
+receipt is valid, owns all 64 samples, and confirms removal of its Harmony hooks. An ineligible start or incomplete run
+times out after 120 wall-clock seconds and exits with code 2. The selected save is an external immutable input to the
+experiment; the addon does not create, overwrite, or persist game state.
 
 1. Pin the stock assembly hash/MVID and exact callback dataflow.
 2. Capture at most 64 samples and 128 parts per sample immediately after stock per-part aero calculation.
