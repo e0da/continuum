@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   baseline:
-    uses: e0da/actions/.github/workflows/ci-baseline.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    uses: e0da/actions/.github/workflows/ci-baseline.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
     permissions:
@@ -23,7 +23,7 @@ jobs:
       statuses: write
 
   portable:
-    uses: e0da/actions/.github/workflows/ci-command.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    uses: e0da/actions/.github/workflows/ci-command.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
       dotnet-version: "8.0.x"
@@ -31,20 +31,21 @@ jobs:
       command: scripts/check portable
 
   field:
-    uses: e0da/actions/.github/workflows/ci-command.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    uses: e0da/actions/.github/workflows/ci-command.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
       python-version: "3.11"
       command: scripts/check field
 
   structural:
-    uses: e0da/actions/.github/workflows/ci-command.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    uses: e0da/actions/.github/workflows/ci-command.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
+      system-deps: cmake build-essential ninja-build
       command: scripts/check structural
 
   hosted-drift:
-    uses: e0da/actions/.github/workflows/hosted-drift-report.yml@5a7d5c8dde2a88e4d3ea5c68e03fe66bdce9bf18
+    uses: e0da/actions/.github/workflows/hosted-drift-report.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
       mode: enforce
