@@ -149,15 +149,33 @@ class Program
             trace.Report.status == "invalid" && trace.Report.cleanupStatus == "owner-destroyed",
             "destroyed owner reported"
         );
-        for (int mode = 0; mode < 6; mode++)
+        Setup();
+        trace = new LifecycleTraceCapture(() => 0);
+        trace.Start();
+        Stabilize(trace);
+        trace.ObserveUpdate();
+        FlightGlobals.ActiveVessel.parts[0].rb.position = new Vector3d(-10, -20, -30);
+        FlightGlobals.ActiveVessel.parts[0].rb.velocity = new Vector3d(4, 0, 0);
+        Krakensbane.Velocity = new Vector3d(6, 0, 0);
+        GameEvents.onFloatingOriginShift.Fire(new Vector3d(10, 20, 30));
+        trace.ObserveUpdate();
+        trace.Dispose();
+        Check(
+            trace.Report.status == "interrupted"
+                && trace.Report.completedEvents == 2
+                && trace.Report.events[1].context.originEvents == 1
+                && trace.Report.events[1].context.originTranslation.X == 10
+                && trace.Report.events[1].parts[0].position.Value.X == 0
+                && trace.Report.events[1].parts[0].velocity.Value.X == 10,
+            "ordinary origin and velocity-frame transforms are named and normalized"
+        );
+        for (int mode = 1; mode < 6; mode++)
         {
             Setup();
             trace = new LifecycleTraceCapture(() => 0);
             trace.Start();
             Stabilize(trace);
             trace.ObserveUpdate();
-            if (mode == 0)
-                GameEvents.onFloatingOriginShift.Fire();
             if (mode == 1)
                 FlightGlobals.ActiveVessel.packed = true;
             if (mode == 2)
@@ -167,7 +185,7 @@ class Program
             if (mode == 4)
                 HighLogic.LoadedScene = GameScenes.MAINMENU;
             if (mode == 5)
-                Krakensbane.Velocity = new Vector3d(1, 0, 0);
+                FlightGlobals.ActiveVessel.mainBody = new CelestialBody { Id = 991 };
             trace.ObserveUpdate();
             Check(
                 trace.Report.status == "invalidated" && trace.Report.completedEvents == 2,
@@ -201,23 +219,37 @@ class Program
         );
         FlightGlobals.ready = true;
         trace.ObserveFixedUpdate();
-        GameEvents.onFloatingOriginShift.Fire();
+        FlightGlobals.ActiveVessel.parts[0].rb.position = new Vector3d(-1, 0, 0);
+        GameEvents.onFloatingOriginShift.Fire(new Vector3d(1, 0, 0));
         trace.ObserveFixedUpdate();
         trace.ObserveFixedUpdate();
         Check(
-            trace.Report.status == "arming"
+            trace.Report.status == "running"
                 && trace.Report.completedEvents == 0
-                && trace.Report.stableArmingHostFixedObservations == 2,
-            "initial origin shift restarts arming window"
+                && trace.Report.stableArmingHostFixedObservations == 3,
+            "ordinary origin translation does not prevent arming"
         );
-        trace.ObserveFixedUpdate();
-        Check(trace.Report.status == "running" && trace.Report.completedEvents == 0,
-            "capture starts after stable post-shift orbital context");
-        GameEvents.onFloatingOriginShift.Fire();
+        FlightGlobals.ActiveVessel.parts[0].rb.position = new Vector3d(-3, 0, 0);
+        GameEvents.onFloatingOriginShift.Fire(new Vector3d(2, 0, 0));
         trace.ObserveUpdate();
-        Check(trace.Report.status == "invalidated" && trace.Report.completedEvents == 1,
-            "origin shift after arming remains visible and invalidates");
         trace.Dispose();
+        Check(
+            trace.Report.status == "interrupted"
+                && trace.Report.completedEvents == 1
+                && trace.Report.events[0].parts[0].position.Value.X == 0
+                && trace.Report.events[0].context.originEvents == 2,
+            "origin shift after arming remains visible without false invalidation"
+        );
+        Setup();
+        trace = new LifecycleTraceCapture(() => 0);
+        trace.Start();
+        Stabilize(trace);
+        GameEvents.onFloatingOriginShift.Fire(new Vector3d(double.NaN, 0, 0));
+        trace.ObserveUpdate();
+        Check(
+            trace.Report.status == "invalidated" && trace.Report.completedEvents == 0,
+            "unsupported nonfinite origin transform invalidates without escaping callback"
+        );
         for (int mode = 0; mode < 2; mode++)
         {
             Setup();
@@ -228,7 +260,7 @@ class Program
             if (mode == 0)
                 FlightGlobals.ActiveVessel.parts[0].rb = new UnityEngine.Rigidbody { Id = 901 };
             else
-                Krakensbane.Velocity = new Vector3d(0, 2, 0);
+                FlightGlobals.ActiveVessel.mainBody = new CelestialBody { Id = 902 };
             trace.ObserveFixedUpdate();
             trace.ObserveFixedUpdate();
             Check(

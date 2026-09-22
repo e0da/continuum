@@ -72,7 +72,8 @@ namespace KspContinuum
             holdPhysics,
             paused,
             eligible;
-        public readonly Vec frameVelocity;
+        public readonly Vec frameVelocity,
+            originTranslation;
 
         public LifecycleTraceContext(
             string session,
@@ -99,7 +100,8 @@ namespace KspContinuum
             bool held,
             bool paused,
             bool eligible,
-            Vec velocity
+            Vec velocity,
+            Vec originTranslation
         )
         {
             if (
@@ -121,6 +123,7 @@ namespace KspContinuum
             if (wall < 0 || step <= 0 || warp < 0 || scale < 0)
                 throw new ArgumentException("Invalid lifecycle clocks.");
             ForceObservationValidation.Vector(velocity);
+            ForceObservationValidation.Vector(originTranslation);
             sessionId = session;
             this.stage = stage;
             vesselId = vessel;
@@ -146,6 +149,7 @@ namespace KspContinuum
             this.paused = paused;
             this.eligible = eligible;
             frameVelocity = velocity;
+            this.originTranslation = originTranslation;
         }
     }
 
