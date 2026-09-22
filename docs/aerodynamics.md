@@ -133,6 +133,8 @@ portable lifecycle tests do not establish patch coexistence, callback ordering, 
 
 Current force receipts are not training data for stock aero. They omit stock aerodynamic rigidbody writes. Post-step velocity deltas also mix gravity, frame changes, contacts, constraints and other direct writes.
 
+`continuum-tools aero-compare RECEIPT [RECEIPT ...] --output REPORT` evaluates the deterministic drag-cube baseline against the captured body-drag publications. The report separates finite comparisons from abstentions, summarizes force magnitude, force vector, direction and torque errors, and buckets results by dynamic pressure and Mach regime. It rejects malformed capture contracts and refuses to combine different receipt-wide provider fingerprints. The capture format has only receipt-wide provider provenance, so the comparison cannot independently prove per-publication provider homogeneity; that limitation is recorded in every output report.
+
 ## Evaluation
 
 Split by complete attempt, trajectory, craft design and craft family. Adjacent physics steps are near duplicates and may not cross train/test boundaries. Keep provider and version splits exact. Required adversaries include zero density/speed, transonic flight, high angle of attack, spin, staging, shielding changes, deployed surfaces and reentry extremes.
