@@ -48,8 +48,8 @@ namespace UnityEngine.LowLevel
     {
         public static PlayerLoopSystem Current;
         public static int Writes;
-        public static bool FailAfterWrite;
+        public static bool FailAfterWrite, FailBeforeWrite;
         public static PlayerLoopSystem GetCurrentPlayerLoop() { return Current; }
-        public static void SetPlayerLoop(PlayerLoopSystem value) { Current = value; Writes++; if (FailAfterWrite) { FailAfterWrite = false; throw new InvalidOperationException("Native setter failure"); } }
+        public static void SetPlayerLoop(PlayerLoopSystem value) { Writes++; if (FailBeforeWrite) { FailBeforeWrite = false; throw new InvalidOperationException("Native setter failure before write"); } Current = value; if (FailAfterWrite) { FailAfterWrite = false; throw new InvalidOperationException("Native setter failure"); } }
     }
 }
