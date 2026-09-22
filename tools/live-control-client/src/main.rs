@@ -14,6 +14,7 @@ struct Options {
     address: String,
     samples: usize,
     output: PathBuf,
+    ready: PathBuf,
     timeout: Duration,
 }
 
@@ -33,14 +34,30 @@ struct Reply {
 struct Identity {
     session_id: String,
     epoch: u64,
+    render_frame: u64,
+    observed_fixed_callbacks: u64,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Sample {
     sequence: usize,
+    render_frame: u64,
+    observed_fixed_callbacks: u64,
     round_trip_nanoseconds: u64,
     observer_nanoseconds: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadyReceipt<'a> {
+    schema: &'static str,
+    status: &'static str,
+    session_id: &'a str,
+    epoch: u64,
+    accepted_snapshot_sequence: usize,
+    render_frame: u64,
+    observed_fixed_callbacks: u64,
 }
 
 #[derive(Serialize)]
@@ -96,8 +113,25 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
         if observed.session_id != identity.session_id || observed.epoch != identity.epoch {
             return Err(format!("request {request_id} changed identity"));
         }
+        if sequence == 0 {
+            write_new(
+                &options.ready,
+                &ReadyReceipt {
+                    schema: "ksp-continuum-live-control-ready/v1",
+                    status: "ready",
+                    session_id: &identity.session_id,
+                    epoch: identity.epoch,
+                    accepted_snapshot_sequence: sequence,
+                    render_frame: observed.render_frame,
+                    observed_fixed_callbacks: observed.observed_fixed_callbacks,
+                },
+                "readiness marker",
+            )?;
+        }
         samples.push(Sample {
             sequence,
+            render_frame: observed.render_frame,
+            observed_fixed_callbacks: observed.observed_fixed_callbacks,
             round_trip_nanoseconds: round_trip,
             observer_nanoseconds: reply
                 .observer_nanoseconds
@@ -117,19 +151,24 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
         epoch: identity.epoch,
         samples,
     };
-    let encoded = serde_json::to_vec_pretty(&receipt).map_err(|e| e.to_string())?;
-    if let Some(parent) = options.output.parent() {
+    write_new(&options.output, &receipt, "receipt")?;
+    println!("{}", options.output.display());
+    Ok(())
+}
+
+fn write_new<T: Serialize>(path: &PathBuf, value: &T, kind: &str) -> Result<(), String> {
+    let encoded = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&options.output)
-        .map_err(|e| format!("cannot create receipt: {e}"))?;
+        .open(path)
+        .map_err(|e| format!("cannot create {kind}: {e}"))?;
     output
         .write_all(&encoded)
-        .map_err(|e| format!("cannot write receipt: {e}"))?;
-    println!("{}", options.output.display());
+        .map_err(|e| format!("cannot write {kind}: {e}"))?;
     Ok(())
 }
 
@@ -193,6 +232,7 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
     let mut address = "127.0.0.1:47771".to_string();
     let mut samples = 300usize;
     let mut output = None;
+    let mut ready = None;
     let mut timeout_ms = 5_000u64;
     let mut index = 0;
     while index < arguments.len() {
@@ -201,6 +241,7 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
             "--address" => address = value.clone(),
             "--samples" => samples = value.parse().map_err(|_| "invalid --samples")?,
             "--output" => output = Some(PathBuf::from(value)),
+            "--ready" => ready = Some(PathBuf::from(value)),
             "--timeout-ms" => timeout_ms = value.parse().map_err(|_| "invalid --timeout-ms")?,
             _ => return Err(usage()),
         }
@@ -212,10 +253,16 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
     if timeout_ms == 0 || timeout_ms > 60_000 {
         return Err("--timeout-ms must be between 1 and 60000".into());
     }
+    let output = output.ok_or_else(usage)?;
+    let ready = ready.ok_or_else(usage)?;
+    if output == ready {
+        return Err("--ready and --output must be different paths".into());
+    }
     Ok(Options {
         address,
         samples,
-        output: output.ok_or_else(usage)?,
+        output,
+        ready,
         timeout: Duration::from_millis(timeout_ms),
     })
 }
@@ -228,7 +275,7 @@ fn nanos(duration: Duration) -> Result<u64, String> {
 }
 
 fn usage() -> String {
-    "usage: continuum-live-control-client [--address HOST:PORT] [--samples 1..10000] --output RECEIPT.json [--timeout-ms 1..60000]".into()
+    "usage: continuum-live-control-client [--address HOST:PORT] [--samples 1..10000] --ready READY.json --output RECEIPT.json [--timeout-ms 1..60000]".into()
 }
 
 #[cfg(test)]
@@ -244,8 +291,36 @@ mod tests {
             "10001".into(),
             "--output".into(),
             "x".into(),
+            "--ready".into(),
+            "r".into(),
         ];
         assert!(parse_options(&args).unwrap_err().contains("between 1 and"));
+    }
+
+    #[test]
+    fn readiness_evidence_cannot_overwrite_existing_file() {
+        let path = env::temp_dir().join(format!(
+            "continuum-live-control-ready-{}-{}.json",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let marker = ReadyReceipt {
+            schema: "ksp-continuum-live-control-ready/v1",
+            status: "ready",
+            session_id: "session",
+            epoch: 1,
+            accepted_snapshot_sequence: 0,
+            render_frame: 10,
+            observed_fixed_callbacks: 4,
+        };
+        write_new(&path, &marker, "readiness marker").unwrap();
+        assert!(write_new(&path, &marker, "readiness marker").is_err());
+        let encoded = fs::read_to_string(&path).unwrap();
+        assert!(encoded.contains(r#""renderFrame": 10"#));
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -263,9 +338,9 @@ mod tests {
                 reader.read_line(&mut line).unwrap();
                 assert_eq!(line.trim_end(), expected);
                 let reply = if expected.starts_with("hello") {
-                    r#"{"status":"ok","requestId":"qualification-hello","identity":{"sessionId":"session","epoch":7}}"#
+                    r#"{"status":"ok","requestId":"qualification-hello","identity":{"sessionId":"session","epoch":7,"renderFrame":10,"observedFixedCallbacks":4}}"#
                 } else {
-                    r#"{"status":"ok","requestId":"qualification-0","identity":{"sessionId":"session","epoch":7},"snapshot":{"parts":3},"observerNanoseconds":123}"#
+                    r#"{"status":"ok","requestId":"qualification-0","identity":{"sessionId":"session","epoch":7,"renderFrame":11,"observedFixedCallbacks":5},"snapshot":{"parts":3},"observerNanoseconds":123}"#
                 };
                 writeln!(socket, "{reply}").unwrap();
             }
