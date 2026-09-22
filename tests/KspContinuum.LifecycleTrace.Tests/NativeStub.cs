@@ -238,9 +238,9 @@ public static class GameEvents
             Handlers -= action;
         }
 
-        public void Fire()
+        public void Fire(Vector3d offset = default(Vector3d), Vector3d nonFrame = default(Vector3d))
         {
-            Handlers?.Invoke(new Vector3d(), new Vector3d());
+            Handlers?.Invoke(offset, nonFrame);
         }
     }
 

@@ -29,12 +29,13 @@ namespace KspContinuum
         bool started,
             finished,
             originRegistered,
-            registrationsAttempted;
+            registrationsAttempted,
+            unsupportedOriginTransform;
         string topologyKey,
             frameKey,
             armingTopologyKey,
             armingFrameKey;
-        long armingOriginEvents;
+        Vector3d originTranslation;
         double startTime,
             previousElapsed;
         public LifecycleTraceReport Report { get; private set; }
@@ -123,7 +124,19 @@ namespace KspContinuum
         {
             RequireThread();
             if (!finished)
+            {
+                if (!IsFinite(offset.x) || !IsFinite(offset.y) || !IsFinite(offset.z))
+                {
+                    unsupportedOriginTransform = true;
+                    return;
+                }
+                originTranslation = new Vector3d(
+                    originTranslation.x + offset.x,
+                    originTranslation.y + offset.y,
+                    originTranslation.z + offset.z
+                );
                 Report.originEvents++;
+            }
         }
 
         void Observe(string name)
@@ -145,6 +158,11 @@ namespace KspContinuum
                     return;
                 }
                 Audit();
+                if (unsupportedOriginTransform)
+                {
+                    Finish("invalidated", "Floating-origin event supplied a nonfinite translation.");
+                    return;
+                }
                 var vessel = Active();
                 bool eligible = Eligible(vessel);
                 if (topologyKey == null)
@@ -170,6 +188,8 @@ namespace KspContinuum
                     frameKey = frame;
                     Report.frameGeneration++;
                 }
+                Vector3d frameVelocity =
+                    vessel == null ? new Vector3d() : Krakensbane.GetFrameVelocity();
                 var context = new LifecycleTraceContext(
                     Report.sessionId,
                     name,
@@ -195,14 +215,18 @@ namespace KspContinuum
                     vessel != null && vessel.HoldPhysics,
                     FlightDriver.Pause,
                     eligible,
-                    vessel == null ? new Vec() : Vector(Krakensbane.GetFrameVelocity())
+                    Vector(frameVelocity),
+                    Vector(originTranslation)
                 );
-                var parts = changed ? new LifecyclePartSample[0] : Capture(vessel);
+                var parts = changed ? new LifecyclePartSample[0] : Capture(vessel, frameVelocity);
                 if (
                     Active() != vessel
                     || Topology(vessel) != topologyKey
                     || Frame(vessel) != frameKey
                     || context.originEvents != Report.originEvents
+                    || Krakensbane.GetFrameVelocity().x != frameVelocity.x
+                    || Krakensbane.GetFrameVelocity().y != frameVelocity.y
+                    || Krakensbane.GetFrameVelocity().z != frameVelocity.z
                 )
                     throw new InvalidOperationException("Context changed during sample.");
                 var entry = new LifecycleTraceEvent(
@@ -287,12 +311,10 @@ namespace KspContinuum
             if (
                 topology != armingTopologyKey
                 || frame != armingFrameKey
-                || Report.originEvents != armingOriginEvents
             )
             {
                 armingTopologyKey = topology;
                 armingFrameKey = frame;
-                armingOriginEvents = Report.originEvents;
                 Report.stableArmingHostFixedObservations = 1;
                 return false;
             }
@@ -312,19 +334,32 @@ namespace KspContinuum
         void ResetArmingCandidate()
         {
             armingTopologyKey = armingFrameKey = null;
-            armingOriginEvents = Report.originEvents;
             Report.stableArmingHostFixedObservations = 0;
         }
 
         static void Finite(double value)
         {
-            if (double.IsNaN(value) || double.IsInfinity(value))
+            if (!IsFinite(value))
                 throw new ArgumentException("Nonfinite sample.");
+        }
+
+        static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         static Vec Vector(Vector3d value)
         {
             return new Vec(value.x, value.y, value.z);
+        }
+
+        Vector3d TranslationNormalized(Vector3d value)
+        {
+            return new Vector3d(
+                value.x + originTranslation.x,
+                value.y + originTranslation.y,
+                value.z + originTranslation.z
+            );
         }
 
         static string Number(double value)
@@ -335,18 +370,9 @@ namespace KspContinuum
 
         string Frame(Vessel vessel)
         {
-            var velocity = vessel == null ? new Vector3d() : Krakensbane.GetFrameVelocity();
             return HighLogic.LoadedScene
                 + ":"
-                + Report.originEvents
-                + ":"
                 + (vessel == null || vessel.mainBody == null ? 0 : vessel.mainBody.GetInstanceID())
-                + ":"
-                + Number(velocity.x)
-                + ":"
-                + Number(velocity.y)
-                + ":"
-                + Number(velocity.z)
                 + ":"
                 + Number(TimeWarp.CurrentRate)
                 + ":"
@@ -383,7 +409,7 @@ namespace KspContinuum
             return text.ToString();
         }
 
-        LifecyclePartSample[] Capture(Vessel vessel)
+        LifecyclePartSample[] Capture(Vessel vessel, Vector3d frameVelocity)
         {
             int count = vessel.parts.Count;
             if (count == 0)
@@ -415,12 +441,13 @@ namespace KspContinuum
                     || (p.RigidBodyPart != null && !ids.Contains(p.RigidBodyPart.flightID))
                 )
                     throw new InvalidOperationException("Foreign topology reference.");
-                Vec? center = b == null ? (Vec?)null : Vector(b.worldCenterOfMass);
+                Vec? center =
+                    b == null ? (Vec?)null : Vector(TranslationNormalized(b.worldCenterOfMass));
                 var holders = new ForceAtPositionObservation[p.forces.Count];
                 for (int j = 0; j < holders.Length; j++)
                 {
                     var f = p.forces[j];
-                    var position = Vector(f.pos);
+                    var position = Vector(TranslationNormalized(f.pos));
                     Vec? arm = center.HasValue ? (Vec?)(position + center.Value * -1) : null;
                     holders[j] = new ForceAtPositionObservation(Vector(f.force), position, arm);
                 }
@@ -440,8 +467,14 @@ namespace KspContinuum
                         ? new LifecyclePartSample(census, null, null, null, null, null)
                         : new LifecyclePartSample(
                             census,
-                            Vector(b.position),
-                            Vector(b.velocity),
+                            Vector(TranslationNormalized(b.position)),
+                            Vector(
+                                new Vector3d(
+                                    b.velocity.x + frameVelocity.x,
+                                    b.velocity.y + frameVelocity.y,
+                                    b.velocity.z + frameVelocity.z
+                                )
+                            ),
                             Vector(b.angularVelocity),
                             new Vec(b.rotation.x, b.rotation.y, b.rotation.z),
                             b.rotation.w
