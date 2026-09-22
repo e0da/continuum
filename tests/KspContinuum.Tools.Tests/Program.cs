@@ -37,6 +37,24 @@ try
     Require(aeroComparison["counts"]!["capturedSamples"]!.GetValue<int>() == 1 && aeroComparison["counts"]!["bodyDragLabels"]!.GetValue<int>() == 2, "aero comparison lost labels");
     Require(aeroComparison["counts"]!["finiteCompared"]!.GetValue<int>() == 1 && aeroComparison["counts"]!["abstentions"]!.GetValue<int>() == 1, "aero comparison hid abstention");
     Require(aeroComparison["errors"]!["forceVectorNormNewtons"]!["maximum"]!.GetValue<double>() == 0, "exact baseline label diverged");
+    var scalarDiagnostics = aeroComparison["stockDragScalarDiagnostics"]!;
+    Require(scalarDiagnostics["count"]!.GetValue<int>() == 2, "stock diagnostics did not cover every body-drag label");
+    Require(scalarDiagnostics["scope"]!.ToString() ==
+        "all body-drag rows; no-ocean-multiplier product; submerged samples indistinguishable",
+        "stock diagnostics overstated their ability to identify non-submerged samples");
+    Require(aeroComparison["incompleteness"]!.AsArray().Any(item =>
+        item!.ToString().Contains("disagreement may reflect the omitted ocean multiplier", StringComparison.Ordinal)),
+        "stock diagnostics did not explain possible submerged-sample disagreement");
+    Require(scalarDiagnostics["reconstructedForceMagnitudeNewtons"]!["maximum"]!.GetValue<double>() == 60,
+        "stock scalar product did not reconstruct newtons");
+    Require(scalarDiagnostics["dragScalarForceMagnitudeNewtons"]!["maximum"]!.GetValue<double>() == 60,
+        "stock drag scalar was not converted from kilonewtons to newtons");
+    Require(scalarDiagnostics["reconstructedToDragScalar"]!["absoluteErrorNewtons"]!["maximum"]!.GetValue<double>() == 0 &&
+        scalarDiagnostics["reconstructedToDragScalar"]!["agreementRatio"]!["mean"]!.GetValue<double>() == 1,
+        "stock scalar decomposition disagreed despite equivalent SI magnitudes");
+    Require(scalarDiagnostics["reconstructedToObserved"]!["absoluteErrorNewtons"]!["maximum"]!.GetValue<double>() == 0 &&
+        scalarDiagnostics["dragScalarToObserved"]!["absoluteErrorNewtons"]!["maximum"]!.GetValue<double>() == 0,
+        "stock scalar decomposition disagreed with observed force magnitude");
     Require(aeroComparison["counts"]!["bodyLiftLabelsExcluded"]!.GetValue<int>() == 1 && !aeroComparison["qualifiedForAuthority"]!.GetValue<bool>(), "aero comparison overstated coverage");
     var otherAero = Path.Combine(temporary, "aero-other.json"); File.WriteAllText(otherAero, ReportJson.Encode(AeroReceipt("1.12.5-other")));
     Require(Run("aero-compare", aero, otherAero) != 0, "mixed providers accepted");
@@ -109,7 +127,7 @@ AeroCaptureReport AeroReceipt(string version)
     var dragContext = Part(1, 0, true); var exact = AeroDragCubeBaseline.Evaluate(dragContext);
     var drag = new AeroBodyPublication(dragContext, AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
         exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters,
-        new AeroStockDragScalars(1, 60, 1, 1, 1, .06));
+        new AeroStockDragScalars(3, 2, 4, 5, .5, .06));
     var liftContext = Part(1, 1, true); var lift = new AeroBodyPublication(liftContext, AeroPublicationKind.BodyLift,
         AeroApplicationMode.AtCenterOfMass, new Vec(), liftContext.worldCenterOfMass, new Vec());
     var absentContext = Part(2, 2, false); var absent = new AeroBodyPublication(absentContext, AeroPublicationKind.BodyDrag,
