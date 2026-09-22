@@ -82,7 +82,7 @@ internal static class AeroCompareCommand
     private static IEnumerable<JsonObject> Regimes(IReadOnlyList<Row> rows)
     {
         foreach (var definition in new[] {
-            ("zero-dynamic-pressure", 0d, 0d), ("subsonic", double.Epsilon, .8),
+            ("zero-dynamic-pressure", 0d, 0d), ("subsonic", 0d, .8),
             ("transonic", .8, 1.2), ("supersonic", 1.2, 5d), ("hypersonic", 5d, double.PositiveInfinity) })
         {
             var bucket = rows.Where(row => definition.Item1 == "zero-dynamic-pressure"
