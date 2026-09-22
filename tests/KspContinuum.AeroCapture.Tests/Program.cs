@@ -116,6 +116,10 @@ static class Program
         Check(Reject(() => Part(step, density: double.NaN)));
         Check(Reject(() => new AeroPartContext(step, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, false,
             new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .5, Array.Empty<AeroDragCubeState>())));
+        Check(new AeroPartContext(step, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, false,
+            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .999996, Array.Empty<AeroDragCubeState>()).worldAttitudeW == .999996);
+        Check(Reject(() => new AeroPartContext(step, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, false,
+            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .99999, Array.Empty<AeroDragCubeState>())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyDrag, AeroApplicationMode.AtCenterOfMass,
             new Vec(1, 0, 0), new Vec(), new Vec())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,

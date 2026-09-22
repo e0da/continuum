@@ -154,6 +154,7 @@ namespace KspContinuum
 
     public sealed class AeroPartContext
     {
+        const double FloatQuaternionNormTolerance = 1e-5;
         public readonly AeroCaptureContext step;
         public readonly long flightId;
         public readonly int nativePartInstanceId, nativeRigidbodyInstanceId;
@@ -175,7 +176,7 @@ namespace KspContinuum
             foreach (double value in new[] { mass, density, pressure, temperature, speedOfSound, mach, aerodynamicArea, exposedArea, attitudeW }) AeroCaptureValidation.Number(value);
             foreach (var value in new[] { center, velocity, airVelocity, angularVelocity, attitudeXYZ }) AeroCaptureValidation.Vector(value);
             double norm = attitudeXYZ.X * attitudeXYZ.X + attitudeXYZ.Y * attitudeXYZ.Y + attitudeXYZ.Z * attitudeXYZ.Z + attitudeW * attitudeW;
-            if (Math.Abs(norm - 1) > 1e-9 || dragCubes == null || dragCubes.Length > AeroDragCubeState.MaximumBlendedCubes)
+            if (Math.Abs(norm - 1) > FloatQuaternionNormTolerance || dragCubes == null || dragCubes.Length > AeroDragCubeState.MaximumBlendedCubes)
                 throw new ArgumentException("Invalid stock geometry state.");
             foreach (var cube in dragCubes) if (cube == null) throw new ArgumentException("Null drag cube.");
             this.step = step; this.flightId = flightId; nativePartInstanceId = partId; nativeRigidbodyInstanceId = rigidbodyId;
