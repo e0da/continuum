@@ -42,6 +42,8 @@ def fixture():
                 aggregateForceStatus='unavailable-not-captured', evidence='portable-helper-fixture',
                 scope='Test fixture with zero-force worker model', framePolicy='test frame policy',
                 comparisonScope='Observed forced dynamics minus zero-force model; not solver accuracy',
+                workerStrategy='independent-constant-force/v1',
+                workerStrategyScope='Each captured body advances independently under its captured force.',
                 units='test fixture units', status='complete', reason=None,
                 unity='test-double', ksp='test-double', plugin='test', startedUtc='fixture',
                 maxBodies=512, requestedSamples=1, submitted=1, accepted=1, stale=0,
@@ -124,6 +126,21 @@ class ShadowReportTests(unittest.TestCase):
         code, report = self.invoke(fixture())
         self.assertEqual(code, 0)
         self.assertIsNone(report.get('gravity'))
+        self.assertEqual(report['workerStrategy'], 'independent-constant-force/v1')
+
+    def test_rigid_cluster_strategy_is_preserved(self):
+        data = fixture()
+        data['workerStrategy'] = 'translational-rigid-cluster/v1'
+        data['workerStrategyScope'] = 'All captured bodies form one translational cluster.'
+        data['samples'][0].update(analyticAvailable=False,
+                                  analyticMaxPositionError=0, analyticMaxVelocityError=0)
+        code, report = self.invoke(data)
+        self.assertEqual(code, 0)
+        self.assertEqual(report['workerStrategy'], 'translational-rigid-cluster/v1')
+        self.assertEqual(report['workerStrategyScope'], data['workerStrategyScope'])
+
+        data['samples'][0]['analyticMaxPositionError'] = 1
+        self.assertEqual(self.invoke(data), (1, None))
 
     def test_malformed_gravity_section_is_rejected(self):
         changes = [

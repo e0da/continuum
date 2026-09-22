@@ -19,6 +19,7 @@ namespace KspContinuum
         readonly List<ShadowSample> samples = new List<ShadowSample>();
         readonly ShadowReport report;
         readonly SimulationWorker worker;
+        readonly bool constantForceOracle;
         Action<ShadowReport> completion;
         SimulationBatch pending;
         ShadowSample pendingSample;
@@ -37,8 +38,14 @@ namespace KspContinuum
             get { return !finished; }
         }
 
-        public ShadowCapture(Action<ShadowReport> complete)
+        public ShadowCapture(Action<ShadowReport> complete) : this(new ConstantForceBackend(),
+            "independent-constant-force/v1", "Each captured body advances independently under its captured force.", true, complete) { }
+
+        public ShadowCapture(ISimulationBackend backend, string strategy, string strategyScope,
+            bool constantForceOracle, Action<ShadowReport> complete)
         {
+            if (backend == null || String.IsNullOrEmpty(strategy) || String.IsNullOrEmpty(strategyScope))
+                throw new ArgumentException("A named shadow backend is required.");
             if (complete == null)
                 throw new ArgumentNullException("complete");
             if (owner != null)
@@ -49,8 +56,16 @@ namespace KspContinuum
                 ksp = Versioning.GetVersionString(),
                 plugin = typeof(ShadowCapture).Assembly.GetName().Version.ToString(),
                 startedUtc = DateTime.UtcNow.ToString("o"),
+                workerStrategy = strategy,
+                workerStrategyScope = strategyScope,
             };
-            worker = new SimulationWorker(new ConstantForceBackend());
+            if (!constantForceOracle)
+            {
+                report.scope = "Read-only alternate-solver probe: captured Unity rigidbody positions, velocities, masses and synthetic zero forces enter the named worker strategy. Its one-step prediction is compared with the next matching stock observation. The worker writes nothing to the vessel.";
+                report.comparisonScope = "Named alternate strategy versus observed raw-coordinate KSP motion. Stock joint constraints are replaced by one all-body translational cluster; gravity, thrust, contacts, rotation and Krakensbane frame adjustment remain omitted. This is behavioral discrepancy telemetry, not stock equivalence.";
+            }
+            worker = new SimulationWorker(backend);
+            this.constantForceOracle = constantForceOracle;
             completion = complete;
             owner = this;
             try
@@ -474,7 +489,7 @@ namespace KspContinuum
         {
             double maxPosition = 0,
                 maxVelocity = 0;
-            for (int i = 0; i < result.Count; i++)
+            if (constantForceOracle) for (int i = 0; i < result.Count; i++)
             {
                 Vec expected =
                     pending.GetPosition(i) + pending.GetVelocity(i) * pending.StepSeconds;
@@ -484,10 +499,10 @@ namespace KspContinuum
                     Distance(pending.GetVelocity(i), result.GetVelocity(i))
                 );
             }
-            pendingSample.analyticAvailable = true;
-            pendingSample.analyticMaxPositionError = maxPosition;
-            pendingSample.analyticMaxVelocityError = maxVelocity;
-            if (maxPosition != 0 || maxVelocity != 0)
+            pendingSample.analyticAvailable = constantForceOracle;
+            pendingSample.analyticMaxPositionError = constantForceOracle ? maxPosition : 0;
+            pendingSample.analyticMaxVelocityError = constantForceOracle ? maxVelocity : 0;
+            if (constantForceOracle && (maxPosition != 0 || maxVelocity != 0))
                 throw new InvalidOperationException("Zero-force transport oracle mismatch.");
             if (report.firstAcceptedBatch.Length == 0)
             {
