@@ -53,6 +53,18 @@ foreach (uint steps in stepCounts)
         Native.Integrate(transactionBuffer64, Dt, steps);
         PublishF64(transactionBuffer64, transactionState64);
     }), count);
+    BodyD[] managedCanonical = Fixture(count);
+    Timing managedCanonicalTime = Summarize(Measure(Samples, () => IntegrateCanonical(managedCanonical, Dt, steps)), count);
+    BodyD[] persistentState64 = Fixture(count);
+    BodyF64[] persistentBuffer64 = PackF64(persistentState64);
+    Timing refreshForces64 = Summarize(Measure(Samples, () => RefreshForcesF64(persistentState64, persistentBuffer64)), count);
+    Timing publishMotion64 = Summarize(Measure(Samples, () => PublishMotionF64(persistentBuffer64, persistentState64)), count);
+    Timing persistentEndToEnd64 = Summarize(Measure(Samples, () =>
+    {
+        RefreshForcesF64(persistentState64, persistentBuffer64);
+        Native.Integrate(persistentBuffer64, Dt, steps);
+        PublishMotionF64(persistentBuffer64, persistentState64);
+    }), count);
     BodyD[] transactionState32 = Fixture(count);
     BodyF32[] transactionBuffer32 = new BodyF32[count];
     Timing endToEnd32 = Summarize(Measure(Samples, () =>
@@ -72,23 +84,34 @@ foreach (uint steps in stepCounts)
     Native.Integrate(observed32, (float)Dt, steps);
     if (!expected64.AsSpan().SequenceEqual(observed64) || !expected32.AsSpan().SequenceEqual(observed32))
         throw new InvalidOperationException($"native result mismatch for {count} x {steps}");
+    BodyD[] expectedPersistent = Fixture(count);
+    BodyD[] observedPersistent = Fixture(count);
+    BodyF64[] observedPersistentView = PackF64(observedPersistent);
+    IntegrateCanonical(expectedPersistent, Dt, steps);
+    RefreshForcesF64(observedPersistent, observedPersistentView);
+    Native.Integrate(observedPersistentView, Dt, steps);
+    PublishMotionF64(observedPersistentView, observedPersistent);
+    if (!expectedPersistent.AsSpan().SequenceEqual(observedPersistent))
+        throw new InvalidOperationException($"persistent native transaction mismatch for {count} x {steps}");
 
     double f32Error = MaxPositionError(expected64, observed32);
     rows.Add(new Row(count, steps, managedF64, nativeF64, pack64, publish64, endToEnd64,
         managedF64.MedianNs / nativeF64.MedianNs, managedF64.MedianNs / endToEnd64.MedianNs,
+        managedCanonicalTime, refreshForces64, publishMotion64, persistentEndToEnd64,
+        managedCanonicalTime.MedianNs / persistentEndToEnd64.MedianNs,
         managedF32, nativeF32, pack32, publish32, endToEnd32,
         managedF32.MedianNs / nativeF32.MedianNs, managedF32.MedianNs / endToEnd32.MedianNs, f32Error));
 }
 
 var report = new Report(
-    "continuum-native-boundary-bench/v2",
+    "continuum-native-boundary-bench/v3",
     RuntimeInformation.ProcessArchitecture.ToString(),
     RuntimeInformation.OSDescription,
     RuntimeInformation.FrameworkDescription,
     Samples,
     new Timing(Summarize(noops, 1).MedianNs, Summarize(noops, 1).P95Ns, Summarize(noops, 1).NsPerBodyAtMedian),
     "synchronous P/Invoke into an x86_64 Rust cdylib; pinned blittable arrays are mutated in place; return is the synchronization boundary",
-    "end-to-end is directly timed over one pack-call-publish transaction; component diagnostics are separate; f64 preserves canonical precision and f32 converts both ways",
+    "full-copy and persistent-view transactions are timed directly; the persistent f64 view refreshes force inputs and publishes position/velocity while retaining stable mass and state columns",
     rows);
 using var stream = new FileStream(args[1], FileMode.CreateNew, FileAccess.Write);
 JsonSerializer.Serialize(stream, report, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
@@ -103,6 +126,9 @@ static void CopyToF64(BodyD[] source,BodyF64[] destination) { for(int i=0;i<sour
 static void CopyToF32(BodyD[] source,BodyF32[] destination) { for(int i=0;i<source.Length;i++) destination[i]=new((float)source[i].Px,(float)source[i].Py,(float)source[i].Pz,(float)source[i].Vx,(float)source[i].Vy,(float)source[i].Vz,(float)source[i].Fx,(float)source[i].Fy,(float)source[i].Fz,(float)source[i].InverseMass); }
 static void PublishF64(BodyF64[] source, BodyD[] destination) { for(int i=0;i<source.Length;i++) destination[i]=new(source[i].Px,source[i].Py,source[i].Pz,source[i].Vx,source[i].Vy,source[i].Vz,source[i].Fx,source[i].Fy,source[i].Fz,source[i].InverseMass); }
 static void PublishF32(BodyF32[] source, BodyD[] destination) { for(int i=0;i<source.Length;i++) destination[i]=new(source[i].Px,source[i].Py,source[i].Pz,source[i].Vx,source[i].Vy,source[i].Vz,source[i].Fx,source[i].Fy,source[i].Fz,source[i].InverseMass); }
+static void RefreshForcesF64(BodyD[] source, BodyF64[] destination) { for(int i=0;i<source.Length;i++) { destination[i].Fx=source[i].Fx;destination[i].Fy=source[i].Fy;destination[i].Fz=source[i].Fz; } }
+static void PublishMotionF64(BodyF64[] source, BodyD[] destination) { for(int i=0;i<source.Length;i++) destination[i]=new(source[i].Px,source[i].Py,source[i].Pz,source[i].Vx,source[i].Vy,source[i].Vz,destination[i].Fx,destination[i].Fy,destination[i].Fz,destination[i].InverseMass); }
+static void IntegrateCanonical(BodyD[] bodies,double dt,uint steps) { for(uint s=0;s<steps;s++) foreach(ref BodyD b in bodies.AsSpan()) { double scale=dt*b.InverseMass;b.Vx+=b.Fx*scale;b.Vy+=b.Fy*scale;b.Vz+=b.Fz*scale;b.Px+=b.Vx*dt;b.Py+=b.Vy*dt;b.Pz+=b.Vz*dt; } }
 static void IntegrateF64(BodyF64[] bodies,double dt,uint steps) { for(uint s=0;s<steps;s++) foreach(ref BodyF64 b in bodies.AsSpan()) { double scale=dt*b.InverseMass;b.Vx+=b.Fx*scale;b.Vy+=b.Fy*scale;b.Vz+=b.Fz*scale;b.Px+=b.Vx*dt;b.Py+=b.Vy*dt;b.Pz+=b.Vz*dt; } }
 static void IntegrateF32(BodyF32[] bodies,float dt,uint steps) { for(uint s=0;s<steps;s++) foreach(ref BodyF32 b in bodies.AsSpan()) { float scale=dt*b.InverseMass;b.Vx+=b.Fx*scale;b.Vy+=b.Fy*scale;b.Vz+=b.Fz*scale;b.Px+=b.Vx*dt;b.Py+=b.Vy*dt;b.Pz+=b.Vz*dt; } }
 static double MaxPositionError(BodyF64[] expected,BodyF32[] observed) { double max=0;for(int i=0;i<expected.Length;i++){max=Math.Max(max,Math.Abs(expected[i].Px-observed[i].Px));max=Math.Max(max,Math.Abs(expected[i].Py-observed[i].Py));max=Math.Max(max,Math.Abs(expected[i].Pz-observed[i].Pz));}return max; }
@@ -115,6 +141,8 @@ record struct BodyD(double Px,double Py,double Pz,double Vx,double Vy,double Vz,
 record Timing(double MedianNs,double P95Ns,double NsPerBodyAtMedian);
 record Row(int Bodies,uint Steps,Timing ManagedF64Kernel,Timing NativeF64Call,Timing F64Pack,Timing F64Publication,
     Timing F64EndToEnd,double NativeF64CallSpeedup,double F64EndToEndSpeedup,
+    Timing ManagedCanonical,Timing PersistentF64ForceRefresh,Timing PersistentF64MotionPublication,
+    Timing PersistentF64EndToEnd,double PersistentF64EndToEndSpeedup,
     Timing ManagedF32Kernel,Timing NativeF32Call,Timing F32PackConversion,Timing F32PublicationConversion,
     Timing F32EndToEnd,double NativeF32CallSpeedup,double F32EndToEndSpeedup,double F32MaximumPositionError);
 record Report(string Schema,string ProcessArchitecture,string OperatingSystem,string Framework,int SamplesPerCase,Timing NoopBoundary,string NativeRoute,string TransportAndPrecision,List<Row> Rows);

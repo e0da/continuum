@@ -2,7 +2,7 @@
 
 This experiment measures the smallest architecture-compatible native route available without running KSP. The installed macOS KSP 1.12.5 executable, `UnityPlayer.dylib`, and `libmonobdwgc-2.0.dylib` are all x86_64 Mach-O binaries. Continuum's existing Metal benchmark runs as arm64. An arm64 library therefore cannot be loaded into the KSP process.
 
-The selected route is an x86_64 C# host loading an x86_64 Rust `cdylib` under Rosetta. The host pins blittable arrays and makes synchronous P/Invoke calls. Rust mutates the arrays in place; return from the call is the synchronization boundary. No serialization, IPC, allocation, or GPU transfer occurs inside the native call. The harness separately measures copying canonical f64 state into the execution buffer, an f64-to-f32 conversion variant, and publication back to canonical state.
+The selected route is an x86_64 C# host loading an x86_64 Rust `cdylib` under Rosetta. The host pins blittable arrays for synchronous P/Invoke calls. Rust mutates the arrays in place; return from the call is the synchronization boundary. No serialization, IPC, allocation, or GPU transfer occurs inside the native call. The harness separately measures copying canonical f64 state into the execution buffer, an f64-to-f32 conversion variant, and publication back to canonical state. It also measures a stable f64 execution view that retains motion and mass across ticks, refreshes only force inputs, and publishes only position and velocity.
 
 This is the closest standalone test of the ABI and process architecture. It is not a Unity Mono measurement: the host uses self-contained x86_64 .NET 8 because the installed standalone Mono and .NET tools are arm64, while Unity's x86_64 Mono runtime is embedded in KSP. KSP was not launched for this experiment.
 
@@ -13,6 +13,7 @@ Can a synchronous, in-process Rust call be cheap enough for one or a few physics
 - If the empty call or pinned-array call dominates small batches, native dispatch is unsuitable at that granularity.
 - If an in-place native kernel wins but pack and publication erase the win, the boundary is useful only with persistent execution views or sufficiently many resident steps.
 - If f32 conversion materially improves the complete path while staying within its declared error budget, conversion can be considered. Otherwise, preserve f64 at the CPU boundary.
+- If retaining state while narrowing refresh and publication makes a one-step transaction faster than direct managed integration, use the native route for ordinary ticks. If it wins only after several resident steps, reserve it for workloads that can advance multiple steps without a host callback.
 
 ## Reproduction
 
@@ -56,12 +57,31 @@ The direct native f64 call matched the managed f64 result exactly and was 1.67-2
 
 Two additional fresh process runs reproduced the central result. The complete four-step f64 transaction was faster at 64 bodies in all three runs (1.45-1.78x) and at 256 bodies in all three runs (1.13-1.26x). The 1,024-body result straddled parity (0.95-1.06x), while 16,384 bodies remained slightly slower (0.97-0.98x). One-step full-copy execution remained slower throughout. The smallest timings are near timer resolution and should not drive routing policy.
 
+### Persistent-view follow-up
+
+The next run retained all ten f64 fields in the execution view between calls. Each transaction refreshed three force fields per body, called Rust synchronously, and published six motion fields per body. Stable inverse mass and prior motion were not repacked. The managed comparison integrated the same canonical body layout directly. The correctness check required the complete persistent transaction to match the managed state exactly.
+
+One M4 Max run produced these median transaction times; two fresh-process repetitions checked the routing result. Times are nanoseconds.
+
+| bodies | steps | managed canonical | native call | force refresh | motion publication | persistent complete | managed/complete |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 1 | 125 | 83 | 42 | 83 | 167 | 0.75x |
+| 256 | 1 | 458 | 209 | 167 | 333 | 667 | 0.69x |
+| 1,024 | 1 | 1,750 | 917 | 1,375 | 1,916 | 4,083 | 0.43x |
+| 16,384 | 1 | 31,292 | 18,916 | 23,583 | 27,584 | 70,917 | 0.44x |
+| 64 | 4 | 417 | 250 | 42 | 84 | 375 | 1.11x |
+| 256 | 4 | 1,750 | 833 | 166 | 292 | 1,375 | 1.27x |
+| 1,024 | 4 | 6,958 | 3,666 | 1,375 | 1,750 | 7,125 | 0.98x |
+| 16,384 | 4 | 117,041 | 84,750 | 23,500 | 27,667 | 132,708 | 0.88x |
+
+The two repeated runs kept the four-step speedup at 64 bodies between 1.10x and 1.11x and at 256 bodies between 1.12x and 1.27x. The 1,024-body case ranged from 0.92x to 1.00x and 16,384 bodies from 0.85x to 0.88x. One-step persistent execution lost at every meaningful size. This rules out routing this trivial kernel through Rust on every ordinary tick merely because its execution view is persistent. It supports Rust when the native workload does materially more computation per published state, or when warp and background simulation permit several resident steps.
+
 The f32 route does not rescue full-copy execution. It reduces buffer size and can reduce native kernel time, but conversion remains dominant and introduces measurable error. It should be selected only for explicitly local coordinates and a qualified error budget, not as a general boundary optimization.
 
 ## Route decision
 
-Use the in-process x86_64 Rust dylib as the next CPU integration route. Measure the same exports from Unity Mono before claiming KSP latency or frame improvement. Bind it to the existing persistent execution-view and stale-publication contracts rather than rebuilding all rows per tick.
+Use the in-process x86_64 Rust dylib as the next CPU integration route for compute-dense or multi-step work. Keep the smallest one-step live canary managed until a representative kernel demonstrates enough work to repay refresh and publication. Measure the same exports from Unity Mono before claiming KSP latency or frame improvement. Bind Rust to the existing persistent execution-view and stale-publication contracts rather than rebuilding all rows per tick.
 
 An arm64 sidecar could use native Apple Silicon and the existing Metal backend, but adds IPC, scheduling, and synchronization. It becomes a useful experiment only when a resident workload is large enough to amortize those costs. An in-process x86_64 Metal backend avoids IPC but still needs x86_64 GPU qualification and the existing f32/local-offset accuracy contract. Neither GPU route is supported by this CPU ABI result.
 
-This benchmark does not measure Unity Mono, KSP's actual extraction and publication code, contention with rendering, GPU transfer, or live frame rate. It establishes that the architecture-compatible synchronous ABI is cheap and that full per-tick repacking is not.
+This benchmark does not measure Unity Mono, KSP's actual extraction and publication code, dirty-set discovery, contention with rendering, GPU transfer, or live frame rate. The persistent-view transaction still scans every row for force refresh and motion publication. It establishes that the architecture-compatible synchronous ABI is cheap, while host traffic can dominate even without full-state repacking.
