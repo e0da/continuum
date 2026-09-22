@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -64,20 +65,27 @@ impl BodyState {
         position: Vec3,
         velocity: Vec3,
     ) -> Result<Self, ValidationError> {
-        if !mass.is_finite() || mass <= 0.0 || !radius.is_finite() || radius <= 0.0 {
-            return Err(ValidationError::InvalidBody);
-        }
-        if !position.is_finite() || !velocity.is_finite() {
-            return Err(ValidationError::InvalidBody);
-        }
-        Ok(Self {
+        let body = Self {
             id,
             generation,
             mass,
             radius,
             position,
             velocity,
-        })
+        };
+        if !body.is_valid() {
+            return Err(ValidationError::InvalidBody);
+        }
+        Ok(body)
+    }
+
+    fn is_valid(&self) -> bool {
+        self.mass.is_finite()
+            && self.mass > 0.0
+            && self.radius.is_finite()
+            && self.radius > 0.0
+            && self.position.is_finite()
+            && self.velocity.is_finite()
     }
 }
 
@@ -109,6 +117,9 @@ impl Snapshot {
         }
         if bodies.windows(2).any(|pair| pair[0].id == pair[1].id) {
             return Err(ValidationError::InvalidSnapshot);
+        }
+        if bodies.iter().any(|body| !body.is_valid()) {
+            return Err(ValidationError::InvalidBody);
         }
         Ok(Self {
             frame,
@@ -324,9 +335,13 @@ impl SimulationWorld {
             )
         };
 
-        let solved = solver(admitted.clone(), cancellation);
+        let solved = catch_unwind(AssertUnwindSafe(|| solver(admitted.clone(), cancellation)));
         let mut state = self.state.lock().expect("simulation world poisoned");
         state.active = false;
+        let solved = match solved {
+            Ok(result) => result,
+            Err(_) => return TransactionStatus::SolverFailed,
+        };
         if cancellation.is_cancelled() || matches!(solved, Err(SolveError::Cancelled)) {
             return TransactionStatus::Cancelled;
         }
@@ -391,7 +406,9 @@ fn validate_and_merge(
             return Err(ValidationError::DuplicateBody);
         }
         let coasted = before.position + before.velocity * dt;
-        if body.generation != before.generation
+        if !coasted.is_finite()
+            || !body.is_valid()
+            || body.generation != before.generation
             || body.mass != before.mass
             || body.radius != before.radius
             || body.position != coasted
@@ -527,6 +544,81 @@ mod tests {
             TransactionStatus::Cancelled
         );
         assert!(Arc::ptr_eq(&before, &world.capture()));
+    }
+
+    #[test]
+    fn public_body_literals_cannot_bypass_snapshot_validation() {
+        let mut invalid = body(1, 0, 0.0, 0.0);
+        invalid.mass = 0.0;
+        assert_eq!(
+            Snapshot::new("local", 0.0, 0.0, [invalid]),
+            Err(ValidationError::InvalidBody)
+        );
+
+        let mut invalid = body(1, 0, 0.0, 0.0);
+        invalid.position.x = f64::NAN;
+        assert_eq!(
+            Snapshot::new("local", 0.0, 0.0, [invalid]),
+            Err(ValidationError::InvalidBody)
+        );
+    }
+
+    #[test]
+    fn nonfinite_selected_or_quiet_coasts_publish_nothing() {
+        let selected_overflow = SimulationWorld::new(
+            Snapshot::new("local", 0.0, 0.0, [body(1, 0, 1e308, 1e308)]).unwrap(),
+        );
+        let selected_plan = selected_overflow.plan(&[1]).unwrap();
+        let selected_before = selected_overflow.capture();
+        assert_eq!(
+            selected_overflow.execute(
+                &selected_plan,
+                1.0,
+                &Cancellation::default(),
+                |input, _| Ok(coasted(&input, 1.0))
+            ),
+            TransactionStatus::InvalidResult
+        );
+        assert!(Arc::ptr_eq(&selected_before, &selected_overflow.capture()));
+
+        let quiet_overflow = SimulationWorld::new(
+            Snapshot::new(
+                "local",
+                0.0,
+                0.0,
+                [body(1, 0, 0.0, 0.0), body(2, 0, 1e308, 1e308)],
+            )
+            .unwrap(),
+        );
+        let quiet_plan = quiet_overflow.plan(&[1]).unwrap();
+        let quiet_before = quiet_overflow.capture();
+        assert_eq!(
+            quiet_overflow.execute(&quiet_plan, 1.0, &Cancellation::default(), |input, _| Ok(
+                coasted(&input, 1.0)
+            )),
+            TransactionStatus::InvalidResult
+        );
+        assert!(Arc::ptr_eq(&quiet_before, &quiet_overflow.capture()));
+    }
+
+    #[test]
+    fn solver_panic_releases_transaction_slot() {
+        let world = SimulationWorld::new(initial());
+        let plan = world.plan(&[1, 2]).unwrap();
+        let before = world.capture();
+        assert_eq!(
+            world.execute(&plan, 9.0, &Cancellation::default(), |_, _| {
+                panic!("backend panic")
+            }),
+            TransactionStatus::SolverFailed
+        );
+        assert!(Arc::ptr_eq(&before, &world.capture()));
+        assert_eq!(
+            world.execute(&plan, 9.0, &Cancellation::default(), |input, _| Ok(
+                coasted(&input, 9.0)
+            )),
+            TransactionStatus::Committed
+        );
     }
 
     #[test]
