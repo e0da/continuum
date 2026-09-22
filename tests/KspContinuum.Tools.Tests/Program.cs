@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json.Nodes;
+using KspContinuum;
 
 var root = FindRoot();
 var project = Path.Combine(root, "tools/KspContinuum.Tools");
@@ -29,6 +30,19 @@ try
 
     var shadow = Path.Combine(temporary, "shadow.json"); File.WriteAllText(shadow, new JsonObject { ["schema"] = "ksp-continuum-flight-shadow/v2", ["status"] = "complete", ["strategy"] = "rigid-cluster", ["samples"] = new JsonArray(new JsonObject { ["comparisonStatus"] = "compared", ["bodies"] = 2, ["observedPositionMaxMeters"] = 2.0, ["observedPositionRmsMeters"] = 1.0, ["observedVelocityMaxMetersPerSecond"] = 4.0, ["observedVelocityRmsMetersPerSecond"] = 3.0 }) }.ToJsonString()); var shadowOutput = Path.Combine(temporary, "shadow-summary.json"); Require(Run("shadow-report", "--input", shadow, "--output", shadowOutput) == 0 && JsonNode.Parse(File.ReadAllText(shadowOutput))!["positionResidualMeters"]!["comparedBodies"]!.GetValue<int>() == 2, "shadow report lost weighted residual population");
 
+    var aero = Path.Combine(temporary, "aero.json"); File.WriteAllText(aero, ReportJson.Encode(AeroReceipt("1.12.5"))); var aeroOutput = Path.Combine(temporary, "aero-comparison.json");
+    Require(Run("aero-compare", aero, "--output", aeroOutput) == 0, "aero comparison failed");
+    var aeroComparison = JsonNode.Parse(File.ReadAllText(aeroOutput))!.AsObject();
+    Require(aeroComparison["schema"]!.ToString() == "ksp-continuum-aero-comparison/v1", "aero comparison schema changed");
+    Require(aeroComparison["counts"]!["capturedSamples"]!.GetValue<int>() == 1 && aeroComparison["counts"]!["bodyDragLabels"]!.GetValue<int>() == 2, "aero comparison lost labels");
+    Require(aeroComparison["counts"]!["finiteCompared"]!.GetValue<int>() == 1 && aeroComparison["counts"]!["abstentions"]!.GetValue<int>() == 1, "aero comparison hid abstention");
+    Require(aeroComparison["errors"]!["forceVectorNormNewtons"]!["maximum"]!.GetValue<double>() == 0, "exact baseline label diverged");
+    Require(aeroComparison["counts"]!["bodyLiftLabelsExcluded"]!.GetValue<int>() == 1 && !aeroComparison["qualifiedForAuthority"]!.GetValue<bool>(), "aero comparison overstated coverage");
+    var otherAero = Path.Combine(temporary, "aero-other.json"); File.WriteAllText(otherAero, ReportJson.Encode(AeroReceipt("1.12.5-other")));
+    Require(Run("aero-compare", aero, otherAero) != 0, "mixed providers accepted");
+    var malformedAero = Path.Combine(temporary, "aero-malformed.json"); File.WriteAllText(malformedAero, "{\"schema\":\"ksp-continuum-aero-capture/v1\",\"disposition\":\"Valid\"}");
+    Require(Run("aero-compare", malformedAero) != 0, "malformed aero receipt accepted");
+
     var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]); var package = Path.Combine(temporary, "continuum.zip"); var download = "https://packages.example.invalid/ksp-continuum.zip";
     Require(Run("package", "--plugin", plugin, "--output", package, "--download-url", download) == 0, "package generation failed");
     var packageMetadata = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(package, ".ckan")))!.AsObject();
@@ -53,4 +67,31 @@ finally { Directory.Delete(temporary, true); }
 int Run(params string[] arguments) { var start = new ProcessStartInfo("dotnet") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true }; start.ArgumentList.Add("run"); start.ArgumentList.Add("--project"); start.ArgumentList.Add(project); start.ArgumentList.Add("-c"); start.ArgumentList.Add("Release"); start.ArgumentList.Add("--no-build"); start.ArgumentList.Add("--"); foreach (var argument in arguments) start.ArgumentList.Add(argument); using var process = Process.Start(start)!; process.WaitForExit(); if (process.ExitCode != 0) Console.Error.Write(process.StandardError.ReadToEnd()); return process.ExitCode; }
 void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 string FindRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current is not null && !File.Exists(Path.Combine(current.FullName, "README.md"))) current = current.Parent; return current?.FullName ?? throw new InvalidOperationException("repository root not found"); }
+AeroCaptureReport AeroReceipt(string version)
+{
+    const string hash = "8a20892953fc14c02f352b393eb6712c665156d94a7d846d16c20a7de3e22f27";
+    var provider = new AeroProviderFingerprint("stock-flight-integrator", version, "Assembly-CSharp", hash, "10657063-2fc3-43a7-84fa-d39e75e877bf");
+    AeroPatchEntry Entry(string method, string kind, int index, int priority = AeroPatchEntry.DefaultPriority) => new("continuum.capture", method, kind, index, hash, priority);
+    var provenance = new AeroPatchProvenance(provider, "continuum.capture", [
+        new AeroPatchTarget("FlightIntegrator.UpdateAerodynamics", [
+            Entry("KspContinuum.AeroCapture.UpdatePrefix", "prefix", 0),
+            Entry("KspContinuum.AeroCapture.UpdatePostfix", "postfix", 1, AeroPatchEntry.PriorityLast),
+            Entry("KspContinuum.AeroCapture.UpdateFinalizer", "finalizer", 2, AeroPatchEntry.PriorityLast)]),
+        new AeroPatchTarget("FlightIntegrator.ApplyAeroDrag", [Entry("KspContinuum.AeroCapture.DragPrefix", "prefix", 0)]),
+        new AeroPatchTarget("FlightIntegrator.ApplyAeroLift", [Entry("KspContinuum.AeroCapture.LiftPrefix", "prefix", 0)])]);
+    AeroCaptureContext Step(int ordinal) => new("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", "frame", 1, 1, 1, 1, 1, ordinal, 100, 2, .02);
+    var faces = new[] { 1d, 1, 1, 1, 1, 1 };
+    AeroPartContext Part(long id, int ordinal, bool cubes) => new(Step(ordinal), id, (int)id + 10, (int)id + 20, 10, 1.2, 100000, 280, 330, .5, 1, 1, false,
+        new Vec(id, 0, 0), new Vec(-10, 0, 0), new Vec(10, 0, 0), new Vec(), new Vec(), 1,
+        cubes ? [new AeroDragCubeState("Default", 1, new Vec(), new Vec(1, 1, 1), faces, faces, faces, faces)] : []);
+    var dragContext = Part(1, 0, true); var exact = AeroDragCubeBaseline.Evaluate(dragContext);
+    var drag = new AeroBodyPublication(dragContext, AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
+        exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters);
+    var liftContext = Part(1, 1, true); var lift = new AeroBodyPublication(liftContext, AeroPublicationKind.BodyLift,
+        AeroApplicationMode.AtCenterOfMass, new Vec(), liftContext.worldCenterOfMass, new Vec());
+    var absentContext = Part(2, 2, false); var absent = new AeroBodyPublication(absentContext, AeroPublicationKind.BodyDrag,
+        AeroApplicationMode.AtCenterOfMass, new Vec(), absentContext.worldCenterOfMass, new Vec());
+    return new AeroCaptureReport(provenance, AeroCaptureDisposition.Valid, AeroCaptureReason.None,
+        AeroCleanupOutcome.RemovedOwnedPatches, [new AeroCaptureSample(Step(3), [drag, lift, absent])]);
+}
 string Sha256(string path) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();

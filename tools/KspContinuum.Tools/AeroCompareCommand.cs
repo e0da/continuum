@@ -1,0 +1,278 @@
+using System.Text.Json.Nodes;
+using KspContinuum;
+
+namespace KspContinuum.Tools;
+
+internal static class AeroCompareCommand
+{
+    private const string CaptureSchema = "ksp-continuum-aero-capture/v1";
+    private const string ComparisonSchema = "ksp-continuum-aero-comparison/v1";
+
+    public static int Run(string[] args)
+    {
+        var options = new Arguments(args);
+        Tooling.Require(options.Positionals.Count > 0, "usage: aero-compare RECEIPT [RECEIPT ...] [--output FILE]");
+        var reports = options.Positionals.Select(Parse).ToArray();
+        var provider = reports[0].Provider;
+        Tooling.Require(reports.All(report => report.Provider == provider),
+            "capture receipts contain mixed providers or provider versions");
+        Tooling.Require(provider.Name == "stock-flight-integrator",
+            "only stock-flight-integrator body-drag labels are supported");
+
+        var rows = new List<Row>();
+        var abstentions = new Dictionary<string, int>(StringComparer.Ordinal);
+        var bodyLiftLabels = 0;
+        foreach (var report in reports)
+        foreach (var publication in report.Publications)
+        {
+            if (publication.Kind == AeroPublicationKind.BodyLift) { bodyLiftLabels++; continue; }
+            var candidate = AeroDragCubeBaseline.Evaluate(publication.Context);
+            if (candidate.Disposition == AeroBaselineDisposition.Abstained)
+            {
+                var reason = candidate.Reason.ToString();
+                abstentions[reason] = abstentions.GetValueOrDefault(reason) + 1;
+                continue;
+            }
+            RequireFinite(candidate.ForceNewtons, "candidate force");
+            RequireFinite(candidate.TorqueAboutPartCenterOfMassNewtonMeters, "candidate torque");
+            Tooling.Require(double.IsFinite(candidate.DynamicPressurePascals) &&
+                double.IsFinite(candidate.WeightedProjectedAreaSquareMeters), "candidate scalar output is nonfinite");
+            rows.Add(new Row(publication, candidate));
+        }
+
+        var output = new JsonObject
+        {
+            ["schema"] = ComparisonSchema,
+            ["strategy"] = AeroDragCubeBaseline.Strategy,
+            ["qualifiedForAuthority"] = false,
+            ["provider"] = provider.ToJson(),
+            ["counts"] = new JsonObject
+            {
+                ["inputReceipts"] = reports.Length,
+                ["capturedSamples"] = reports.Sum(report => report.SampleCount),
+                ["bodyDragLabels"] = reports.Sum(report => report.BodyDragCount),
+                ["bodyLiftLabelsExcluded"] = bodyLiftLabels,
+                ["finiteCompared"] = rows.Count,
+                ["abstentions"] = abstentions.Values.Sum()
+            },
+            ["abstentionsByReason"] = Object(abstentions),
+            ["errors"] = Metrics(rows),
+            ["regimes"] = new JsonArray(Regimes(rows).Select(item => (JsonNode)item).ToArray()),
+            ["incompleteness"] = new JsonArray(
+                "One-step body-drag force labels only; body lift and lifting surfaces are excluded.",
+                "The baseline omits Mach curves, pseudo-Reynolds corrections, stock drag-cube interpolation details, shielding transitions, heating, and provider-specific clamps.",
+                "Application-point torque is compared, but no angular impulse or trajectory behavior is qualified.",
+                "Receipt-wide provenance detects mixed input receipts; the capture schema has no per-publication provider fingerprint.",
+                "No train/test split or repeated-provider envelope is established by this report.")
+        };
+        var destination = FindOption(args, "--output");
+        if (destination is null) Console.WriteLine(output.ToJsonString(Tooling.Json));
+        else Tooling.WriteJsonNew(destination, output);
+        return 0;
+    }
+
+    private static JsonObject Metrics(IReadOnlyList<Row> rows) => new()
+    {
+        ["forceMagnitudeAbsoluteNewtons"] = Distribution(rows.Select(row => row.ForceMagnitudeError)),
+        ["forceVectorNormNewtons"] = Distribution(rows.Select(row => row.ForceVectorError)),
+        ["forceDirectionDegrees"] = Distribution(rows.Where(row => row.HasDirection).Select(row => row.DirectionErrorDegrees)),
+        ["torqueVectorNormNewtonMeters"] = Distribution(rows.Select(row => row.TorqueError))
+    };
+
+    private static IEnumerable<JsonObject> Regimes(IReadOnlyList<Row> rows)
+    {
+        foreach (var definition in new[] {
+            ("zero-dynamic-pressure", 0d, 0d), ("subsonic", 0d, .8),
+            ("transonic", .8, 1.2), ("supersonic", 1.2, 5d), ("hypersonic", 5d, double.PositiveInfinity) })
+        {
+            var bucket = rows.Where(row => definition.Item1 == "zero-dynamic-pressure"
+                ? row.DynamicPressure == 0
+                : row.DynamicPressure > 0 && row.Mach >= definition.Item2 && row.Mach < definition.Item3).ToArray();
+            yield return new JsonObject
+            {
+                ["name"] = definition.Item1,
+                ["finiteCompared"] = bucket.Length,
+                ["forceVectorNormNewtons"] = Distribution(bucket.Select(row => row.ForceVectorError)),
+                ["torqueVectorNormNewtonMeters"] = Distribution(bucket.Select(row => row.TorqueError))
+            };
+        }
+    }
+
+    private static JsonObject Distribution(IEnumerable<double> source)
+    {
+        var values = source.OrderBy(value => value).ToArray();
+        if (values.Length == 0) return new JsonObject { ["count"] = 0 };
+        return new JsonObject
+        {
+            ["count"] = values.Length,
+            ["mean"] = values.Average(),
+            ["rms"] = Math.Sqrt(values.Average(value => value * value)),
+            ["p50"] = Percentile(values, .5),
+            ["p95"] = Percentile(values, .95),
+            ["p99"] = Percentile(values, .99),
+            ["maximum"] = values[^1]
+        };
+    }
+
+    private static double Percentile(double[] sorted, double probability)
+    {
+        var position = probability * (sorted.Length - 1);
+        var lower = (int)Math.Floor(position); var upper = (int)Math.Ceiling(position);
+        return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+    }
+
+    private static JsonObject Object(Dictionary<string, int> values)
+    {
+        var result = new JsonObject();
+        foreach (var pair in values.OrderBy(pair => pair.Key, StringComparer.Ordinal)) result[pair.Key] = pair.Value;
+        return result;
+    }
+
+    private static ParsedReport Parse(string path)
+    {
+        var root = Tooling.ReadObject(path);
+        Tooling.Require(Text(root, "schema") == CaptureSchema, $"{path}: unsupported capture schema");
+        Tooling.Require(Text(root, "disposition") == "Valid", $"{path}: capture is not valid");
+        Tooling.Require(Text(root, "reason") == "None", $"{path}: valid capture has a failure reason");
+        Tooling.Require(Text(root, "cleanup") == "RemovedOwnedPatches", $"{path}: capture cleanup is unconfirmed");
+        var provenance = Child(root, "provenance"); var providerNode = Child(provenance, "provider");
+        var provider = new Provider(Text(providerNode, "provider"), Text(providerNode, "providerVersion"),
+            Text(providerNode, "assemblyName"), Hex(providerNode, "assemblySha256"), GuidText(providerNode, "assemblyMvid"));
+        Tooling.Require(Text(provenance, "captureOwner") == "continuum.capture", $"{path}: unexpected capture owner");
+        ValidatePatchGraph(provenance, path);
+        var samples = Array(root, "samples");
+        Tooling.Require(samples.Count <= AeroCaptureReport.MaximumSamples, $"{path}: sample bound exceeded");
+        var publications = new List<Publication>();
+        string? session = null; long previousEpoch = 0;
+        foreach (var sampleNode in samples)
+        {
+            var sample = Object(sampleNode, "sample"); var sampleContext = ParseStep(Child(sample, "context"));
+            session ??= sampleContext.sessionId;
+            Tooling.Require(sampleContext.sessionId == session && sampleContext.physicsEpoch > previousEpoch,
+                $"{path}: samples must share one session and increase by physics epoch");
+            previousEpoch = sampleContext.physicsEpoch;
+            var seen = new HashSet<string>(StringComparer.Ordinal); var ordinals = new HashSet<int>();
+            var parts = new Dictionary<long, AeroPartContext>();
+            var items = Array(sample, "publications");
+            Tooling.Require(items.Count <= AeroCaptureReport.MaximumPartsPerSample * 2, $"{path}: publication bound exceeded");
+            foreach (var item in items)
+            {
+                var publication = Object(item, "publication"); var context = ParsePart(Child(publication, "context"));
+                Tooling.Require(sampleContext.SameStep(context.step), $"{path}: publication step mismatch");
+                Tooling.Require(ordinals.Add(context.step.callOrdinal), $"{path}: duplicate call ordinal");
+                var kind = EnumValue<AeroPublicationKind>(publication, "kind");
+                Tooling.Require(seen.Add(context.flightId + ":" + kind), $"{path}: duplicate part publication kind");
+                if (parts.TryGetValue(context.flightId, out var prior)) Tooling.Require(prior.SameState(context), $"{path}: drag/lift state mismatch");
+                parts[context.flightId] = context;
+                var label = new AeroBodyPublication(context, kind, EnumValue<AeroApplicationMode>(publication, "applicationMode"),
+                    Vector(publication, "forceNewtons"), Vector(publication, "worldApplicationPosition"),
+                    Vector(publication, "torqueAboutPartCenterOfMassNewtonMeters"));
+                publications.Add(new Publication(label));
+            }
+            Tooling.Require(parts.Count <= AeroCaptureReport.MaximumPartsPerSample, $"{path}: part bound exceeded");
+        }
+        return new ParsedReport(provider, samples.Count, publications);
+    }
+
+    private static void ValidatePatchGraph(JsonObject provenance, string path)
+    {
+        var targets = Array(provenance, "targets");
+        var required = new HashSet<string>(new[] { "FlightIntegrator.UpdateAerodynamics", "FlightIntegrator.ApplyAeroDrag", "FlightIntegrator.ApplyAeroLift" }, StringComparer.Ordinal);
+        var expected = new HashSet<string>(new[] {
+            "FlightIntegrator.UpdateAerodynamics|continuum.capture|KspContinuum.AeroCapture.UpdatePrefix|prefix|400",
+            "FlightIntegrator.UpdateAerodynamics|continuum.capture|KspContinuum.AeroCapture.UpdatePostfix|postfix|0",
+            "FlightIntegrator.UpdateAerodynamics|continuum.capture|KspContinuum.AeroCapture.UpdateFinalizer|finalizer|0",
+            "FlightIntegrator.ApplyAeroDrag|continuum.capture|KspContinuum.AeroCapture.DragPrefix|prefix|400",
+            "FlightIntegrator.ApplyAeroLift|continuum.capture|KspContinuum.AeroCapture.LiftPrefix|prefix|400" }, StringComparer.Ordinal);
+        foreach (var targetNode in targets)
+        {
+            var target = Object(targetNode, "patch target"); var name = Text(target, "targetMethod");
+            Tooling.Require(required.Remove(name), $"{path}: duplicate or unexpected patch target");
+            var patches = Array(target, "orderedPatches");
+            for (var index = 0; index < patches.Count; index++)
+            {
+                var patch = Object(patches[index], "patch");
+                Tooling.Require(Integer(patch, "executionIndex") == index, $"{path}: noncontiguous patch order");
+                var identity = name + "|" + Text(patch, "owner") + "|" + Text(patch, "patchMethod") + "|" +
+                    Text(patch, "patchKind") + "|" + Integer(patch, "harmonyPriority");
+                expected.Remove(identity);
+                _ = Hex(patch, "assemblySha256"); _ = Array(patch, "beforeOwners"); _ = Array(patch, "afterOwners");
+            }
+        }
+        Tooling.Require(required.Count == 0 && targets.Count == 3 && expected.Count == 0,
+            $"{path}: incomplete stock aero patch graph");
+    }
+
+    private static AeroCaptureContext ParseStep(JsonObject value) => new(Text(value, "sessionId"), Text(value, "vesselId"),
+        Text(value, "frameKey"), Long(value, "physicsEpoch"), Long(value, "topologyGeneration"), Long(value, "frameGeneration"),
+        Integer(value, "unityFrame"), Integer(value, "mainThreadId"), Integer(value, "callOrdinal"), Number(value, "universalTime"),
+        Number(value, "fixedTimeSeconds"), Number(value, "stepSeconds"));
+
+    private static AeroPartContext ParsePart(JsonObject value)
+    {
+        var cubes = Array(value, "dragCubes").Select(node =>
+        {
+            var cube = Object(node, "drag cube");
+            return new AeroDragCubeState(Text(cube, "name"), Number(cube, "weight"), Vector(cube, "center"), Vector(cube, "size"),
+                Numbers(cube, "area", 6), Numbers(cube, "drag", 6), Numbers(cube, "depth", 6), Numbers(cube, "dragModifiers", 6));
+        }).ToArray();
+        return new AeroPartContext(ParseStep(Child(value, "step")), Long(value, "flightId"), Integer(value, "nativePartInstanceId"),
+            Integer(value, "nativeRigidbodyInstanceId"), Number(value, "massKilograms"), Number(value, "densityKilogramsPerCubicMeter"),
+            Number(value, "staticPressurePascals"), Number(value, "temperatureKelvin"), Number(value, "speedOfSoundMetersPerSecond"),
+            Number(value, "mach"), Number(value, "aerodynamicAreaSquareMeters"), Number(value, "exposedAreaSquareMeters"),
+            Boolean(value, "shielded"), Vector(value, "worldCenterOfMass"), Vector(value, "worldVelocity"),
+            Vector(value, "relativeAirVelocity"), Vector(value, "worldAngularVelocity"), Vector(value, "worldAttitudeXYZ"),
+            Number(value, "worldAttitudeW"), cubes);
+    }
+
+    private static Vec Vector(JsonObject owner, string name)
+    { var value = Child(owner, name); return new Vec(Number(value, "X"), Number(value, "Y"), Number(value, "Z")); }
+    private static double[] Numbers(JsonObject owner, string name, int count)
+    { var values = Array(owner, name); Tooling.Require(values.Count == count, $"{name} requires {count} values"); return values.Select((node, index) => Tooling.Finite(node, $"{name}[{index}]")).ToArray(); }
+    private static JsonObject Child(JsonObject owner, string name) => owner[name] as JsonObject ?? throw new ToolException($"{name} must be an object");
+    private static JsonObject Object(JsonNode? node, string name) => node as JsonObject ?? throw new ToolException($"{name} must be an object");
+    private static JsonArray Array(JsonObject owner, string name) => owner[name] as JsonArray ?? throw new ToolException($"{name} must be an array");
+    private static string Text(JsonObject owner, string name) => Tooling.Text(owner[name], name);
+    private static double Number(JsonObject owner, string name) => Tooling.Finite(owner[name], name);
+    private static int Integer(JsonObject owner, string name) { var value = Long(owner, name); Tooling.Require(value >= int.MinValue && value <= int.MaxValue, $"{name} is outside Int32"); return (int)value; }
+    private static long Long(JsonObject owner, string name) => owner[name]?.GetValue<long>() ?? throw new ToolException($"{name} must be an integer");
+    private static bool Boolean(JsonObject owner, string name) => owner[name]?.GetValue<bool>() ?? throw new ToolException($"{name} must be boolean");
+    private static string Hex(JsonObject owner, string name) { var value = Text(owner, name).ToLowerInvariant(); Tooling.Require(value.Length == 64 && value.All(Uri.IsHexDigit), $"{name} must be SHA-256 hex"); return value; }
+    private static string GuidText(JsonObject owner, string name) { var value = Text(owner, name); Tooling.Require(Guid.TryParse(value, out var parsed) && parsed != Guid.Empty, $"{name} must be a nonempty GUID"); return parsed.ToString("D"); }
+    private static T EnumValue<T>(JsonObject owner, string name) where T : struct, Enum
+    { var value = Text(owner, name); Tooling.Require(Enum.TryParse<T>(value, false, out var parsed) && Enum.IsDefined(parsed), $"{name} is unsupported"); return parsed; }
+    private static void RequireFinite(Vec value, string name) => Tooling.Require(double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z), $"{name} is nonfinite");
+    private static string? FindOption(string[] args, string name) { for (var i = 0; i < args.Length - 1; i++) if (args[i] == name) return args[i + 1]; return null; }
+
+    private sealed record ParsedReport(Provider Provider, int SampleCount, IReadOnlyList<Publication> Publications)
+    { public int BodyDragCount => Publications.Count(item => item.Kind == AeroPublicationKind.BodyDrag); }
+    private sealed record Provider(string Name, string Version, string Assembly, string Sha256, string Mvid)
+    { public JsonObject ToJson() => new() { ["name"] = Name, ["version"] = Version, ["assembly"] = Assembly, ["assemblySha256"] = Sha256, ["assemblyMvid"] = Mvid }; }
+    private sealed class Publication
+    {
+        public Publication(AeroBodyPublication value) { Context = value.context; Kind = value.kind; Force = value.forceNewtons; Torque = value.torqueAboutPartCenterOfMassNewtonMeters; }
+        public AeroPartContext Context { get; } public AeroPublicationKind Kind { get; } public Vec Force { get; } public Vec Torque { get; }
+    }
+    private sealed class Row
+    {
+        public Row(Publication label, AeroBaselineResult candidate)
+        {
+            DynamicPressure = candidate.DynamicPressurePascals; Mach = label.Context.mach;
+            var expectedMagnitude = Length(label.Force); var actualMagnitude = Length(candidate.ForceNewtons);
+            ForceMagnitudeError = Math.Abs(actualMagnitude - expectedMagnitude);
+            ForceVectorError = Length(Subtract(candidate.ForceNewtons, label.Force));
+            TorqueError = Length(Subtract(candidate.TorqueAboutPartCenterOfMassNewtonMeters, label.Torque));
+            HasDirection = expectedMagnitude > 0 && actualMagnitude > 0;
+            if (HasDirection) DirectionErrorDegrees = Math.Acos(Math.Clamp(Dot(label.Force, candidate.ForceNewtons) / (expectedMagnitude * actualMagnitude), -1, 1)) * 180 / Math.PI;
+            Tooling.Require(double.IsFinite(DynamicPressure) && double.IsFinite(ForceMagnitudeError) &&
+                double.IsFinite(ForceVectorError) && double.IsFinite(TorqueError) &&
+                (!HasDirection || double.IsFinite(DirectionErrorDegrees)), "comparison metric is nonfinite");
+        }
+        public double DynamicPressure { get; } public double Mach { get; } public double ForceMagnitudeError { get; }
+        public double ForceVectorError { get; } public double TorqueError { get; } public bool HasDirection { get; }
+        public double DirectionErrorDegrees { get; }
+        private static double Length(Vec value) => Math.Sqrt(Dot(value, value));
+        private static Vec Subtract(Vec left, Vec right) => new(left.X - right.X, left.Y - right.Y, left.Z - right.Z);
+        private static double Dot(Vec left, Vec right) => left.X * right.X + left.Y * right.Y + left.Z * right.Z;
+    }
+}

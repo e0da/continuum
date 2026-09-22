@@ -5,6 +5,7 @@ internal static class Program
     private static readonly IReadOnlyDictionary<string, Func<string[], int>> Commands =
         new Dictionary<string, Func<string[], int>>(StringComparer.Ordinal)
         {
+            ["aero-compare"] = AeroCompareCommand.Run,
             ["chronicle"] = ChronicleCommand.Run,
             ["chronicle-index"] = ChronicleIndexCommand.Run,
             ["compare-inputs"] = CompareInputsCommand.Run,
@@ -39,6 +40,16 @@ internal static class Program
         catch (UnauthorizedAccessException error)
         {
             Console.Error.WriteLine(args[0] + ": " + error.Message);
+            return 1;
+        }
+        catch (ArgumentException error)
+        {
+            Console.Error.WriteLine(args[0] + ": malformed input: " + error.Message);
+            return 1;
+        }
+        catch (InvalidOperationException error)
+        {
+            Console.Error.WriteLine(args[0] + ": malformed input: " + error.Message);
             return 1;
         }
     }

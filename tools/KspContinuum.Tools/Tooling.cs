@@ -32,6 +32,7 @@ internal sealed class Arguments
     public string Required(string key) => values.TryGetValue(key, out var value) && value is not null ? value : throw new ToolException($"missing required option {key}");
     public string? Optional(string key) => values.TryGetValue(key, out var value) ? value : null;
     public string Positional(int index, string label) => positionals.Count > index ? positionals[index] : throw new ToolException($"missing {label}");
+    public IReadOnlyList<string> Positionals => positionals;
 }
 
 internal static class Tooling
