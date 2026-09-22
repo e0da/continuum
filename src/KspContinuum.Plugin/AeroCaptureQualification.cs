@@ -93,6 +93,12 @@ namespace KspContinuum
                 if (Time.realtimeSinceStartup - eligibleSince < SettleSeconds) return;
                 Begin(eligible); return;
             }
+            if (capture.Report != null)
+            {
+                Finish("invalid", 2, "Capture terminated before reaching its bound: " +
+                    capture.Report.reason + (string.IsNullOrEmpty(capture.FailureDetail) ? "." : " (" + capture.FailureDetail + ")."));
+                return;
+            }
             if (eligible == null || vessel.id.ToString("D") != vesselId || vessel.parts.Count != partCount)
             { Finish("invalid", 2, "The qualified vessel or atmospheric flight context changed during capture."); return; }
             if (capture.ReachedBound) Finish("complete", 0, "Captured the declared 64-sample bound.");
