@@ -89,6 +89,25 @@ Candidates compete in this order:
 
 The strongest outcome may be a faster deterministic stock-style kernel. Machine learning earns a place only when it improves held-out accuracy or throughput after capture, packing, dispatch, validation and fallback costs.
 
+### First deterministic baseline
+
+`AeroDragCubeBaseline` is the first portable candidate, identified as
+`continuum-drag-cube-projection/v1`. It projects relative airflow onto the six
+captured drag-cube faces, blends each cube's weight, area, drag coefficient and
+modifier, applies dynamic pressure, and maps the weighted cube center back into
+the world frame. Scalar and bounded parallel entry points run the identical
+per-part calculation; the parallel path preserves input order and performs no
+shared reduction.
+
+This is a deliberately falsifiable baseline, not a reproduction of KSP's stock
+algorithm. It does not yet model Mach curves, pseudo-Reynolds corrections, body
+lift, drag-cube interpolation details, shielding transitions, lifting surfaces,
+heating, or provider-specific clamps. Cube centers are provisionally treated as
+part-local application offsets. Captured stock labels must determine whether
+that interpretation and the face projection are useful. Until then the result
+is suitable for metamorphic checks and throughput experiments only, and cannot
+control a vessel.
+
 ## `AERO-CAPTURE-001`
 
 The first experiment is a bounded read-only truth recorder, not a replacement solver.
