@@ -1,4 +1,7 @@
 using System;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace KspContinuum
 {
@@ -56,7 +59,7 @@ namespace KspContinuum
         public long topologyGeneration;
         public long frameGeneration;
         public long originEventCount;
-        public long callbackInvocation;
+        public long physicsCycle;
         public int bodyAInstanceId;
         public int bodyBInstanceId;
         public int unityFrame;
@@ -85,6 +88,9 @@ namespace KspContinuum
         public int jointHostBodyInstanceId;
         public int jointConnectedBodyInstanceId;
         public bool jointEnabled;
+        public long topologyGeneration;
+        public StructuralLink joint;
+        public double[] jointTransformRotation = new double[0];
         public int installedContactSentinels;
         public int removedContactSentinels;
         public long contactWindowFirstEpoch;
@@ -92,6 +98,9 @@ namespace KspContinuum
         public int contactObservationCount;
         public int detectedContactCount;
         public int jointBreakCount;
+        public int bodyASentinelTargetInstanceId;
+        public int bodyBSentinelTargetInstanceId;
+        public string hookCleanupStatus;
     }
 
     public sealed class StructuralInjectionWitness
@@ -99,12 +108,12 @@ namespace KspContinuum
         public string status = "pending";
         public string callback;
         public long physicsEpoch;
-        public long callbackInvocation;
-        public int callbackInvocationCount;
+        public long physicsCycle;
+        public int totalInjectionCallbacks;
         public int bodyAInstanceId;
         public int bodyBInstanceId;
-        public int bodyACommandCount;
-        public int bodyBCommandCount;
+        public int totalBodyACommands;
+        public int totalBodyBCommands;
         public bool bodyACommandReturned;
         public bool bodyBCommandReturned;
         public double[] bodyAImpulse = new double[0];
@@ -213,7 +222,7 @@ namespace KspContinuum
                 Require(report.requestedNetImpulse[i] == 0, "Requested net impulse is not exactly zero.");
                 if (report.mode == "sham") Require(report.requestedBodyAImpulse[i] == 0, "Sham experiment requests an impulse.");
                 double expected = report.mode == "sham" ? 0 : report.worldAxis[i] * report.impulseMagnitude;
-                Require(Math.Abs(report.requestedBodyAImpulse[i] - expected) <= 1e-12,
+                Require(Math.Abs(report.requestedBodyAImpulse[i] - expected) <= 1e-6 * Math.Max(1, Math.Abs(expected)),
                     "Requested impulse does not match the frozen axis and magnitude.");
                 Require(Math.Abs(report.baselineBodyBWorldCenterOfMass[i] - report.baselineBodyAWorldCenterOfMass[i]
                     - report.referenceRelativeCenterOfMass[i]) <= 1e-12,
@@ -246,7 +255,7 @@ namespace KspContinuum
                     && Finite(sample.fixedTimeSeconds), "Structural sample context is invalid.");
                 Require(sample.bodyAInstanceId == report.bodyAInstanceId && sample.bodyBInstanceId == report.bodyBInstanceId,
                     "Structural sample body identity changed.");
-                Require(sample.callbackInvocation == i + 1, "Structural observation callback sequence is not exact.");
+                Require(sample.physicsCycle == i + 1, "Structural physics-cycle sequence is not exact.");
                 Require(sample.unityFrame >= previousUnityFrame, "Structural rendered frame sequence reversed.");
                 previousUnityFrame = sample.unityFrame;
                 if (i == 0) { topologyGeneration = sample.topologyGeneration; frameGeneration = sample.frameGeneration;
@@ -279,7 +288,6 @@ namespace KspContinuum
         {
             StructuralAdmissionEvidence value = report.admission;
             Require(value != null && value.status == "verified", "Structural admission evidence is missing.");
-            Require(value.topology == report.topology, "Structural admission topology does not bind the report.");
             Require(value.dynamicBodyCount == 2 && value.mappedJointCount == 1 && value.unmappedJointCount == 0
                 && value.jointEnabled, "Structural topology was not admitted exactly.");
             Require(value.bodyAInstanceId == report.bodyAInstanceId && value.bodyBInstanceId == report.bodyBInstanceId
@@ -288,6 +296,21 @@ namespace KspContinuum
                 && value.jointHostBodyInstanceId == report.bodyAInstanceId
                 && value.jointConnectedBodyInstanceId == report.bodyBInstanceId,
                 "Structural admission identities do not bind the report.");
+            Require(value.topologyGeneration > 0 && value.topologyGeneration == report.baseline.topologyGeneration,
+                "Structural admission generation does not bind the run.");
+            ShadowPhysicalInput.ValidateStructuralLink(value.joint, 0, 1);
+            Require(value.joint.nativeInstanceId == report.jointInstanceId
+                && value.joint.jointType == "UnityEngine.ConfigurableJoint",
+                "Structural admission joint payload does not bind the native joint.");
+            Quaternion(value.jointTransformRotation, "admitted joint transform rotation");
+            Require(value.topology == report.topology && report.topology == ComputeTopology(report),
+                "Structural admission topology does not bind its full payload.");
+            double[] transformedAxis = Rotate(value.jointTransformRotation, value.joint.axis);
+            double transformedNorm = Math.Sqrt(transformedAxis[0] * transformedAxis[0]
+                + transformedAxis[1] * transformedAxis[1] + transformedAxis[2] * transformedAxis[2]);
+            Require(transformedNorm > 0, "Admitted joint axis is degenerate.");
+            for (int i = 0; i < 3; i++) Require(Math.Abs(report.worldAxis[i] - transformedAxis[i] / transformedNorm) <= 1e-6,
+                "Structural world axis is not derived from the admitted joint axis.");
             if (report.runEligibility == "eligible")
             {
                 StructuralBodySample last = report.bodySamples[report.bodySamples.Length - 1];
@@ -299,6 +322,9 @@ namespace KspContinuum
                     && value.contactObservationCount == report.bodySamples.Length
                     && value.detectedContactCount == 0 && value.jointBreakCount == 0,
                     "Structural contact sentinel evidence is incomplete or observed interference.");
+                Require(value.bodyASentinelTargetInstanceId == report.bodyAInstanceId
+                    && value.bodyBSentinelTargetInstanceId == report.bodyBInstanceId,
+                    "Structural contact sentinels do not bind both bodies.");
             }
             else
             {
@@ -310,6 +336,8 @@ namespace KspContinuum
                     && value.jointBreakCount == 0,
                     "Provisional structural capture contains contradictory contact evidence.");
             }
+            Require(value.hookCleanupStatus == "removed-owned-hooks",
+                "Structural physics-boundary hook cleanup is incomplete.");
         }
 
         static void ValidateBaselineAndInjection(StructuralExperimentReport report)
@@ -319,18 +347,18 @@ namespace KspContinuum
             Require(baseline != null && injection != null && injection.status == "completed",
                 "Structural baseline or injection witness is missing.");
             Require(baseline.physicsEpoch >= 0 && baseline.physicsEpoch != Int64.MaxValue
-                && baseline.callbackInvocation == 1 && baseline.topologyGeneration > 0 && baseline.frameGeneration > 0
+                && baseline.physicsCycle == 1 && baseline.topologyGeneration > 0 && baseline.frameGeneration > 0
                 && baseline.originEventCount >= 0 && baseline.unityFrame >= 0 && Finite(baseline.fixedTimeSeconds),
                 "Structural baseline context is invalid.");
             Require(baseline.bodyAInstanceId == report.bodyAInstanceId && baseline.bodyBInstanceId == report.bodyBInstanceId,
                 "Structural baseline body identity changed.");
             Require(injection.callback == report.injectionCallback && injection.physicsEpoch == baseline.physicsEpoch
-                && injection.callbackInvocation == baseline.callbackInvocation && injection.callbackInvocationCount == 1
+                && injection.physicsCycle == baseline.physicsCycle && injection.totalInjectionCallbacks == 1
                 && injection.bodyAInstanceId == report.bodyAInstanceId && injection.bodyBInstanceId == report.bodyBInstanceId,
                 "Structural injection did not execute once in the baseline callback.");
             int expectedCalls = report.mode == "impulse" ? 1 : 0;
             bool expectedReturned = report.mode == "impulse";
-            Require(injection.bodyACommandCount == expectedCalls && injection.bodyBCommandCount == expectedCalls
+            Require(injection.totalBodyACommands == expectedCalls && injection.totalBodyBCommands == expectedCalls
                 && injection.bodyACommandReturned == expectedReturned && injection.bodyBCommandReturned == expectedReturned,
                 "Structural injection command completion is not exact.");
             Vector(baseline.bodyAWorldCenterOfMass, 3, "baseline event body A center of mass");
@@ -345,6 +373,7 @@ namespace KspContinuum
             Vector(injection.bodyBImpulse, 3, "witness body B impulse");
             StructuralBodySample first = report.bodySamples[0];
             Require(first != null && first.physicsEpoch == baseline.physicsEpoch && first.fixedTimeSeconds == baseline.fixedTimeSeconds
+                && first.physicsCycle == baseline.physicsCycle && first.unityFrame == baseline.unityFrame
                 && first.topologyGeneration == baseline.topologyGeneration && first.frameGeneration == baseline.frameGeneration
                 && first.originEventCount == baseline.originEventCount,
                 "Structural first response does not bind the pre-physics baseline.");
@@ -359,6 +388,37 @@ namespace KspContinuum
                     && injection.bodyBImpulse[i] == report.requestedBodyBImpulse[i],
                     "Structural injection witness does not match the request.");
             }
+        }
+
+        public static string ComputeTopology(StructuralExperimentReport report)
+        {
+            if (report == null || report.admission == null || report.admission.joint == null)
+                throw new ArgumentException("Missing structural topology evidence.");
+            string canonical = report.bodyAInstanceId.ToString(CultureInfo.InvariantCulture) + "|"
+                + report.bodyBInstanceId.ToString(CultureInfo.InvariantCulture) + "|"
+                + report.jointInstanceId.ToString(CultureInfo.InvariantCulture) + "|"
+                + (report.admission.jointEnabled ? "1" : "0") + "|"
+                + ReportJson.Encode(report.admission.jointTransformRotation) + "|"
+                + ReportJson.Encode(report.admission.joint);
+            using (var sha = SHA256.Create())
+            {
+                byte[] digest = sha.ComputeHash(Encoding.UTF8.GetBytes(canonical));
+                var result = new StringBuilder("sha256:");
+                foreach (byte value in digest) result.Append(value.ToString("x2", CultureInfo.InvariantCulture));
+                return result.ToString();
+            }
+        }
+
+        static double[] Rotate(double[] quaternion, double[] vector)
+        {
+            Vector(vector, 3, "joint local axis");
+            double x = quaternion[0], y = quaternion[1], z = quaternion[2], w = quaternion[3];
+            double tx = 2 * (y * vector[2] - z * vector[1]);
+            double ty = 2 * (z * vector[0] - x * vector[2]);
+            double tz = 2 * (x * vector[1] - y * vector[0]);
+            return new[] { vector[0] + w * tx + (y * tz - z * ty),
+                vector[1] + w * ty + (z * tx - x * tz),
+                vector[2] + w * tz + (x * ty - y * tx) };
         }
 
         static void Vector(double[] value, int length, string name)

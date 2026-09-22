@@ -7,6 +7,26 @@ static class Program
     static void Check(bool condition, string message) { checks++; if (!condition) throw new Exception(message); }
     static void Reject(Action action, string message) { checks++; try { action(); } catch (InvalidOperationException) { return; } throw new Exception(message); }
 
+    static StructuralLimit Limit(double value = 1) { return new StructuralLimit { limit = value, bounciness = .1, contactDistance = .01 }; }
+    static StructuralSpring Spring() { return new StructuralSpring { spring = 10, damper = 2 }; }
+    static StructuralDrive Drive() { return new StructuralDrive { positionSpring = 11, positionDamper = 3,
+        maximumForce = 100, maximumForceStatus = "finite" }; }
+    static StructuralConfigurableJoint Configurable() { return new StructuralConfigurableJoint {
+        autoConfigureConnectedAnchor = false, configuredInWorldSpace = false, swapBodies = false,
+        xMotion = "Limited", yMotion = "Locked", zMotion = "Free", angularXMotion = "Limited",
+        angularYMotion = "Locked", angularZMotion = "Free", rotationDriveMode = "Slerp",
+        projectionMode = "PositionAndRotation", projectionDistance = .1, projectionAngle = 2,
+        targetPosition = new[] { .1, .2, .3 }, targetVelocity = new[] { .4, .5, .6 },
+        targetRotation = new[] { 0.0, 0, 0, 1 }, targetAngularVelocity = new[] { .7, .8, .9 },
+        linearLimit = Limit(), lowAngularXLimit = Limit(-20), highAngularXLimit = Limit(30),
+        angularYLimit = Limit(40), angularZLimit = Limit(50), linearLimitSpring = Spring(),
+        angularXLimitSpring = Spring(), angularYZLimitSpring = Spring(), xDrive = Drive(), yDrive = Drive(),
+        zDrive = Drive(), angularXDrive = Drive(), angularYZDrive = Drive(), slerpDrive = Drive() }; }
+    static StructuralLink Joint() { return new StructuralLink { nativeInstanceId = 3, bodyId = 0, connectedBodyId = 1,
+        jointType = "UnityEngine.ConfigurableJoint", anchor = new[] { 0.0, 0, 0 }, connectedAnchor = new[] { 0.0, 0, 0 },
+        axis = new[] { 1.0, 0, 0 }, secondaryAxis = new[] { 0.0, 1, 0 }, breakForceStatus = "unbreakable",
+        breakTorqueStatus = "unbreakable", massScale = 1, connectedMassScale = 1, configurable = Configurable() }; }
+
     static StructuralExperimentReport Fixture()
     {
         const double step = .02;
@@ -19,7 +39,7 @@ static class Program
             trace[i] = new StructuralTraceSample { physicsEpoch = i + 10, relativeDisplacement = displacement, relativeVelocity = velocity };
             bodies[i] = new StructuralBodySample {
                 physicsEpoch = i + 10, topologyGeneration = 4, frameGeneration = 7, originEventCount = 2,
-                callbackInvocation = i + 1, bodyAInstanceId = 1, bodyBInstanceId = 2,
+                physicsCycle = i + 1, bodyAInstanceId = 1, bodyBInstanceId = 2,
                 unityFrame = 100 + i, fixedTimeSeconds = 20 + i * step,
                 bodyAWorldCenterOfMass = new[] { 0.0, 0, 0 }, bodyARotation = new[] { 0.0, 0, 0, 1 },
                 bodyAVelocity = new[] { 0.0, 0, 0 }, bodyAAngularVelocity = new[] { 0.0, 0, 0 },
@@ -41,7 +61,7 @@ static class Program
         };
         lifecycle.qualificationId = LifecycleOrderQualification.ComputeId(lifecycle);
         var baseline = new StructuralBodySample {
-            physicsEpoch = 10, callbackInvocation = 1, topologyGeneration = 4, frameGeneration = 7,
+            physicsEpoch = 10, physicsCycle = 1, topologyGeneration = 4, frameGeneration = 7,
             originEventCount = 2, unityFrame = 100, fixedTimeSeconds = 20,
             bodyAInstanceId = 1, bodyBInstanceId = 2,
             bodyAWorldCenterOfMass = new[] { 0.0, 0, 0 }, bodyARotation = new[] { 0.0, 0, 0, 1 },
@@ -49,13 +69,12 @@ static class Program
             bodyBWorldCenterOfMass = new[] { 1.0, 0, 0 }, bodyBRotation = new[] { 0.0, 0, 0, 1 },
             bodyBVelocity = new[] { 0.0, 0, 0 }, bodyBAngularVelocity = new[] { 0.0, 0, 0 },
         };
-        return new StructuralExperimentReport {
+        var report = new StructuralExperimentReport {
             evidence = "portable-helper-fixture", status = "complete", receiptValidity = "valid",
             runEligibility = "eligible", experimentQualified = "not-evaluated", cleanupStatus = "complete",
             contactObservationStatus = "observed-none", vesselId = "fixture-vessel", bodyAInstanceId = 1,
             unity = lifecycle.unity, ksp = lifecycle.ksp, plugin = lifecycle.plugin,
             startedUtc = "2026-09-21T12:00:00Z", sessionId = "fixture-session", runId = "fixture-run",
-            topology = "fixture-config-sha256",
             injectionCallback = lifecycle.injectionCallback, observationCallback = lifecycle.observationCallback,
             lifecycleQualificationId = lifecycle.qualificationId, lifecycleQualification = lifecycle,
             bodyBInstanceId = 2, jointInstanceId = 3, retainedSamples = trace.Length, stepSeconds = step,
@@ -66,21 +85,26 @@ static class Program
             requestedBodyBImpulse = new[] { -.01, 0, 0 }, requestedNetImpulse = new[] { 0.0, 0, 0 },
             baseline = baseline,
             injection = new StructuralInjectionWitness { status = "completed", callback = lifecycle.injectionCallback,
-                physicsEpoch = 10, callbackInvocation = 1, callbackInvocationCount = 1,
-                bodyAInstanceId = 1, bodyBInstanceId = 2, bodyACommandCount = 1, bodyBCommandCount = 1,
+                physicsEpoch = 10, physicsCycle = 1, totalInjectionCallbacks = 1,
+                bodyAInstanceId = 1, bodyBInstanceId = 2, totalBodyACommands = 1, totalBodyBCommands = 1,
                 bodyACommandReturned = true, bodyBCommandReturned = true,
                 bodyAImpulse = new[] { .01, 0, 0 }, bodyBImpulse = new[] { -.01, 0, 0 } },
-            admission = new StructuralAdmissionEvidence { status = "verified", topology = "fixture-config-sha256",
+            admission = new StructuralAdmissionEvidence { status = "verified", topologyGeneration = 4,
                 dynamicBodyCount = 2, mappedJointCount = 1, unmappedJointCount = 0, jointEnabled = true,
                 bodyAInstanceId = 1, bodyBInstanceId = 2, jointInstanceId = 3,
                 jointType = "UnityEngine.ConfigurableJoint", jointHostBodyInstanceId = 1,
-                jointConnectedBodyInstanceId = 2,
+                jointConnectedBodyInstanceId = 2, joint = Joint(), jointTransformRotation = new[] { 0.0, 0, 0, 1 },
                 installedContactSentinels = 2, removedContactSentinels = 2,
                 contactWindowFirstEpoch = 10, contactWindowLastEpoch = 129,
-                contactObservationCount = trace.Length, detectedContactCount = 0, jointBreakCount = 0 },
-            trace = new StructuralTrace { evidence = "portable-helper-fixture", topology = "fixture-config-sha256",
+                contactObservationCount = trace.Length, detectedContactCount = 0, jointBreakCount = 0,
+                bodyASentinelTargetInstanceId = 1, bodyBSentinelTargetInstanceId = 2,
+                hookCleanupStatus = "removed-owned-hooks" },
+            trace = new StructuralTrace { evidence = "portable-helper-fixture",
                 stepSeconds = step, samples = trace }, bodySamples = bodies,
         };
+        report.topology = StructuralExperiment.ComputeTopology(report);
+        report.admission.topology = report.trace.topology = report.topology;
+        return report;
     }
 
     static int Main()
@@ -91,7 +115,7 @@ static class Program
         var sham = Fixture(); sham.mode = "sham"; sham.impulseMagnitude = 0;
         sham.requestedBodyAImpulse = sham.requestedBodyBImpulse = sham.requestedNetImpulse = new[] { 0.0, 0, 0 };
         sham.injection.bodyAImpulse = sham.injection.bodyBImpulse = new[] { 0.0, 0, 0 };
-        sham.injection.bodyACommandCount = sham.injection.bodyBCommandCount = 0;
+        sham.injection.totalBodyACommands = sham.injection.totalBodyBCommands = 0;
         sham.injection.bodyACommandReturned = sham.injection.bodyBCommandReturned = false;
         StructuralExperiment.Validate(sham); Check(true, "valid sham rejected");
         var provisional = Fixture(); provisional.runEligibility = "provisional-contact-unobserved";
@@ -119,7 +143,7 @@ static class Program
         changed = Fixture(); changed.referenceRelativeCenterOfMass[0] += .1;
         for (int i = 0; i < changed.trace.samples.Length; i++) changed.trace.samples[i].relativeDisplacement -= .1;
         Reject(() => StructuralExperiment.Validate(changed), "shifted displacement reference accepted");
-        changed = Fixture(); changed.injection.callbackInvocationCount = 2;
+        changed = Fixture(); changed.injection.totalInjectionCallbacks = 2;
         Reject(() => StructuralExperiment.Validate(changed), "duplicate injection callback accepted");
         changed = Fixture(); changed.injection = null;
         Reject(() => StructuralExperiment.Validate(changed), "missing injection witness accepted");
@@ -127,8 +151,12 @@ static class Program
         Reject(() => StructuralExperiment.Validate(changed), "injection epoch detached from baseline");
         changed = Fixture(); changed.injection.bodyBCommandReturned = false;
         Reject(() => StructuralExperiment.Validate(changed), "half-completed injection accepted");
+        changed = Fixture(); changed.injection.totalBodyACommands = 2;
+        Reject(() => StructuralExperiment.Validate(changed), "repeated injection command accepted");
         changed = Fixture(); changed.baseline.bodyAWorldCenterOfMass[0] = 1000;
         Reject(() => StructuralExperiment.Validate(changed), "unbound baseline accepted");
+        changed = Fixture(); changed.baseline.unityFrame = 999;
+        Reject(() => StructuralExperiment.Validate(changed), "cross-frame baseline accepted");
         changed = Fixture(); changed.bodySamples[60].bodyAInstanceId = 2;
         Reject(() => StructuralExperiment.Validate(changed), "mid-run body swap accepted");
         changed = Fixture(); changed.bodySamples[0] = null;
@@ -141,8 +169,20 @@ static class Program
         Reject(() => StructuralExperiment.Validate(changed), "wrong joint type accepted");
         changed = Fixture(); changed.admission.jointConnectedBodyInstanceId = 1;
         Reject(() => StructuralExperiment.Validate(changed), "wrong joint endpoint accepted");
+        changed = Fixture(); changed.topology = changed.admission.topology = changed.trace.topology = "arbitrary";
+        Reject(() => StructuralExperiment.Validate(changed), "free-form topology identity accepted");
+        changed = Fixture(); changed.admission.joint.configurable.xDrive.positionSpring++;
+        Reject(() => StructuralExperiment.Validate(changed), "joint configuration mutation accepted under stale topology");
+        changed = Fixture(); changed.admission.joint.axis = new[] { 0.0, 1, 0 };
+        changed.topology = StructuralExperiment.ComputeTopology(changed);
+        changed.admission.topology = changed.trace.topology = changed.topology;
+        Reject(() => StructuralExperiment.Validate(changed), "world axis detached from joint axis");
         changed = Fixture(); changed.admission.detectedContactCount = 1;
         Reject(() => StructuralExperiment.Validate(changed), "observed contact accepted");
+        changed = Fixture(); changed.admission.bodyASentinelTargetInstanceId = 2;
+        Reject(() => StructuralExperiment.Validate(changed), "misbound contact sentinel accepted");
+        changed = Fixture(); changed.admission.hookCleanupStatus = "pending";
+        Reject(() => StructuralExperiment.Validate(changed), "unclean physics hooks accepted");
         changed = Fixture(); changed.lifecycleQualification.trials[1].fixedDeltaSeconds = .03;
         changed.lifecycleQualification.qualificationId = LifecycleOrderQualification.ComputeId(changed.lifecycleQualification);
         changed.lifecycleQualificationId = changed.lifecycleQualification.qualificationId;

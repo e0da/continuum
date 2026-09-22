@@ -221,6 +221,15 @@ namespace KspContinuum
                     ids.Contains(link.bodyId) && ids.Contains(link.connectedBodyId) && link.bodyId != link.connectedBodyId,
                     "Structural link endpoints are invalid."
                 );
+                ValidateStructuralLink(link, link.bodyId, link.connectedBodyId);
+            }
+        }
+
+        public static void ValidateStructuralLink(StructuralLink link, int bodyId, int connectedBodyId)
+        {
+            Require(link != null, "Structural link is missing.");
+            Require(link.bodyId == bodyId && link.connectedBodyId == connectedBodyId && bodyId != connectedBodyId,
+                "Structural link endpoints are invalid.");
                 Require(!String.IsNullOrEmpty(link.jointType), "Structural joint type is missing.");
                 Vector(link.anchor, 3, "joint anchor");
                 Vector(link.connectedAnchor, 3, "connected joint anchor");
@@ -234,7 +243,6 @@ namespace KspContinuum
                     ValidateConfigurable(link.configurable);
                 else
                     Require(link.configurable == null, "Non-configurable joint has a configurable payload.");
-            }
         }
 
         static void ValidateConfigurable(StructuralConfigurableJoint joint)
