@@ -66,6 +66,7 @@ The experiments are independent of the running game:
 | [Contact checkpoints](docs/contact-checkpoints.md) | Uninterrupted contact/joint simulation versus full state restore and cold body reconstruction |
 | [Orbital/event fixture](docs/orbital-fixture.md) | An external local Gimbal coast implementation against independent orbital states, plus bounded encounter-event adversaries |
 | [Data-layout comparison](docs/layout-benchmark.md) | Object, SoA, and AoSoA captures under the same free-body and neighbor-reading kernels |
+| [Aerodynamic strategies](docs/aerodynamics.md) | Deterministic drag-cube projection with scalar and order-preserving parallel paths; a metamorphic baseline pending comparison with captured stock labels |
 | [Gravitational trajectories](docs/field-trajectory.md) | Analytic and step-refined Plummer trajectories, conservation, reversibility and a potential-consistent split toy |
 | [3D field gravity](docs/field-gravity.md) | Isolated softened forces via padded FFT/CIC against direct forces, with retained accuracy failures |
 | [Modal rocket reduction](docs/modal-reduction.md) | Full spring-mass motion versus a gross mode and six exact flexible modes under smooth and localized loads |
