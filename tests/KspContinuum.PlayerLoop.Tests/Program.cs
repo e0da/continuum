@@ -87,6 +87,12 @@ static class Program
         PlayerLoop.FailAfterWrite = true; bool setterRejected = false; try { failedHooks.Start(); } catch (InvalidOperationException) { setterRejected = true; }
         Check(setterRejected && failedHooks.CleanupStatus == "removed-owned-hooks");
         Check(Find(PlayerLoop.Current, typeof(Fixed)).subSystemList.Length == 2);
+
+        PlayerLoop.Current = Tree(); var poisonedHooks = new PhysicsBoundaryHooks(() => { }, () => { }); poisonedHooks.Start();
+        PlayerLoop.FailBeforeWrite = true; poisonedHooks.Dispose(); Check(poisonedHooks.CleanupStatus == "cleanup-error");
+        var blockedHooks = new PhysicsBoundaryHooks(() => { }, () => { }); bool blockedAfterCleanupFailure = false;
+        try { blockedHooks.Start(); } catch (InvalidOperationException) { blockedAfterCleanupFailure = true; }
+        Check(blockedAfterCleanupFailure);
         Console.WriteLine("PlayerLoop: " + checks + " assertions passed.");
     }
 }

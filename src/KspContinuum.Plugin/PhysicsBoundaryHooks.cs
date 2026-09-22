@@ -85,7 +85,7 @@ namespace KspContinuum
                 }
                 catch (Exception error) { clean = false; Detail = "Loop cleanup failed: " + error.GetType().Name; }
             }
-            if (owner == this) owner = null;
+            if (clean && owner == this) owner = null;
             CleanupStatus = clean ? "removed-owned-hooks" : "cleanup-error";
             if (!clean) valid = false;
         }
