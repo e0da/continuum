@@ -121,6 +121,12 @@ owned patches before exporting. The flight panel starts and stops the recorder. 
 assembly hash and MVID below, the expected owned hooks at inspection time, and confirmed cleanup; otherwise the run
 publishes no partial samples.
 
+Capture schema v2 adds one fixed-size stock scalar label to every body-drag publication: runtime drag-cube `AreaDrag`,
+part dynamic pressure, the flight integrator's pseudo-Reynolds, cached drag-cube and cached global drag multipliers, and
+the final part `dragScalar`. Mach remains in the shared part context. These read-only values separate projected-area
+error from stock magnitude multipliers without retaining KSP objects or expanding the sample and part bounds. The
+ocean scalar remains unobserved, so submerged samples cannot close the full stock magnitude product.
+
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
 The default archive and metadata filenames include the archive's full SHA-256, and the metadata points to that immutable
