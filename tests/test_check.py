@@ -23,7 +23,7 @@ class CheckContractTests(unittest.TestCase):
         result = self.run_lane("portable")
         self.assertEqual(result.returncode, 0, result.stderr)
         commands = result.stdout.splitlines()
-        self.assertEqual(len([line for line in commands if line.startswith("dotnet run")]), 14)
+        self.assertEqual(len([line for line in commands if line.startswith("dotnet run")]), 15)
         self.assertIn(
             "dotnet run --project tests/KspContinuum.StructuralResponse.Tests -c Release",
             commands,
