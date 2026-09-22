@@ -88,9 +88,9 @@ namespace KspContinuum
     {
         public string schema = "ksp-continuum-physics-substitution-canary/v1";
         public string status = "not-started";
-        public string limitation = "Exactly one native PhysicsFixedUpdate is deliberately skipped and no replacement dynamics are computed. This is an ownership/restoration canary, not a physics result or gameplay mode.";
+        public string limitation = "A bounded number of native PhysicsFixedUpdate callbacks already cached for one render frame are deliberately skipped and no replacement dynamics are computed. This is an ownership/restoration canary, not a physics result or gameplay mode.";
         public string reason, vesselId, topologyKey, installationStatus = "not-installed", restorationStatus = "not-attempted";
-        public int candidateCallbacks;
+        public int candidateCallbacks, candidateFrame = -1;
         public long originGeneration;
         public Vec frameVelocity;
         public WriterCensusSnapshot before, after;

@@ -34,11 +34,19 @@ namespace KspContinuum
             report.status = "entered-substituted-physics-bracket"; return true;
         }
 
-        public bool CandidateCallback()
+        public bool CandidateCallback(int frame)
         {
-            report.candidateCallbacks++;
-            if (!entered || callback || observed) return Reject("unexpected-candidate-callback");
-            callback = true; report.status = "skipping-one-native-physics-tick"; return true;
+            if (!entered || frame < 0) return Reject("unexpected-candidate-callback");
+            if (callback)
+            {
+                if (!restored || frame != report.candidateFrame || report.candidateCallbacks >= 4)
+                    return Reject("candidate-callback-outside-bounded-frame");
+                report.candidateCallbacks++;
+                return true;
+            }
+            if (observed) return Reject("unexpected-candidate-callback");
+            callback = true; report.candidateFrame = frame; report.candidateCallbacks = 1;
+            report.status = "skipping-cached-native-physics-frame"; return true;
         }
 
         public bool Observe(WriterCensusSnapshot before, WriterCensusSnapshot after, WriterCensusReport interval)
@@ -69,7 +77,7 @@ namespace KspContinuum
         void CompleteIfReady()
         {
             if (report.status == "invalid") return;
-            if (observed && restored) report.status = "observed-skipped-native-tick";
+            if (observed && restored) report.status = "observed-bounded-native-skip";
         }
 
         bool Reject(string reason) { report.status = "invalid"; if (report.reason == null) report.reason = reason; return false; }
