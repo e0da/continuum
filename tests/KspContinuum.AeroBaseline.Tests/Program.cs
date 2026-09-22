@@ -226,7 +226,7 @@ static class Program
             ReconstructionInputs(subunitAreas, subunitDrag)).AreaDragSquareMeters,
             "subunit drag uses Cd and Mach-power curves", 1e-12);
 
-        var context = Part(1, new Vec(), new Vec(-10, 0, 0), Rotation.Identity,
+        var context = Part(1, new Vec(), new Vec(10, 0, 0), Rotation.Identity,
             setDragInputs: ReconstructionInputs(areas, drag));
         Near(positive.AreaDragSquareMeters, AeroSetDragReconstruction.Evaluate(context).AreaDragSquareMeters,
             "part context derives normalized local drag direction", 1e-12);
@@ -254,6 +254,18 @@ static class Program
             ReconstructionInputs(areas, drag, bounded));
         Check(outside.Disposition == AeroSetDragDisposition.Abstained &&
             outside.Reason == AeroSetDragReason.OutsideCurveDomain, "curve extrapolation abstains explicitly");
+        var clamped = new AeroFloatCurveDefinition(8, 8, new[] {
+            new AeroCurveKey(.05, .1, 0, 0, 0, 0, 0), new AeroCurveKey(1, 2, 0, 0, 0, 0, 0) });
+        Near(.1, EvaluateClamp(clamped, 0), "clamp-forever pre-wrap", 0);
+        Near(2, EvaluateClamp(clamped, 2), "clamp-forever post-wrap", 0);
+    }
+
+    static double EvaluateClamp(AeroFloatCurveDefinition curve, double time)
+    {
+        var inputs = new AeroSetDragInputs(new[] { 1d, 0, 0, 0, 0, 0 }, new[] { time, 2, 2, 2, 2, 2 },
+            new AeroSurfaceCurveDefinitions(ConstantCurve(1), ConstantCurve(1), ConstantCurve(1), ConstantCurve(1)),
+            curve, ConstantCurve(1));
+        return AeroSetDragReconstruction.Evaluate(new Vec(1, 0, 0), .5, inputs).AreaDragSquareMeters;
     }
 
     static int Main()

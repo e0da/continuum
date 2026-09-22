@@ -6,7 +6,7 @@ namespace KspContinuum.Tools;
 internal static class AeroCompareCommand
 {
     private const string CaptureSchema = "ksp-continuum-aero-capture/v3";
-    private const long MaximumCaptureBytes = 32 * 1024 * 1024;
+    private const long MaximumCaptureBytes = 64 * 1024 * 1024;
     private const string ComparisonSchema = "ksp-continuum-aero-comparison/v1";
 
     public static int Run(string[] args)
