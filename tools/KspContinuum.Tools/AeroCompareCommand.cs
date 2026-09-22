@@ -5,7 +5,7 @@ namespace KspContinuum.Tools;
 
 internal static class AeroCompareCommand
 {
-    private const string CaptureSchema = "ksp-continuum-aero-capture/v1";
+    private const string CaptureSchema = "ksp-continuum-aero-capture/v2";
     private const long MaximumCaptureBytes = 32 * 1024 * 1024;
     private const string ComparisonSchema = "ksp-continuum-aero-comparison/v1";
 
@@ -165,9 +165,14 @@ internal static class AeroCompareCommand
                 Tooling.Require(seen.Add(context.flightId + ":" + kind), $"{path}: duplicate part publication kind");
                 if (parts.TryGetValue(context.flightId, out var prior)) Tooling.Require(prior.SameState(context), $"{path}: drag/lift state mismatch");
                 parts[context.flightId] = context;
+                var dragScalars = kind == AeroPublicationKind.BodyDrag
+                    ? ParseDragScalars(Child(publication, "stockDragScalars"))
+                    : null;
+                if (kind == AeroPublicationKind.BodyLift)
+                    Tooling.Require(publication["stockDragScalars"] is null, $"{path}: lift publication has drag scalars");
                 var label = new AeroBodyPublication(context, kind, EnumValue<AeroApplicationMode>(publication, "applicationMode"),
                     Vector(publication, "forceNewtons"), Vector(publication, "worldApplicationPosition"),
-                    Vector(publication, "torqueAboutPartCenterOfMassNewtonMeters"));
+                    Vector(publication, "torqueAboutPartCenterOfMassNewtonMeters"), dragScalars);
                 publications.Add(new Publication(label));
             }
             Tooling.Require(parts.Count <= AeroCaptureReport.MaximumPartsPerSample, $"{path}: part bound exceeded");
@@ -225,6 +230,11 @@ internal static class AeroCompareCommand
             Vector(value, "relativeAirVelocity"), Vector(value, "worldAngularVelocity"), Vector(value, "worldAttitudeXYZ"),
             Number(value, "worldAttitudeW"), cubes);
     }
+
+    private static AeroStockDragScalars ParseDragScalars(JsonObject value) => new(
+        Number(value, "areaDragSquareMeters"), Number(value, "dynamicPressurePascals"),
+        Number(value, "pseudoReynoldsDragMultiplier"), Number(value, "cachedDragCubeMultiplier"),
+        Number(value, "cachedGlobalDragMultiplier"), Number(value, "dragScalarKilonewtons"));
 
     private static Vec Vector(JsonObject owner, string name)
     { var value = Child(owner, name); return new Vec(Number(value, "X"), Number(value, "Y"), Number(value, "Z")); }

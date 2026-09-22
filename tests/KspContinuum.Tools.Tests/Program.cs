@@ -40,7 +40,7 @@ try
     Require(aeroComparison["counts"]!["bodyLiftLabelsExcluded"]!.GetValue<int>() == 1 && !aeroComparison["qualifiedForAuthority"]!.GetValue<bool>(), "aero comparison overstated coverage");
     var otherAero = Path.Combine(temporary, "aero-other.json"); File.WriteAllText(otherAero, ReportJson.Encode(AeroReceipt("1.12.5-other")));
     Require(Run("aero-compare", aero, otherAero) != 0, "mixed providers accepted");
-    var malformedAero = Path.Combine(temporary, "aero-malformed.json"); File.WriteAllText(malformedAero, "{\"schema\":\"ksp-continuum-aero-capture/v1\",\"disposition\":\"Valid\"}");
+    var malformedAero = Path.Combine(temporary, "aero-malformed.json"); File.WriteAllText(malformedAero, "{\"schema\":\"ksp-continuum-aero-capture/v2\",\"disposition\":\"Valid\"}");
     Require(Run("aero-compare", malformedAero) != 0, "malformed aero receipt accepted");
 
     var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]); var package = Path.Combine(temporary, "continuum.zip"); var download = "https://packages.example.invalid/ksp-continuum.zip";
@@ -108,11 +108,13 @@ AeroCaptureReport AeroReceipt(string version)
         cubes ? [new AeroDragCubeState("Default", 1, new Vec(), new Vec(1, 1, 1), faces, faces, faces, faces)] : []);
     var dragContext = Part(1, 0, true); var exact = AeroDragCubeBaseline.Evaluate(dragContext);
     var drag = new AeroBodyPublication(dragContext, AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
-        exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters);
+        exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters,
+        new AeroStockDragScalars(1, 60, 1, 1, 1, .06));
     var liftContext = Part(1, 1, true); var lift = new AeroBodyPublication(liftContext, AeroPublicationKind.BodyLift,
         AeroApplicationMode.AtCenterOfMass, new Vec(), liftContext.worldCenterOfMass, new Vec());
     var absentContext = Part(2, 2, false); var absent = new AeroBodyPublication(absentContext, AeroPublicationKind.BodyDrag,
-        AeroApplicationMode.AtCenterOfMass, new Vec(), absentContext.worldCenterOfMass, new Vec());
+        AeroApplicationMode.AtCenterOfMass, new Vec(), absentContext.worldCenterOfMass, new Vec(),
+        new AeroStockDragScalars(0, 60, 1, 1, 1, 0));
     return new AeroCaptureReport(provenance, AeroCaptureDisposition.Valid, AeroCaptureReason.None,
         AeroCleanupOutcome.RemovedOwnedPatches, [new AeroCaptureSample(Step(3), [drag, lift, absent])]);
 }

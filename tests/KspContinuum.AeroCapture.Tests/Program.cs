@@ -41,9 +41,11 @@ static class Program
         cubes ?? new[] { Cube() });
     static AeroDragCubeState Cube(double weight = .75) => new AeroDragCubeState("Default", weight, new Vec(.1, .2, .3), new Vec(1, 2, 3),
         new[] { 1d, 2, 3, 4, 5, 6 }, new[] { .1, .2, .3, .4, .5, .6 }, new[] { 2d, 3, 4, 5, 6, 7 }, new[] { 1d, 1, 1, 1, 1, 1 });
+    static AeroStockDragScalars DragScalars() => new AeroStockDragScalars(1.75, 240, .91, 1.2, .8, .32);
     static AeroBodyPublication Publication(AeroCaptureContext step, AeroPublicationKind kind, long flightId = 1, double density = 1.2) =>
         new AeroBodyPublication(Part(step, flightId, density), kind, AeroApplicationMode.AtWorldPosition,
-            new Vec(0, -2, 0), new Vec(2, 2, 3), new Vec(0, 0, -2));
+            new Vec(0, -2, 0), new Vec(2, 2, 3), new Vec(0, 0, -2),
+            kind == AeroPublicationKind.BodyDrag ? DragScalars() : null);
 
     static void Main()
     {
@@ -61,7 +63,7 @@ static class Program
         Check(readOnly);
         var report = new AeroCaptureReport(Provenance(), AeroCaptureDisposition.Valid, AeroCaptureReason.None,
             AeroCleanupOutcome.RemovedOwnedPatches, new[] { sample });
-        Check(report.schema == "ksp-continuum-aero-capture/v1" && report.samples.Count == 1 && report.provenance.targets.Count == 3);
+        Check(report.schema == "ksp-continuum-aero-capture/v2" && report.samples.Count == 1 && report.provenance.targets.Count == 3);
         Check(report.provenance.provider.assemblySha256 == Hash);
         var faces = new[] { 1d, 2, 3, 4, 5, 6 };
         var cube = new AeroDragCubeState("Asymmetric", .25, new Vec(), new Vec(1, 2, 3), faces,
@@ -76,6 +78,13 @@ static class Program
             Check(json.RootElement.GetProperty("disposition").GetString() == "Valid");
             Check(json.RootElement.GetProperty("provenance").GetProperty("targets").GetArrayLength() == 3);
             Check(json.RootElement.GetProperty("samples")[0].GetProperty("publications")[0].GetProperty("context").GetProperty("dragCubes")[0].GetProperty("area")[5].GetDouble() == 6);
+            var scalars = json.RootElement.GetProperty("samples")[0].GetProperty("publications")[0].GetProperty("stockDragScalars");
+            Check(scalars.GetProperty("areaDragSquareMeters").GetDouble() == 1.75 &&
+                scalars.GetProperty("dynamicPressurePascals").GetDouble() == 240 &&
+                scalars.GetProperty("pseudoReynoldsDragMultiplier").GetDouble() == .91 &&
+                scalars.GetProperty("cachedDragCubeMultiplier").GetDouble() == 1.2 &&
+                scalars.GetProperty("cachedGlobalDragMultiplier").GetDouble() == .8 &&
+                scalars.GetProperty("dragScalarKilonewtons").GetDouble() == .32);
         }
 
         Check(Reject(() => new AeroProviderFingerprint("stock", "1", "assembly", "bad", Guid.NewGuid().ToString())));
@@ -121,9 +130,15 @@ static class Program
         Check(Reject(() => new AeroPartContext(step, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, false,
             new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .99999, Array.Empty<AeroDragCubeState>())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyDrag, AeroApplicationMode.AtCenterOfMass,
-            new Vec(1, 0, 0), new Vec(), new Vec())));
+            new Vec(1, 0, 0), new Vec(), new Vec(), DragScalars())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,
             new Vec(0, -2, 0), new Vec(2, 2, 3), new Vec(0, 0, 2))));
+        Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
+            new Vec(), new Vec(1, 2, 3), new Vec())));
+        Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,
+            new Vec(), new Vec(1, 2, 3), new Vec(), DragScalars())));
+        Check(Reject(() => new AeroStockDragScalars(1, 2, double.NaN, 1, 1, 1)));
+        Check(Reject(() => new AeroStockDragScalars(1, 2, 1, -.1, 1, 1)));
         Check(Reject(() => new AeroCaptureSample(step, new[] { drag, drag })));
         Check(Reject(() => new AeroCaptureSample(step, new[] { Publication(Step(epoch: 2), AeroPublicationKind.BodyDrag) })));
         Check(Reject(() => new AeroCaptureSample(step, new[] { drag, Publication(Step(1), AeroPublicationKind.BodyLift, density: 1.1) })));

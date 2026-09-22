@@ -237,12 +237,15 @@ namespace KspContinuum
         public readonly AeroPartContext context;
         public readonly AeroPublicationKind kind;
         public readonly AeroApplicationMode applicationMode;
+        public readonly AeroStockDragScalars stockDragScalars;
         public readonly Vec forceNewtons, worldApplicationPosition, torqueAboutPartCenterOfMassNewtonMeters;
         public AeroBodyPublication(AeroPartContext context, AeroPublicationKind kind, AeroApplicationMode mode,
-            Vec force, Vec position, Vec torque)
+            Vec force, Vec position, Vec torque, AeroStockDragScalars dragScalars = null)
         {
             if (context == null || !Enum.IsDefined(typeof(AeroPublicationKind), kind) || !Enum.IsDefined(typeof(AeroApplicationMode), mode))
                 throw new ArgumentException("Invalid body aero publication.");
+            if ((kind == AeroPublicationKind.BodyDrag) != (dragScalars != null))
+                throw new ArgumentException("Stock drag scalars must label body-drag publications only.");
             AeroCaptureValidation.Vector(force); AeroCaptureValidation.Vector(position); AeroCaptureValidation.Vector(torque);
             if (mode == AeroApplicationMode.AtCenterOfMass && !AeroCaptureValidation.Equal(position, context.worldCenterOfMass))
                 throw new ArgumentException("Center application must use the captured center of mass.");
@@ -250,7 +253,26 @@ namespace KspContinuum
                 position.Z - context.worldCenterOfMass.Z), force);
             if (!AeroCaptureValidation.Equal(expected, torque)) throw new ArgumentException("Published torque is inconsistent with force application.");
             this.context = context; this.kind = kind; applicationMode = mode; forceNewtons = force;
-            worldApplicationPosition = position; torqueAboutPartCenterOfMassNewtonMeters = torque;
+            worldApplicationPosition = position; torqueAboutPartCenterOfMassNewtonMeters = torque; stockDragScalars = dragScalars;
+        }
+    }
+
+    public sealed class AeroStockDragScalars
+    {
+        public readonly double areaDragSquareMeters, dynamicPressurePascals, pseudoReynoldsDragMultiplier,
+            cachedDragCubeMultiplier, cachedGlobalDragMultiplier, dragScalarKilonewtons;
+        public AeroStockDragScalars(double areaDrag, double dynamicPressure, double pseudoReynoldsMultiplier,
+            double cubeMultiplier, double globalMultiplier, double dragScalar)
+        {
+            foreach (double value in new[] { areaDrag, dynamicPressure, pseudoReynoldsMultiplier,
+                cubeMultiplier, globalMultiplier, dragScalar })
+            {
+                AeroCaptureValidation.Number(value);
+                if (value < 0) throw new ArgumentException("Stock drag scalar cannot be negative.");
+            }
+            areaDragSquareMeters = areaDrag; dynamicPressurePascals = dynamicPressure;
+            pseudoReynoldsDragMultiplier = pseudoReynoldsMultiplier; cachedDragCubeMultiplier = cubeMultiplier;
+            cachedGlobalDragMultiplier = globalMultiplier; dragScalarKilonewtons = dragScalar;
         }
     }
 
@@ -281,7 +303,7 @@ namespace KspContinuum
     public sealed class AeroCaptureReport
     {
         public const int MaximumSamples = 64, MaximumPartsPerSample = 128;
-        public readonly string schema = "ksp-continuum-aero-capture/v1";
+        public readonly string schema = "ksp-continuum-aero-capture/v2";
         public readonly AeroPatchProvenance provenance;
         public readonly AeroCaptureDisposition disposition;
         public readonly AeroCaptureReason reason;

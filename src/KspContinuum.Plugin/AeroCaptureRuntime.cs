@@ -108,8 +108,8 @@ namespace KspContinuum
         }
         public static void Detach(AeroCaptureSession session) { if (ReferenceEquals(owner, session)) owner = null; }
         public static void UpdatePrefix(Part part) { if (owner != null) owner.Begin(part); }
-        public static void DragPrefix(Part part, Rigidbody rbPossible, ForceMode mode) { if (owner != null) owner.Publish(part, rbPossible, false); }
-        public static void LiftPrefix(Part part, Rigidbody rbPossible, ForceMode mode) { if (owner != null) owner.Publish(part, rbPossible, true); }
+        public static void DragPrefix(FlightIntegrator __instance, Part part, Rigidbody rbPossible, ForceMode mode) { if (owner != null) owner.Publish(__instance, part, rbPossible, false); }
+        public static void LiftPrefix(FlightIntegrator __instance, Part part, Rigidbody rbPossible, ForceMode mode) { if (owner != null) owner.Publish(__instance, part, rbPossible, true); }
         public static void UpdatePostfix(Part part) { if (owner != null) owner.End(part); }
         public static Exception UpdateFinalizer(Exception __exception, Part part)
         {
@@ -120,6 +120,10 @@ namespace KspContinuum
 
     public sealed class AeroCaptureSession : IDisposable
     {
+        static readonly AccessTools.FieldRef<FlightIntegrator, float> CacheDragCubeMultiplier =
+            AccessTools.FieldRefAccess<FlightIntegrator, float>("cacheDragCubeMultiplier");
+        static readonly AccessTools.FieldRef<FlightIntegrator, float> CacheDragMultiplier =
+            AccessTools.FieldRefAccess<FlightIntegrator, float>("cacheDragMultiplier");
         readonly AeroCaptureRun run;
         readonly string sessionId = Guid.NewGuid().ToString("D");
         readonly int threadId = Thread.CurrentThread.ManagedThreadId;
@@ -158,9 +162,9 @@ namespace KspContinuum
             current = part;
         }
 
-        internal void Publish(Part part, Rigidbody body, bool lift)
+        internal void Publish(FlightIntegrator integrator, Part part, Rigidbody body, bool lift)
         {
-            if (!ReferenceEquals(part, current) || body == null) return;
+            if (!ReferenceEquals(part, current) || body == null || integrator == null) return;
             if (pending.Count >= AeroCaptureReport.MaximumPartsPerSample * 2)
             { run.Invalidate(AeroCaptureReason.BoundsExceeded); AeroCapture.Detach(this); return; }
             try
@@ -180,9 +184,12 @@ namespace KspContinuum
                 Vec forceSi = Vector(force * 1000f), positionWorld = Vector(position);
                 Vec arm = new Vec(positionWorld.X - context.worldCenterOfMass.X, positionWorld.Y - context.worldCenterOfMass.Y,
                     positionWorld.Z - context.worldCenterOfMass.Z);
+                AeroStockDragScalars dragScalars = lift ? null : new AeroStockDragScalars(part.DragCubes.AreaDrag,
+                    part.dynamicPressurekPa * 1000d, integrator.pseudoReDragMult,
+                    CacheDragCubeMultiplier(integrator), CacheDragMultiplier(integrator), part.dragScalar);
                 pending.Add(new AeroBodyPublication(context, lift ? AeroPublicationKind.BodyLift : AeroPublicationKind.BodyDrag,
                     atCenter ? AeroApplicationMode.AtCenterOfMass : AeroApplicationMode.AtWorldPosition,
-                    forceSi, positionWorld, Vec.Cross(arm, forceSi)));
+                    forceSi, positionWorld, Vec.Cross(arm, forceSi), dragScalars));
             }
             catch (Exception error)
             {
