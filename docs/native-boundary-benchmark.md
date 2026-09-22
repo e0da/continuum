@@ -85,3 +85,9 @@ Use the in-process x86_64 Rust dylib as the next CPU integration route for compu
 An arm64 sidecar could use native Apple Silicon and the existing Metal backend, but adds IPC, scheduling, and synchronization. It becomes a useful experiment only when a resident workload is large enough to amortize those costs. An in-process x86_64 Metal backend avoids IPC but still needs x86_64 GPU qualification and the existing f32/local-offset accuracy contract. Neither GPU route is supported by this CPU ABI result.
 
 This benchmark does not measure Unity Mono, KSP's actual extraction and publication code, dirty-set discovery, contention with rendering, GPU transfer, or live frame rate. The persistent-view transaction still scans every row for force refresh and motion publication. It establishes that the architecture-compatible synchronous ABI is cheap, while host traffic can dominate even without full-state repacking.
+
+## Unity Mono qualification
+
+The opt-in `--continuum-native-boundary-bench` main-menu qualification measures the same f64 managed and Rust kernels from KSP's embedded Mono host. Install the x86_64 `libcontinuum_native_boundary.dylib` beside `KspContinuum.dll` in `GameData/KspContinuum/Plugins`, then launch an owned KSP 1.12.5 qualification copy with the flag. The addon writes `native-boundary-mono-*.json` under `PluginData` and exits with code 0; ABI, layout, load, or exact-result failures exit with code 2.
+
+The receipt reports 101-sample median and p95 latency for 64, 256, 1,024, and 4,096 bodies over one and four steps, plus a 1,001-sample empty-call baseline. This isolates Unity Mono synchronous P/Invoke plus the Rust kernel. It deliberately excludes vessel capture, execution-view refresh, transactional publication, Unity physics, rendering, and live contention, so it can qualify host-specific call cost but cannot establish a game-frame speedup.
