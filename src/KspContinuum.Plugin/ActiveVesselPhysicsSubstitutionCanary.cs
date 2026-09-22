@@ -10,7 +10,7 @@ namespace KspContinuum
         readonly WriterCensus census;
         PhysicsBoundarySubstitution substitution;
         WriterCensusSnapshot before;
-        bool disposed;
+        bool disposed, finished;
         public PhysicsSubstitutionCanaryReport Report { get; private set; }
 
         public ActiveVesselPhysicsSubstitutionCanary(ActiveVesselWriterCensus source)
@@ -64,7 +64,7 @@ namespace KspContinuum
 
         public void Before(string scope, int frame, double fixedTimeSeconds)
         {
-            if (scope != Scope) return;
+            if (scope != Scope || finished) return;
             try
             {
                 if (!Eligible()) { state.Fail("qualified-lifecycle-changed-before-bracket"); return; }
@@ -76,17 +76,18 @@ namespace KspContinuum
 
         public void After(string scope, int frame, double fixedTimeSeconds)
         {
-            if (scope != Scope) return;
+            if (scope != Scope || finished) return;
             try
             {
                 census.After(scope, frame, fixedTimeSeconds); census.Finish();
                 state.Observe(before, source.Snapshot(), census.Report);
             }
             catch (Exception error) { state.Fail("post-bracket-capture-failed:" + error.GetType().Name); }
+            finally { finished = true; }
         }
 
         public void Fault(string scope, Exception error)
-        { if (scope == Scope) state.Fail("playerloop-bracket-failed:" + error.GetType().Name); }
+        { if (scope == Scope && !finished) state.Fail("playerloop-bracket-failed:" + error.GetType().Name); }
 
         void Restore()
         {
