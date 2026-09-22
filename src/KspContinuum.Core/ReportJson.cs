@@ -70,6 +70,7 @@ namespace KspContinuum
                 type != typeof(StructuralLink) && type != typeof(StructuralConfigurableJoint) &&
                 type != typeof(StructuralLimit) && type != typeof(StructuralSpring) && type != typeof(StructuralDrive) &&
                 type != typeof(StructuralExperimentReport) && type != typeof(StructuralBodySample) &&
+                type != typeof(StructuralAdmissionEvidence) && type != typeof(StructuralInjectionWitness) &&
                 type != typeof(StructuralTrace) && type != typeof(StructuralTraceSample) && type != typeof(StructuralModeFit) &&
                 type != typeof(AeroCaptureReport) && type != typeof(AeroProviderFingerprint) && type != typeof(AeroPatchProvenance) &&
                 type != typeof(AeroPatchTarget) && type != typeof(AeroPatchEntry) && type != typeof(AeroCaptureSample) &&
