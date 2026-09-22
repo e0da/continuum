@@ -18,7 +18,7 @@ namespace KspContinuum
         readonly List<StructuralTraceSample> trace = new List<StructuralTraceSample>();
         Vessel vessel; Rigidbody bodyA, bodyB; ConfigurableJoint joint;
         StructuralContactSentinel sentinelA, sentinelB;
-        int originEvents; long cycle; bool started, active, cleanupRequested, destroyRequested, finished, disposed;
+        int originEvents, settledBoundaries; long cycle; bool started, active, armed, cleanupRequested, destroyRequested, finished, disposed;
         string topology; double[] axis, reference; int sentinelsRequestedForRemoval;
         public StructuralExperimentReport Report { get; private set; }
         public bool IsRunning { get { return started && !finished; } }
@@ -64,7 +64,7 @@ namespace KspContinuum
                 Report.admission.bodyASentinelTargetInstanceId = bodyA.GetInstanceID();
                 Report.admission.bodyBSentinelTargetInstanceId = bodyB.GetInstanceID();
                 GameEvents.onFloatingOriginShift.Add(OnOriginShift);
-                hooks.Start(); active = true; Report.status = "running"; Status = "Structural " + mode + " capture running.";
+                hooks.Start(); active = true; Report.status = "running"; Status = "Structural " + mode + " capture settling.";
                 clock.Start();
             }
             catch (Exception error) { Invalidate("Start failed: " + error.GetType().Name + ": " + error.Message); Cleanup(); }
@@ -108,7 +108,9 @@ namespace KspContinuum
             if (!active) return;
             try
             {
-                RequireStable(); cycle++;
+                RequireStable();
+                if (!armed) return;
+                cycle++;
                 if (cycle > StructuralExperimentReport.RequiredSamples) throw new InvalidOperationException("Unexpected extra physics cycle.");
                 if (cycle != 1) return;
                 Vector3 worldAxis = joint.transform.TransformDirection(joint.axis);
@@ -143,6 +145,19 @@ namespace KspContinuum
             try
             {
                 RequireStable();
+                if (!armed)
+                {
+                    Vector3 relativeVelocity = bodyB.velocity - bodyA.velocity;
+                    Vector3 relativeAngularVelocity = bodyB.angularVelocity - bodyA.angularVelocity;
+                    if (relativeVelocity.sqrMagnitude <= .0001f && relativeAngularVelocity.sqrMagnitude <= .0001f)
+                        settledBoundaries++;
+                    else settledBoundaries = 0;
+                    if (settledBoundaries >= 10)
+                    {
+                        armed = true; Status = "Structural " + mode + " capture armed after settling.";
+                    }
+                    return;
+                }
                 if (cycle <= 0 || samples.Count != cycle - 1) throw new InvalidOperationException("Physics callbacks are unmatched.");
                 if (Report.admission.detectedContactCount != 0 || Report.admission.jointBreakCount != 0)
                     throw new InvalidOperationException("Contact or joint break invalidated the experiment.");
