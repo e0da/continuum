@@ -24,7 +24,7 @@ static class Program
         var query = new ExecutionQuery("free-flight", Moving, ExecutionComponent.Contact, 4);
         MotionExecutionView view = ExecutionViewCompiler.CompileMotion(source, query);
         Check(view.Count == 3 && view.PaddedCount == 4 && view.LaneWidth == 4, "dense lane shape changed");
-        Check(view.PositionX.Length == 4 && view.PositionX[0] == 9 && view.PositionX[1] == 40 && view.PositionX[2] == 7,
+        Check(view.PositionX.Count == 4 && view.PositionX[0] == 9 && view.PositionX[1] == 40 && view.PositionX[2] == 7,
             "backend-facing contiguous position column changed");
         Check(view.GetKey(0).Slot == 9 && view.GetKey(1).Slot == 40 && view.GetKey(2).Slot == 7,
             "view confused dense lane order with stable identity");
