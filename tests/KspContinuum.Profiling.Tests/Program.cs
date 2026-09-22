@@ -62,6 +62,27 @@ static class Program
             new MarkerReport { name = "Missing", available = new bool[2], nanoseconds = new long[2], blocks = new int[2] } } };
         ProfilingSummary.Finish(empty, 0);
         Check(empty.frames.Length == 0 && empty.wallIntervals == null && empty.markers[0].status == "unavailable");
+        var stockProfile = ComparableProfile(10, 8, 6, 4);
+        var candidateProfile = ComparableProfile(8, 6, 3, 3);
+        var expected = new ProfileComparisonExpectation { substitutionId = "cluster-a", substitutionStatus = "verified",
+            stockRigidbodies = 128, stockJoints = 127, candidateRigidbodies = 128, candidateJoints = 127 };
+        var comparison = ProfileComparisonSummary.Compare(stockProfile, candidateProfile, expected);
+        Near(comparison.wallIntervals.meanSpeedupPercent, 20);
+        Near(comparison.fixedUpdate.meanSpeedupPercent, 25);
+        Near(comparison.physicsFixedUpdate.meanSpeedupPercent, 50);
+        Near(comparison.behaviourFixedUpdate.meanSpeedupPercent, 25);
+        Check(comparison.stockFrames == 1 && comparison.candidateFrames == 1);
+        candidateProfile.frames[0].joints = 8;
+        Check(Reject(() => ProfileComparisonSummary.Compare(stockProfile, candidateProfile, expected)));
+        candidateProfile.frames[0].rigidbodies = 1;
+        candidateProfile.frames[0].joints = 0;
+        var structuralExpected = new ProfileComparisonExpectation { substitutionId = "cluster-a", substitutionStatus = "verified",
+            stockRigidbodies = 128, stockJoints = 127, candidateRigidbodies = 1, candidateJoints = 0 };
+        var structural = ProfileComparisonSummary.Compare(stockProfile, candidateProfile, structuralExpected);
+        Check(structural.status == "comparable" && structural.substitutionId == "cluster-a");
+        candidateProfile.playerLoop.scopes[0].droppedSamples = 1;
+        Check(Reject(() => ProfileComparisonSummary.Compare(stockProfile, candidateProfile, structuralExpected)));
+        Check(Reject(() => ProfileComparisonSummary.Compare(stockProfile, candidateProfile, null)));
         var forceContext = new ForceObservationContext("11111111-1111-1111-1111-111111111111",
             "22222222-2222-2222-2222-222222222222", "FLIGHT", "frame-1", 10, -42, 1, 1, 1, 0, 100, 1, .02, new Vec());
         var forcePart = new ForcePartObservation(1, 0, -8, -9, new Vec(1, 2, 3), new Vec(), new Vec(4, 5, 6),
@@ -76,4 +97,24 @@ static class Program
         }
         Console.WriteLine("Profiling: " + assertions + " assertions passed.");
     }
+
+    static ProbeReport ComparableProfile(double wall, double fixedMs, double physicsMs, double behaviourMs)
+    {
+        return new ProbeReport {
+            status = "complete", requestedFrames = 1, completedFrames = 1, contextMisalignedFrames = 0,
+            unity = "2019.4", ksp = "1.12.5", platform = "OSXPlayer", processor = "CPU", processorCount = 8,
+            graphicsDevice = "GPU", targetFrameRate = -1, vSyncCount = 0,
+            frames = new[] { new ProfileFrame { contextAligned = true, scene = "FLIGHT", body = "Kerbin", situation = "ORBITING",
+                vesselId = "vessel", parts = 128, rigidbodies = 128, joints = 127, colliders = 128, loadedVessels = 1,
+                screenWidth = 1920, screenHeight = 1080, fixedDeltaSeconds = .02, timeScale = 1, warpRate = 1,
+                throttleCommand = 0, packed = false, loaded = true, paused = false, wallMilliseconds = wall } },
+            wallIntervals = Dist(wall), markers = new MarkerReport[0],
+            playerLoop = new LoopTimingReport { status = "observed", integrityStatus = "verified-at-boundaries", cleanupStatus = "removed-owned-hooks",
+                scopes = new[] { Scope("UnityEngine.PlayerLoop.FixedUpdate", fixedMs),
+                    Scope("UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate", physicsMs),
+                    Scope("UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate", behaviourMs) } }
+        };
+    }
+    static LoopTimingScope Scope(string name, double value) { return new LoopTimingScope { name = name, status = "observed", milliseconds = Dist(value), samples = new LoopTimingSample[1] }; }
+    static ProfileDistribution Dist(double value) { return new ProfileDistribution { count = 1, minimum = value, maximum = value, mean = value, p50 = value, p95 = value, p99 = value }; }
 }
