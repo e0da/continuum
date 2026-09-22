@@ -891,6 +891,17 @@ static class Program
         physical = PhysicalReport();
         physical.firstAcceptedBatch = new[] { physical.firstAcceptedBatch[0], linked };
         physical.firstAcceptedLinks = new[] { new StructuralLink {
+            nativeInstanceId = -99, bodyId = 0, connectedBodyId = 1, jointType = "UnityEngine.ConfigurableJoint",
+            anchor = new double[3], connectedAnchor = new double[3], axis = new[] { 1.0, 0, 0 },
+            secondaryAxis = new[] { 0.0, 1, 0 }, breakForce = 0, breakTorque = 0,
+            breakForceStatus = "unbreakable", breakTorqueStatus = "unbreakable", massScale = 1,
+            connectedMassScale = 1, configurable = Configurable(),
+        } };
+        physical.firstAcceptedLinks[0].configurable.projectionMode = "bogus";
+        Reject(() => ShadowPhysicalInput.Validate(physical));
+        physical = PhysicalReport();
+        physical.firstAcceptedBatch = new[] { physical.firstAcceptedBatch[0], linked };
+        physical.firstAcceptedLinks = new[] { new StructuralLink {
             nativeInstanceId = -99, bodyId = 0, connectedBodyId = 1, jointType = "UnityEngine.FixedJoint",
             anchor = new double[3], connectedAnchor = new double[3], axis = new[] { 1.0, 0, 0 },
             secondaryAxis = new double[3], breakForce = 0, breakTorque = 0,

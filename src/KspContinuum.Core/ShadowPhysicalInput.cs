@@ -242,8 +242,10 @@ namespace KspContinuum
             Require(joint != null, "Configurable joint payload is missing.");
             Motion(joint.xMotion); Motion(joint.yMotion); Motion(joint.zMotion);
             Motion(joint.angularXMotion); Motion(joint.angularYMotion); Motion(joint.angularZMotion);
-            Require(!String.IsNullOrEmpty(joint.rotationDriveMode), "Rotation drive mode is missing.");
-            Require(!String.IsNullOrEmpty(joint.projectionMode), "Projection mode is missing.");
+            Require(joint.rotationDriveMode == "XYAndZ" || joint.rotationDriveMode == "Slerp",
+                "Rotation drive mode is invalid.");
+            Require(joint.projectionMode == "None" || joint.projectionMode == "PositionAndRotation",
+                "Projection mode is invalid.");
             Nonnegative(joint.projectionDistance, "Projection distance");
             Nonnegative(joint.projectionAngle, "Projection angle");
             Vector(joint.targetPosition, 3, "target position");
