@@ -48,7 +48,8 @@ source into the ignored `artifacts/structural-ci` build directory.
 To compile the addon, point `KSP_MANAGED` at the `Managed` directory in your own KSP 1.12.5 installation. On macOS this is inside `KSP.app/Contents/Resources/Data`; on Windows/Linux it is typically under `KSP_x64_Data`.
 
 The addon compiles against Lib.Harmony for its opt-in aerodynamic recorder, but the package does not bundle
-`0Harmony.dll`. Install the shared CKAN dependency `Harmony2` before loading this build in KSP.
+`0Harmony.dll`. The package command emits a sibling local `.ckan` file that declares the shared CKAN dependency
+`Harmony2` and binds the archive by size and hashes.
 
 ```sh
 export KSP_MANAGED="/path/to/your/KSP/Managed"
@@ -56,7 +57,7 @@ dotnet build src/KspContinuum.Plugin -c Release
 dotnet run --project tools/KspContinuum.Tools -c Release -- package
 ```
 
-The build reads game references but never copies them or installs anything. The local archive in `artifacts/` contains this project's plugin, documentation and an example input track; mission packages add the optional project-owned mission DLL. There is no published CKAN release yet. The local experiment was installed through CKAN in an independent test copy; public release metadata and gameplay qualification remain incomplete. Do not deploy into an instance another process or agent is using.
+The build reads game references but never copies them or installs anything. The local archive in `artifacts/` contains this project's plugin, documentation and an example input track; mission packages add the optional project-owned mission DLL. Its generated `.ckan` metadata uses a local file URL for that exact archive and is not published release or NetKAN metadata. The local experiment was installed through CKAN in an independent test copy; public release metadata and gameplay qualification remain incomplete. Do not deploy into an instance another process or agent is using.
 
 For automated engine qualification in an owned test copy, launch its KSP executable with `-batchmode -nographics --continuum-bench`. At the main menu, the addon runs the isolated benchmark, writes its report, and exits with code 0 when all report checks pass or 1 on failure. An unsupported KSP version exits with code 2. Normal launches do not auto-run or exit. Headless execution does not verify the visible panels or live-vessel inspector.
 
