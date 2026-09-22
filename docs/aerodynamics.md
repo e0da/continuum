@@ -119,10 +119,11 @@ owned patches before exporting. The flight panel starts and stops the recorder. 
 assembly hash and MVID below, the expected owned hooks at inspection time, and confirmed cleanup; otherwise the run
 publishes no partial samples.
 
-This code compiles against Lib.Harmony but does not package `0Harmony.dll`. Installed qualification therefore requires
-the shared CKAN dependency `Harmony2` from HarmonyKSP. The repository does not yet publish release/NetKAN metadata, so
-that dependency remains an explicit installation gate for the first disposable-instance run. Source compilation and
-portable lifecycle tests do not establish patch coexistence, callback ordering, field units, or receipt validity in KSP.
+This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
+metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
+The metadata points to the local archive; the repository does not yet publish release or NetKAN metadata. Source
+compilation and portable lifecycle tests do not establish patch coexistence, callback ordering, field units, or receipt
+validity in KSP.
 
 The automated entrypoint is `--continuum-aero-capture-001`. Launch an owned qualification instance directly into a
 controlled stock atmospheric flight save with KSP's `-loadfile` argument plus `-batchmode -nographics`. The addon waits
