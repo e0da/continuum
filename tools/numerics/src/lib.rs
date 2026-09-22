@@ -4,6 +4,7 @@ pub mod field;
 pub mod gpu_execution;
 pub mod modal;
 pub mod persistent_execution_view;
+pub mod transactional_simulation;
 
 use serde::Serialize;
 use std::{fs::OpenOptions, io::Write, path::Path};
