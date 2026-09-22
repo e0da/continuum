@@ -24,6 +24,7 @@ namespace KspContinuum
         public string evidence = "native-adapter-observation";
         public string schema = "ksp-continuum-flight-shadow/v2";
         public string physicalInputSchema = ShadowPhysicalInput.PhysicalInputSchema;
+        public string structuralInputSchema = ShadowPhysicalInput.StructuralInputSchema;
         public string referenceFrameSchema = ShadowPhysicalInput.ReferenceFrameSchema;
         public string aggregateForceStatus = ShadowPhysicalInput.AggregateForceUnavailable;
         public string scope =
@@ -191,6 +192,63 @@ namespace KspContinuum
         public bool preprocessingEnabled;
         public double massScale;
         public double connectedMassScale;
+        public StructuralConfigurableJoint configurable;
+    }
+
+    public sealed class StructuralConfigurableJoint
+    {
+        public bool autoConfigureConnectedAnchor;
+        public bool configuredInWorldSpace;
+        public bool swapBodies;
+        public string xMotion;
+        public string yMotion;
+        public string zMotion;
+        public string angularXMotion;
+        public string angularYMotion;
+        public string angularZMotion;
+        public string rotationDriveMode;
+        public string projectionMode;
+        public double projectionDistance;
+        public double projectionAngle;
+        public double[] targetPosition;
+        public double[] targetVelocity;
+        public double[] targetRotation;
+        public double[] targetAngularVelocity;
+        public StructuralLimit linearLimit;
+        public StructuralLimit lowAngularXLimit;
+        public StructuralLimit highAngularXLimit;
+        public StructuralLimit angularYLimit;
+        public StructuralLimit angularZLimit;
+        public StructuralSpring linearLimitSpring;
+        public StructuralSpring angularXLimitSpring;
+        public StructuralSpring angularYZLimitSpring;
+        public StructuralDrive xDrive;
+        public StructuralDrive yDrive;
+        public StructuralDrive zDrive;
+        public StructuralDrive angularXDrive;
+        public StructuralDrive angularYZDrive;
+        public StructuralDrive slerpDrive;
+    }
+
+    public sealed class StructuralLimit
+    {
+        public double limit;
+        public double bounciness;
+        public double contactDistance;
+    }
+
+    public sealed class StructuralSpring
+    {
+        public double spring;
+        public double damper;
+    }
+
+    public sealed class StructuralDrive
+    {
+        public double positionSpring;
+        public double positionDamper;
+        public double maximumForce;
+        public string maximumForceStatus;
     }
 }
 

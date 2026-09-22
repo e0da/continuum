@@ -6,6 +6,7 @@ namespace KspContinuum
     public static class ShadowPhysicalInput
     {
         public const string PhysicalInputSchema = "ksp-continuum-rigidbody-input/v1";
+        public const string StructuralInputSchema = "ksp-continuum-structural-input/v2";
         public const string ReferenceFrameSchema = "ksp-continuum-unity-frame-context/v1";
         public const string UnityWorldReferenceFrame = "unity-world-at-capture";
         public const string SyntheticZeroForce = "synthetic-zero-not-native-measurement";
@@ -35,6 +36,7 @@ namespace KspContinuum
                 report.referenceFrameSchema == ReferenceFrameSchema,
                 "Unexpected reference-frame schema."
             );
+            Require(report.structuralInputSchema == StructuralInputSchema, "Unexpected structural input schema.");
             Require(
                 report.aggregateForceStatus == AggregateForceUnavailable,
                 "Aggregate force availability is ambiguous."
@@ -228,7 +230,63 @@ namespace KspContinuum
                 Require(Threshold(link.breakTorque, link.breakTorqueStatus), "Joint break torque is invalid.");
                 Require(Finite(link.massScale) && link.massScale >= 0 && Finite(link.connectedMassScale) && link.connectedMassScale >= 0,
                     "Joint mass scales are invalid.");
+                if (link.jointType == "UnityEngine.ConfigurableJoint")
+                    ValidateConfigurable(link.configurable);
+                else
+                    Require(link.configurable == null, "Non-configurable joint has a configurable payload.");
             }
+        }
+
+        static void ValidateConfigurable(StructuralConfigurableJoint joint)
+        {
+            Require(joint != null, "Configurable joint payload is missing.");
+            Motion(joint.xMotion); Motion(joint.yMotion); Motion(joint.zMotion);
+            Motion(joint.angularXMotion); Motion(joint.angularYMotion); Motion(joint.angularZMotion);
+            Require(!String.IsNullOrEmpty(joint.rotationDriveMode), "Rotation drive mode is missing.");
+            Require(!String.IsNullOrEmpty(joint.projectionMode), "Projection mode is missing.");
+            Nonnegative(joint.projectionDistance, "Projection distance");
+            Nonnegative(joint.projectionAngle, "Projection angle");
+            Vector(joint.targetPosition, 3, "target position");
+            Vector(joint.targetVelocity, 3, "target velocity");
+            Quaternion(joint.targetRotation, "target rotation");
+            Vector(joint.targetAngularVelocity, 3, "target angular velocity");
+            Limit(joint.linearLimit); Limit(joint.lowAngularXLimit); Limit(joint.highAngularXLimit);
+            Limit(joint.angularYLimit); Limit(joint.angularZLimit);
+            Spring(joint.linearLimitSpring); Spring(joint.angularXLimitSpring); Spring(joint.angularYZLimitSpring);
+            Drive(joint.xDrive); Drive(joint.yDrive); Drive(joint.zDrive);
+            Drive(joint.angularXDrive); Drive(joint.angularYZDrive); Drive(joint.slerpDrive);
+        }
+
+        static void Motion(string value)
+        {
+            Require(value == "Locked" || value == "Limited" || value == "Free", "Joint motion is invalid.");
+        }
+
+        static void Limit(StructuralLimit value)
+        {
+            Require(value != null && Finite(value.limit), "Joint limit is invalid.");
+            Nonnegative(value.bounciness, "Joint limit bounciness");
+            Nonnegative(value.contactDistance, "Joint limit contact distance");
+        }
+
+        static void Spring(StructuralSpring value)
+        {
+            Require(value != null, "Joint spring is missing.");
+            Nonnegative(value.spring, "Joint spring");
+            Nonnegative(value.damper, "Joint damper");
+        }
+
+        static void Drive(StructuralDrive value)
+        {
+            Require(value != null, "Joint drive is missing.");
+            Nonnegative(value.positionSpring, "Joint drive spring");
+            Nonnegative(value.positionDamper, "Joint drive damper");
+            Require(Threshold(value.maximumForce, value.maximumForceStatus), "Joint drive maximum force is invalid.");
+        }
+
+        static void Nonnegative(double value, string name)
+        {
+            Require(Finite(value) && value >= 0, name + " must be nonnegative and finite.");
         }
 
         static void Quaternion(double[] value, string name)

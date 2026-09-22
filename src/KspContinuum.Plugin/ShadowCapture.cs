@@ -460,7 +460,7 @@ namespace KspContinuum
                     .Append(joint.enableCollision).Append(':').Append(joint.enablePreprocessing).Append(':')
                     .Append(F(joint.massScale)).Append(':').Append(F(joint.connectedMassScale));
                 Append(signature, joint.anchor); Append(signature, joint.connectedAnchor); Append(signature, joint.axis);
-                if (joint is ConfigurableJoint) Append(signature, ((ConfigurableJoint)joint).secondaryAxis);
+                if (joint is ConfigurableJoint) Append(signature, CaptureConfigurable((ConfigurableJoint)joint));
             }
             return signature.ToString();
         }
@@ -554,9 +554,89 @@ namespace KspContinuum
                     collisionEnabled = joint.enableCollision,
                     preprocessingEnabled = joint.enablePreprocessing, massScale = joint.massScale,
                     connectedMassScale = joint.connectedMassScale,
+                    configurable = joint is ConfigurableJoint ? CaptureConfigurable((ConfigurableJoint)joint) : null,
                 });
             }
             return links.ToArray();
+        }
+
+        static StructuralConfigurableJoint CaptureConfigurable(ConfigurableJoint joint)
+        {
+            return new StructuralConfigurableJoint {
+                autoConfigureConnectedAnchor = joint.autoConfigureConnectedAnchor,
+                configuredInWorldSpace = joint.configuredInWorldSpace, swapBodies = joint.swapBodies,
+                xMotion = joint.xMotion.ToString(), yMotion = joint.yMotion.ToString(), zMotion = joint.zMotion.ToString(),
+                angularXMotion = joint.angularXMotion.ToString(), angularYMotion = joint.angularYMotion.ToString(),
+                angularZMotion = joint.angularZMotion.ToString(), rotationDriveMode = joint.rotationDriveMode.ToString(),
+                projectionMode = joint.projectionMode.ToString(), projectionDistance = joint.projectionDistance,
+                projectionAngle = joint.projectionAngle, targetPosition = A(joint.targetPosition),
+                targetVelocity = A(joint.targetVelocity), targetRotation = A(joint.targetRotation),
+                targetAngularVelocity = A(joint.targetAngularVelocity), linearLimit = Limit(joint.linearLimit),
+                lowAngularXLimit = Limit(joint.lowAngularXLimit), highAngularXLimit = Limit(joint.highAngularXLimit),
+                angularYLimit = Limit(joint.angularYLimit), angularZLimit = Limit(joint.angularZLimit),
+                linearLimitSpring = Spring(joint.linearLimitSpring), angularXLimitSpring = Spring(joint.angularXLimitSpring),
+                angularYZLimitSpring = Spring(joint.angularYZLimitSpring), xDrive = Drive(joint.xDrive),
+                yDrive = Drive(joint.yDrive), zDrive = Drive(joint.zDrive), angularXDrive = Drive(joint.angularXDrive),
+                angularYZDrive = Drive(joint.angularYZDrive), slerpDrive = Drive(joint.slerpDrive),
+            };
+        }
+
+        static StructuralLimit Limit(SoftJointLimit value)
+        {
+            return new StructuralLimit { limit = value.limit, bounciness = value.bounciness, contactDistance = value.contactDistance };
+        }
+
+        static StructuralSpring Spring(SoftJointLimitSpring value)
+        {
+            return new StructuralSpring { spring = value.spring, damper = value.damper };
+        }
+
+        static StructuralDrive Drive(JointDrive value)
+        {
+            return new StructuralDrive {
+                positionSpring = value.positionSpring, positionDamper = value.positionDamper,
+                maximumForce = StructuralThreshold.Value(value.maximumForce),
+                maximumForceStatus = StructuralThreshold.Status(value.maximumForce),
+            };
+        }
+
+        static void Append(StringBuilder signature, StructuralConfigurableJoint joint)
+        {
+            signature.Append(':').Append(joint.autoConfigureConnectedAnchor).Append(':')
+                .Append(joint.configuredInWorldSpace).Append(':').Append(joint.swapBodies).Append(':')
+                .Append(joint.xMotion).Append(':').Append(joint.yMotion).Append(':').Append(joint.zMotion).Append(':')
+                .Append(joint.angularXMotion).Append(':').Append(joint.angularYMotion).Append(':').Append(joint.angularZMotion)
+                .Append(':').Append(joint.rotationDriveMode).Append(':').Append(joint.projectionMode)
+                .Append(':').Append(F(joint.projectionDistance)).Append(':').Append(F(joint.projectionAngle));
+            Append(signature, joint.targetPosition); Append(signature, joint.targetVelocity);
+            Append(signature, joint.targetRotation); Append(signature, joint.targetAngularVelocity);
+            Append(signature, joint.linearLimit); Append(signature, joint.lowAngularXLimit);
+            Append(signature, joint.highAngularXLimit); Append(signature, joint.angularYLimit);
+            Append(signature, joint.angularZLimit); Append(signature, joint.linearLimitSpring);
+            Append(signature, joint.angularXLimitSpring); Append(signature, joint.angularYZLimitSpring);
+            Append(signature, joint.xDrive); Append(signature, joint.yDrive); Append(signature, joint.zDrive);
+            Append(signature, joint.angularXDrive); Append(signature, joint.angularYZDrive); Append(signature, joint.slerpDrive);
+        }
+
+        static void Append(StringBuilder signature, double[] value)
+        {
+            for (int i = 0; i < value.Length; i++) signature.Append(':').Append(F(value[i]));
+        }
+
+        static void Append(StringBuilder signature, StructuralLimit value)
+        {
+            signature.Append(':').Append(F(value.limit)).Append(':').Append(F(value.bounciness)).Append(':').Append(F(value.contactDistance));
+        }
+
+        static void Append(StringBuilder signature, StructuralSpring value)
+        {
+            signature.Append(':').Append(F(value.spring)).Append(':').Append(F(value.damper));
+        }
+
+        static void Append(StringBuilder signature, StructuralDrive value)
+        {
+            signature.Append(':').Append(F(value.positionSpring)).Append(':').Append(F(value.positionDamper))
+                .Append(':').Append(value.maximumForceStatus).Append(':').Append(F(value.maximumForce));
         }
 
         static double Distance(Vec a, Vec b)

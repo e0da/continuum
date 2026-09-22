@@ -78,6 +78,39 @@ static class Program
         };
     }
 
+    static StructuralLimit Limit(double value = 1)
+    {
+        return new StructuralLimit { limit = value, bounciness = .1, contactDistance = .01 };
+    }
+
+    static StructuralSpring Spring()
+    {
+        return new StructuralSpring { spring = 10, damper = 2 };
+    }
+
+    static StructuralDrive Drive()
+    {
+        return new StructuralDrive { positionSpring = 11, positionDamper = 3, maximumForce = 100, maximumForceStatus = "finite" };
+    }
+
+    static StructuralConfigurableJoint Configurable()
+    {
+        return new StructuralConfigurableJoint {
+            autoConfigureConnectedAnchor = false, configuredInWorldSpace = true, swapBodies = false,
+            xMotion = "Limited", yMotion = "Locked", zMotion = "Free",
+            angularXMotion = "Limited", angularYMotion = "Locked", angularZMotion = "Free",
+            rotationDriveMode = "Slerp", projectionMode = "PositionAndRotation",
+            projectionDistance = .1, projectionAngle = 2,
+            targetPosition = new[] { .1, .2, .3 }, targetVelocity = new[] { .4, .5, .6 },
+            targetRotation = new[] { 0.0, 0, 0, 1 }, targetAngularVelocity = new[] { .7, .8, .9 },
+            linearLimit = Limit(), lowAngularXLimit = Limit(-20), highAngularXLimit = Limit(30),
+            angularYLimit = Limit(40), angularZLimit = Limit(50),
+            linearLimitSpring = Spring(), angularXLimitSpring = Spring(), angularYZLimitSpring = Spring(),
+            xDrive = Drive(), yDrive = Drive(), zDrive = Drive(), angularXDrive = Drive(),
+            angularYZDrive = Drive(), slerpDrive = Drive(),
+        };
+    }
+
     sealed class Gate : ISimulationBackend, IDisposable
     {
         public readonly ManualResetEventSlim entered = new ManualResetEventSlim();
@@ -840,6 +873,7 @@ static class Program
             secondaryAxis = new[] { 0.0, 1, 0 }, breakForce = double.PositiveInfinity,
             breakTorque = 100, breakForceStatus = "unbreakable", breakTorqueStatus = "finite",
             massScale = 1, connectedMassScale = 1,
+            configurable = Configurable(),
         } };
         physical.firstAcceptedLinks[0].breakForce = 0;
         ShadowPhysicalInput.Validate(physical);
@@ -847,6 +881,25 @@ static class Program
         Check(ReportJson.Encode(physical).Contains("\"breakForceStatus\":\"unbreakable\""), "structural link did not serialize");
         Check(StructuralThreshold.Status(double.PositiveInfinity) == "unbreakable"
             && StructuralThreshold.Value(double.PositiveInfinity) == 0, "unbreakable threshold canonicalization");
+        Check(ReportJson.Encode(physical).Contains("\"projectionMode\":\"PositionAndRotation\""),
+            "configurable joint payload did not serialize");
+        physical.firstAcceptedLinks[0].configurable.slerpDrive.maximumForceStatus = "unbreakable";
+        physical.firstAcceptedLinks[0].configurable.slerpDrive.maximumForce = 0;
+        ShadowPhysicalInput.Validate(physical);
+        physical.firstAcceptedLinks[0].configurable.targetRotation = new double[4];
+        Reject(() => ShadowPhysicalInput.Validate(physical));
+        physical = PhysicalReport();
+        physical.firstAcceptedBatch = new[] { physical.firstAcceptedBatch[0], linked };
+        physical.firstAcceptedLinks = new[] { new StructuralLink {
+            nativeInstanceId = -99, bodyId = 0, connectedBodyId = 1, jointType = "UnityEngine.FixedJoint",
+            anchor = new double[3], connectedAnchor = new double[3], axis = new[] { 1.0, 0, 0 },
+            secondaryAxis = new double[3], breakForce = 0, breakTorque = 0,
+            breakForceStatus = "unbreakable", breakTorqueStatus = "unbreakable", massScale = 1,
+            connectedMassScale = 1, configurable = Configurable(),
+        } };
+        Reject(() => ShadowPhysicalInput.Validate(physical));
+        physical.firstAcceptedLinks[0].configurable = null;
+        ShadowPhysicalInput.Validate(physical);
         physical.firstAcceptedLinks[0].connectedBodyId = 0;
         Reject(() => ShadowPhysicalInput.Validate(physical));
         ShadowPhysicalInput.Validate(
