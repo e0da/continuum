@@ -93,6 +93,19 @@ static class Program
         var blockedHooks = new PhysicsBoundaryHooks(() => { }, () => { }); bool blockedAfterCleanupFailure = false;
         try { blockedHooks.Start(); } catch (InvalidOperationException) { blockedAfterCleanupFailure = true; }
         Check(blockedAfterCleanupFailure);
+
+        PlayerLoop.Current = Tree(); int candidateCalls = 0;
+        var substitution = new PhysicsBoundarySubstitution(() => candidateCalls++); substitution.Start();
+        Check(Find(PlayerLoop.Current, typeof(Fixed)).subSystemList.Length == 2);
+        DispatchPhysics(PlayerLoop.Current); Check(candidateCalls == 1);
+        substitution.Audit(); substitution.Dispose();
+        Check(substitution.CleanupStatus == "native-node-restored");
+        Check(Find(PlayerLoop.Current, typeof(Fixed.PhysicsFixedUpdate)).updateFunction == (IntPtr)37);
+        DispatchPhysics(PlayerLoop.Current); Check(candidateCalls == 1);
+
+        PlayerLoop.Current = Tree(); substitution = new PhysicsBoundarySubstitution(() => { }); substitution.Start();
+        current = PlayerLoop.Current; current.subSystemList[0].subSystemList[1].updateDelegate += () => { }; PlayerLoop.Current = current;
+        substitution.Audit(); substitution.Dispose(); Check(substitution.CleanupStatus == "cleanup-error");
         Console.WriteLine("PlayerLoop: " + checks + " assertions passed.");
     }
 }
