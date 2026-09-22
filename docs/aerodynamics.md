@@ -124,6 +124,15 @@ the shared CKAN dependency `Harmony2` from HarmonyKSP. The repository does not y
 that dependency remains an explicit installation gate for the first disposable-instance run. Source compilation and
 portable lifecycle tests do not establish patch coexistence, callback ordering, field units, or receipt validity in KSP.
 
+The automated entrypoint is `--continuum-aero-capture-001`. Launch an owned qualification instance directly into a
+controlled stock atmospheric flight save with KSP's `-loadfile` argument plus `-batchmode -nographics`. The addon waits
+for one active, unpacked vessel at ordinary time scale, observes a two-second stable eligibility window, captures the
+declared 64-sample bound, writes `aero-capture.json`, `status.txt`, and `shutdown.txt` beneath a uniquely named
+`GameData/KspContinuum/PluginData/aero-capture-001-*` directory, then exits. It exits with code 0 only when the capture
+receipt is valid, owns all 64 samples, and confirms removal of its Harmony hooks. An ineligible start or incomplete run
+times out after 120 wall-clock seconds and exits with code 2. The selected save is an external immutable input to the
+experiment; the addon does not create, overwrite, or persist game state.
+
 1. Pin the stock assembly hash/MVID and exact callback dataflow.
 2. Capture at most 64 samples and 128 parts per sample immediately after stock per-part aero calculation.
 3. Record immutable atmosphere, flow, geometry, drag-cube, exposure, force, application-point and torque data with exact frames and units.
