@@ -31,7 +31,10 @@ namespace KspContinuum
             originRegistered,
             registrationsAttempted;
         string topologyKey,
-            frameKey;
+            frameKey,
+            armingTopologyKey,
+            armingFrameKey;
+        long armingOriginEvents;
         double startTime,
             previousElapsed;
         public LifecycleTraceReport Report { get; private set; }
@@ -77,13 +80,6 @@ namespace KspContinuum
                 stage3 = Single<Timing3>();
                 stageFI = Single<TimingFI>();
                 stage5 = Single<Timing5>();
-                var vessel = Active();
-                if (Eligible(vessel))
-                {
-                    topologyKey = Topology(vessel);
-                    frameKey = Frame(vessel);
-                    Report.topologyGeneration = Report.frameGeneration = 1;
-                }
                 originRegistered = true;
                 GameEvents.onFloatingOriginShift.Add(OnOriginShift);
                 registrationsAttempted = true;
@@ -95,7 +91,7 @@ namespace KspContinuum
                 TimingManager.FixedUpdateAdd(TimingManager.TimingStage.BetterLateThanNever, late);
                 Audit();
                 Report.registrationStatus = "all-three-exact-callbacks-readback-confirmed";
-                Report.status = topologyKey == null ? "arming" : "running";
+                Report.status = "arming";
                 Report.cleanupStatus = "registered-readback-confirmed";
             }
             catch (BoundExceeded error)
@@ -153,15 +149,11 @@ namespace KspContinuum
                 bool eligible = Eligible(vessel);
                 if (topologyKey == null)
                 {
-                    if (!eligible)
+                    if (!Arm(name, vessel, eligible))
                     {
                         Report.skippedArmingCallbacks++;
                         return;
                     }
-                    topologyKey = Topology(vessel);
-                    frameKey = Frame(vessel);
-                    Report.topologyGeneration = Report.frameGeneration = 1;
-                    Report.status = "running";
                 }
                 if (name == "Host.FixedUpdate")
                     Report.hostFixedObservations++;
@@ -273,12 +265,55 @@ namespace KspContinuum
         static bool Eligible(Vessel vessel)
         {
             return vessel != null
+                && vessel.mainBody != null
                 && vessel.loaded
                 && !vessel.packed
                 && !vessel.HoldPhysics
+                && vessel.situation == Vessel.Situations.ORBITING
                 && !FlightDriver.Pause
                 && TimeWarp.CurrentRate == 1
                 && Time.timeScale == 1;
+        }
+
+        bool Arm(string name, Vessel vessel, bool eligible)
+        {
+            if (!eligible || name != "Host.FixedUpdate")
+            {
+                if (!eligible)
+                    ResetArmingCandidate();
+                return false;
+            }
+            string topology = Topology(vessel), frame = Frame(vessel);
+            if (
+                topology != armingTopologyKey
+                || frame != armingFrameKey
+                || Report.originEvents != armingOriginEvents
+            )
+            {
+                armingTopologyKey = topology;
+                armingFrameKey = frame;
+                armingOriginEvents = Report.originEvents;
+                Report.stableArmingHostFixedObservations = 1;
+                return false;
+            }
+            Report.stableArmingHostFixedObservations++;
+            if (
+                Report.stableArmingHostFixedObservations
+                < LifecycleTraceReport.MinimumStableArmingHostFixedObservations
+            )
+                return false;
+            topologyKey = topology;
+            frameKey = frame;
+            Report.topologyGeneration = Report.frameGeneration = 1;
+            Report.status = "running";
+            return false;
+        }
+
+        void ResetArmingCandidate()
+        {
+            armingTopologyKey = armingFrameKey = null;
+            armingOriginEvents = Report.originEvents;
+            Report.stableArmingHostFixedObservations = 0;
         }
 
         static void Finite(double value)

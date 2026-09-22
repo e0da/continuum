@@ -42,6 +42,19 @@ class Program
         Krakensbane.Velocity = new Vector3d();
     }
 
+    static void Stabilize(LifecycleTraceCapture trace)
+    {
+        for (int i = 0; i < LifecycleTraceReport.MinimumStableArmingHostFixedObservations; i++)
+            trace.ObserveFixedUpdate();
+        Check(
+            trace.Report.status == "running"
+                && trace.Report.completedEvents == 0
+                && trace.Report.stableArmingHostFixedObservations
+                    == LifecycleTraceReport.MinimumStableArmingHostFixedObservations,
+            "orbital context stabilizes before capture"
+        );
+    }
+
     static void Adversaries()
     {
         Setup();
@@ -57,6 +70,7 @@ class Program
             );
         trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        trace.ObserveFixedUpdate();
         Check(trace.Report.status == "bounded", "oversized initial inventory bounded");
         trace.Dispose();
     }
@@ -71,6 +85,7 @@ class Program
         TimingManager.Late.onFixedUpdate = foreign;
         var trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         trace.ObserveUpdate();
         trace.Dispose();
         trace.Dispose();
@@ -139,6 +154,7 @@ class Program
             Setup();
             trace = new LifecycleTraceCapture(() => 0);
             trace.Start();
+            Stabilize(trace);
             trace.ObserveUpdate();
             if (mode == 0)
                 GameEvents.onFloatingOriginShift.Fire();
@@ -166,6 +182,7 @@ class Program
         Setup();
         trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         trace.ObserveUpdate();
         FlightGlobals.ActiveVessel.parts[0].rb.isKinematic = true;
         trace.ObserveUpdate();
@@ -183,13 +200,54 @@ class Program
             "bounded arming skips ineligible samples"
         );
         FlightGlobals.ready = true;
-        trace.ObserveUpdate();
+        trace.ObserveFixedUpdate();
+        GameEvents.onFloatingOriginShift.Fire();
+        trace.ObserveFixedUpdate();
+        trace.ObserveFixedUpdate();
         Check(
-            trace.Report.status == "running"
-                && trace.Report.completedEvents == 1
-                && trace.Report.events.Length == 0,
-            "arming enters eligible capture"
+            trace.Report.status == "arming"
+                && trace.Report.completedEvents == 0
+                && trace.Report.stableArmingHostFixedObservations == 2,
+            "initial origin shift restarts arming window"
         );
+        trace.ObserveFixedUpdate();
+        Check(trace.Report.status == "running" && trace.Report.completedEvents == 0,
+            "capture starts after stable post-shift orbital context");
+        GameEvents.onFloatingOriginShift.Fire();
+        trace.ObserveUpdate();
+        Check(trace.Report.status == "invalidated" && trace.Report.completedEvents == 1,
+            "origin shift after arming remains visible and invalidates");
+        trace.Dispose();
+        for (int mode = 0; mode < 2; mode++)
+        {
+            Setup();
+            trace = new LifecycleTraceCapture(() => 0);
+            trace.Start();
+            trace.ObserveFixedUpdate();
+            trace.ObserveFixedUpdate();
+            if (mode == 0)
+                FlightGlobals.ActiveVessel.parts[0].rb = new UnityEngine.Rigidbody { Id = 901 };
+            else
+                Krakensbane.Velocity = new Vector3d(0, 2, 0);
+            trace.ObserveFixedUpdate();
+            trace.ObserveFixedUpdate();
+            Check(
+                trace.Report.status == "arming"
+                    && trace.Report.stableArmingHostFixedObservations == 2
+                    && trace.Report.completedEvents == 0,
+                "arming topology/frame change restarts window " + mode
+            );
+            trace.ObserveFixedUpdate();
+            Check(trace.Report.status == "running", "restarted arming window completes " + mode);
+            trace.Dispose();
+        }
+        Setup();
+        FlightGlobals.ActiveVessel.situation = Vessel.Situations.LANDED;
+        trace = new LifecycleTraceCapture(() => 0);
+        trace.Start();
+        for (int i = 0; i < 4; i++) trace.ObserveFixedUpdate();
+        Check(trace.Report.status == "arming" && trace.Report.completedEvents == 0,
+            "non-orbital context cannot arm writer census");
         trace.Dispose();
         Setup();
         double wall = 0;
@@ -214,6 +272,7 @@ class Program
         Setup();
         trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         FlightGlobals.ActiveVessel.parts[0].rb.velocity = new Vector3d(double.NaN, 0, 0);
         trace.ObserveUpdate();
         Check(
@@ -234,6 +293,7 @@ class Program
         Setup();
         trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         for (int i = 0; i < 8200 && trace.IsRunning; i++)
             trace.ObserveUpdate();
         Check(
@@ -251,6 +311,7 @@ class Program
             part.forces.Add(new Part.ForceHolder());
         trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         for (int i = 0; i < 300 && trace.IsRunning; i++)
             trace.ObserveUpdate();
         Check(
@@ -264,6 +325,7 @@ class Program
             part.forces.Add(new Part.ForceHolder());
         trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         trace.ObserveUpdate();
         Check(
             trace.Report.status == "bounded" && trace.Report.completedEvents == 0,
@@ -318,6 +380,7 @@ class Program
         );
         var trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         trace.ObserveUpdate();
         trace.Dispose();
         part.rb.position = new Vector3d();
@@ -348,6 +411,7 @@ class Program
         FlightGlobals.ActiveVessel.parts[0].rb = null;
         trace = new LifecycleTraceCapture(() => 0);
         trace.Start();
+        Stabilize(trace);
         trace.ObserveUpdate();
         trace.Dispose();
         Check(
@@ -391,6 +455,7 @@ class Program
         {
             trace.Start();
             Check(trace.IsRunning, "capture must register and run");
+            Stabilize(trace);
             TimingManager.Current.onFixedUpdate();
             trace.ObserveFixedUpdate();
             TimingManager.FI.onFixedUpdate();

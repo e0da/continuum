@@ -6,6 +6,7 @@ namespace KspContinuum
     public sealed class LifecycleTraceReport
     {
         public const int MaximumHostFixedObservations = 120,
+            MinimumStableArmingHostFixedObservations = 3,
             MaximumPartsPerEvent = 512,
             MaximumEvents = 8192,
             MaximumRetainedParts = 8192,
@@ -29,6 +30,9 @@ namespace KspContinuum
         public bool physicsWrites = false,
             installedOrderQualified = false;
         public int skippedArmingCallbacks;
+        public int stableArmingHostFixedObservations;
+        public int requiredStableArmingHostFixedObservations =
+            MinimumStableArmingHostFixedObservations;
         public int retainedParts,
             retainedHolders,
             completedEvents,
