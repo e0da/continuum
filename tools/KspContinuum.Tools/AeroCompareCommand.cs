@@ -22,6 +22,8 @@ internal static class AeroCompareCommand
 
         var rows = new List<Row>();
         var scalarRows = new List<StockDragScalarRow>();
+        var setDragRows = new List<SetDragRow>();
+        var setDragAbstentions = new Dictionary<string, int>(StringComparer.Ordinal);
         var abstentions = new Dictionary<string, int>(StringComparer.Ordinal);
         var bodyLiftLabels = 0;
         foreach (var report in reports)
@@ -29,6 +31,14 @@ internal static class AeroCompareCommand
         {
             if (publication.Kind == AeroPublicationKind.BodyLift) { bodyLiftLabels++; continue; }
             scalarRows.Add(new StockDragScalarRow(publication));
+            var setDrag = AeroSetDragReconstruction.Evaluate(publication.Context);
+            if (setDrag.Disposition == AeroSetDragDisposition.Valid)
+                setDragRows.Add(new SetDragRow(publication, setDrag));
+            else
+            {
+                var reason = setDrag.Reason.ToString();
+                setDragAbstentions[reason] = setDragAbstentions.GetValueOrDefault(reason) + 1;
+            }
             var candidate = AeroDragCubeBaseline.Evaluate(publication.Context);
             if (candidate.Disposition == AeroBaselineDisposition.Abstained)
             {
@@ -60,10 +70,12 @@ internal static class AeroCompareCommand
             },
             ["abstentionsByReason"] = Object(abstentions),
             ["errors"] = Metrics(rows),
+            ["setDragAreaReconstruction"] = SetDragMetrics(setDragRows, setDragAbstentions),
             ["stockDragScalarDiagnostics"] = StockDragScalarMetrics(scalarRows),
             ["regimes"] = new JsonArray(Regimes(rows).Select(item => (JsonNode)item).ToArray()),
             ["incompleteness"] = new JsonArray(
                 "One-step body-drag force labels only; body lift and lifting surfaces are excluded.",
+                "SetDrag area reconstruction is independent of the captured stock AreaDrag label, but requires a separate complete receipt for a held-out qualification split.",
                 "Stock drag scalar reconstruction evaluates the no-ocean-multiplier product for every body-drag row because capture v3 cannot identify submerged samples; disagreement may reflect the omitted ocean multiplier.",
                 "The baseline omits Mach curves, pseudo-Reynolds corrections, stock drag-cube interpolation details, shielding transitions, heating, and provider-specific clamps.",
                 "Application-point torque is compared, but no angular impulse or trajectory behavior is qualified.",
@@ -83,6 +95,33 @@ internal static class AeroCompareCommand
         ["forceDirectionDegrees"] = Distribution(rows.Where(row => row.HasDirection).Select(row => row.DirectionErrorDegrees)),
         ["torqueVectorNormNewtonMeters"] = Distribution(rows.Select(row => row.TorqueError))
     };
+
+    private static JsonObject SetDragMetrics(IReadOnlyList<SetDragRow> rows, Dictionary<string, int> abstentions)
+    {
+        var relative = rows.Where(row => row.StockAreaDragSquareMeters > 1e-5).Select(row => row.RelativeError).ToArray();
+        var absoluteNearZero = rows.Where(row => row.StockAreaDragSquareMeters <= 1e-5).Select(row => row.AbsoluteErrorSquareMeters).ToArray();
+        double p99 = PercentileOrInfinity(relative, .99), maximum = relative.Length == 0 ? 0 : relative.Max();
+        double nearZeroMaximum = absoluteNearZero.Length == 0 ? 0 : absoluteNearZero.Max();
+        return new JsonObject
+        {
+            ["scope"] = "stock DragCubeList.SetDrag area only; lift excluded",
+            ["finiteCompared"] = rows.Count,
+            ["abstentions"] = abstentions.Values.Sum(),
+            ["abstentionsByReason"] = Object(abstentions),
+            ["absoluteErrorSquareMeters"] = Distribution(rows.Select(row => row.AbsoluteErrorSquareMeters)),
+            ["relativeErrorForStockAreaAbove1e-5"] = Distribution(relative),
+            ["absoluteErrorForStockAreaAtMost1e-5"] = Distribution(absoluteNearZero),
+            ["meetsNumericGate"] = rows.Count > 0 && abstentions.Count == 0 &&
+                p99 <= 1e-5 && maximum <= 1e-4 && nearZeroMaximum <= 1e-5,
+            ["qualifiedHeldOutGate"] = false
+        };
+    }
+
+    private static double PercentileOrInfinity(double[] values, double probability)
+    {
+        if (values.Length == 0) return 0;
+        System.Array.Sort(values); return Percentile(values, probability);
+    }
 
     private static JsonObject StockDragScalarMetrics(IReadOnlyList<StockDragScalarRow> rows) => new()
     {
@@ -350,6 +389,21 @@ internal static class AeroCompareCommand
             return maximum == 0 ? 1 : Math.Min(left, right) / maximum;
         }
         private static double Length(Vec value) => Math.Sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
+    }
+    private sealed class SetDragRow
+    {
+        public SetDragRow(Publication label, AeroSetDragResult candidate)
+        {
+            var scalars = label.DragScalars ?? throw new ToolException("body-drag publication is missing stock drag scalars");
+            StockAreaDragSquareMeters = scalars.areaDragSquareMeters;
+            AbsoluteErrorSquareMeters = Math.Abs(candidate.AreaDragSquareMeters - StockAreaDragSquareMeters);
+            RelativeError = AbsoluteErrorSquareMeters / Math.Max(Math.Abs(StockAreaDragSquareMeters), 1e-30);
+            Tooling.Require(double.IsFinite(AbsoluteErrorSquareMeters) && double.IsFinite(RelativeError),
+                "SetDrag reconstruction metric is nonfinite");
+        }
+        public double StockAreaDragSquareMeters { get; }
+        public double AbsoluteErrorSquareMeters { get; }
+        public double RelativeError { get; }
     }
     private sealed class Row
     {

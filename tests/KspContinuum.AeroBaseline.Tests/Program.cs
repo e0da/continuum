@@ -17,10 +17,10 @@ static class Program
         new Vec(1, 1, 1), new[] { 2d, 3, 5, 7, 11, 13 }, new[] { .5, .4, .3, .2, .1, .05 },
         new[] { 1d, 1, 1, 1, 1, 1 }, new double[6]);
     static AeroPartContext Part(long id, Vec center, Vec air, Rotation attitude, double density = 1.2,
-        bool shielded = false, AeroDragCubeState[] cubes = null, int ordinal = 0) => new AeroPartContext(Step(ordinal), id,
+        bool shielded = false, AeroDragCubeState[] cubes = null, int ordinal = 0, AeroSetDragInputs setDragInputs = null) => new AeroPartContext(Step(ordinal), id,
         checked((int)id + 10), checked((int)id + 20), 10, density, 100000, 280, 330, .5, 1, 1, shielded,
         center, air * -1, air, new Vec(), new Vec(attitude.X, attitude.Y, attitude.Z), attitude.W,
-        cubes ?? new[] { Cube(new Vec(.2, -.1, .3)) }, SetDragInputs());
+        cubes ?? new[] { Cube(new Vec(.2, -.1, .3)) }, setDragInputs ?? SetDragInputs());
     static AeroSetDragInputs SetDragInputs()
     {
         var curve = new AeroFloatCurveDefinition(0, 0, new[] { new AeroCurveKey(0, 1, 0, 0, 0, 0, 0) });
@@ -191,9 +191,75 @@ static class Program
             "diagnostic does not flag neighboring live labels that agree");
     }
 
+    static AeroFloatCurveDefinition ConstantCurve(double value, int weightedMode = 0) =>
+        new AeroFloatCurveDefinition(0, 0, new[] { new AeroCurveKey(0, value, 0, 0, 0, 0, weightedMode) });
+    static AeroFloatCurveDefinition LinearCurve(double left, double right) =>
+        new AeroFloatCurveDefinition(0, 0, new[] {
+            new AeroCurveKey(0, left, right - left, right - left, 0, 0, 0),
+            new AeroCurveKey(1, right, right - left, right - left, 0, 0, 0) });
+    static AeroSetDragInputs ReconstructionInputs(double[] areas, double[] drag,
+        AeroFloatCurveDefinition tail = null) => new AeroSetDragInputs(areas, drag,
+            new AeroSurfaceCurveDefinitions(tail ?? ConstantCurve(.2), ConstantCurve(.4), ConstantCurve(2), ConstantCurve(.8)),
+            LinearCurve(0, 2), ConstantCurve(2));
+
+    static void SetDragReconstruction()
+    {
+        var areas = new[] { 1d, 2, 3, 4, 5, 6 };
+        var drag = new[] { 2d, 2, 2, 2, 2, 2 };
+        AeroSetDragResult positive = AeroSetDragReconstruction.Evaluate(new Vec(3, 0, 0), .5,
+            ReconstructionInputs(areas, drag));
+        Check(positive.Disposition == AeroSetDragDisposition.Valid && positive.Reason == AeroSetDragReason.None,
+            "supported SetDrag inputs are reconstructed");
+        Near(33.6, positive.AreaDragSquareMeters, "hand-computed positive-face SetDrag", 1e-12);
+        Near(36, AeroSetDragReconstruction.Evaluate(new Vec(-1, 0, 0), .5,
+            ReconstructionInputs(areas, drag)).AreaDragSquareMeters, "opposing face selection", 1e-12);
+
+        var scaledAreas = new[] { 3d, 6, 9, 12, 15, 18 };
+        Near(positive.AreaDragSquareMeters * 3, AeroSetDragReconstruction.Evaluate(new Vec(1, 0, 0), .5,
+            ReconstructionInputs(scaledAreas, drag)).AreaDragSquareMeters, "occluded-area scaling", 1e-12);
+        Near(0, AeroSetDragReconstruction.Evaluate(new Vec(1, 2, 3), .5,
+            ReconstructionInputs(new double[6], drag)).AreaDragSquareMeters, "zero occluded area", 0);
+
+        var subunitAreas = new[] { 4d, 0, 0, 0, 0, 0 };
+        var subunitDrag = new[] { .25d, 2, 2, 2, 2, 2 };
+        Near(1.6, AeroSetDragReconstruction.Evaluate(new Vec(1, 0, 0), .5,
+            ReconstructionInputs(subunitAreas, subunitDrag)).AreaDragSquareMeters,
+            "subunit drag uses Cd and Mach-power curves", 1e-12);
+
+        var context = Part(1, new Vec(), new Vec(-10, 0, 0), Rotation.Identity,
+            setDragInputs: ReconstructionInputs(areas, drag));
+        Near(positive.AreaDragSquareMeters, AeroSetDragReconstruction.Evaluate(context).AreaDragSquareMeters,
+            "part context derives normalized local drag direction", 1e-12);
+        Check(AeroSetDragReconstruction.Evaluate(Part(1, new Vec(), new Vec(), Rotation.Identity,
+            setDragInputs: ReconstructionInputs(areas, drag))).Reason == AeroSetDragReason.ZeroFlow,
+            "zero flow has a deterministic zero result");
+
+        AeroSetDragResult weighted = AeroSetDragReconstruction.Evaluate(new Vec(1, 0, 0), .5,
+            ReconstructionInputs(areas, drag, ConstantCurve(.2, 1)));
+        Check(weighted.Disposition == AeroSetDragDisposition.Abstained &&
+            weighted.Reason == AeroSetDragReason.UnsupportedWeightedCurve, "weighted curves abstain explicitly");
+        AeroSetDragResult weightedZeroFlow = AeroSetDragReconstruction.Evaluate(new Vec(), .5,
+            ReconstructionInputs(areas, drag, ConstantCurve(.2, 1)));
+        Check(weightedZeroFlow.Disposition == AeroSetDragDisposition.Abstained &&
+            weightedZeroFlow.Reason == AeroSetDragReason.UnsupportedWeightedCurve,
+            "zero flow does not bypass weighted-curve abstention");
+        AeroSetDragResult weightedZeroFlowContext = AeroSetDragReconstruction.Evaluate(Part(1, new Vec(), new Vec(),
+            Rotation.Identity, setDragInputs: ReconstructionInputs(areas, drag, ConstantCurve(.2, 1))));
+        Check(weightedZeroFlowContext.Disposition == AeroSetDragDisposition.Abstained &&
+            weightedZeroFlowContext.Reason == AeroSetDragReason.UnsupportedWeightedCurve,
+            "part-context zero flow does not bypass weighted-curve abstention");
+        var bounded = new AeroFloatCurveDefinition(0, 0, new[] {
+            new AeroCurveKey(0, .2, 0, 0, 0, 0, 0), new AeroCurveKey(1, .2, 0, 0, 0, 0, 0) });
+        AeroSetDragResult outside = AeroSetDragReconstruction.Evaluate(new Vec(1, 0, 0), 2,
+            ReconstructionInputs(areas, drag, bounded));
+        Check(outside.Disposition == AeroSetDragDisposition.Abstained &&
+            outside.Reason == AeroSetDragReason.OutsideCurveDomain, "curve extrapolation abstains explicitly");
+    }
+
     static int Main()
     {
         DynamicPressureAndFaces(); MetamorphicBehavior(); DomainAndBatches(); RegimeMatrix(); SetDragCaptureSufficiency();
+        SetDragReconstruction();
         Console.WriteLine("PASS " + checks + " aerodynamic baseline assertions");
         return 0;
     }
