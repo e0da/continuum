@@ -22,7 +22,7 @@ rejection, identity change, timeout, malformed reply, or missing snapshot.
 
 ```sh
 cargo run --release --manifest-path tools/live-control-client/Cargo.toml -- \
-  --address 127.0.0.1:47771 --samples 300 \
+  --address 127.0.0.1:47771 --samples 900 \
   --output artifacts/live-control/loaded.json
 ```
 
@@ -31,8 +31,9 @@ Qualify overhead from the same settled-flight checkpoint in three fresh runs:
 1. Launch without the control flag and capture 300 frames as the baseline.
 2. Launch with `--continuum-control-port=47771`, leave the endpoint idle, and
    capture 300 frames to isolate listener/identity-check overhead.
-3. Launch with the endpoint enabled, start the 300-frame capture, and run the
-   client for 300 snapshots to measure sequential request load.
+3. Launch with the endpoint enabled, start the client for 900 snapshots, then
+   immediately start the 300-frame capture. Confirm the client is still running
+   when the capture completes so the entire capture lies inside request load.
 
 Keep resolution, graphics settings, timestep, warp, vessel identity and
 topology unchanged. Enable `--continuum-playerloop` in all three runs. Retain
@@ -40,7 +41,7 @@ the raw marker reports, client receipt, KSP log, package hash, source commit and
 checkpoint hash. The client receipt proves transport behavior and reports two
 timing scopes; only the matched PlayerLoop captures can assess whole-frame
 impact. Reject the qualification if any run is incomplete, context differs,
-PlayerLoop integrity or cleanup fails, the client completes fewer than 300
+PlayerLoop integrity or cleanup fails, the client completes fewer than 900
 samples, any response is non-`ok`, or teardown leaves the port accepting
 connections.
 
