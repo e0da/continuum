@@ -47,6 +47,13 @@ static class Program
 
     static void Main()
     {
+        var selection = AeroQualificationSelection.Parse(new[] { "ksp", "--continuum-aero-save", "scenarios",
+            "--continuum-aero-checkpoint", "Jool Aerobrake" });
+        Check(selection.Save == "scenarios" && selection.Checkpoint == "Jool Aerobrake");
+        Check(Reject(() => AeroQualificationSelection.Parse(new[] { "--continuum-aero-save", "../saves", "--continuum-aero-checkpoint", "flight" })));
+        Check(Reject(() => AeroQualificationSelection.Parse(new[] { "--continuum-aero-save", "scenarios", "--continuum-aero-checkpoint", "../persistent" })));
+        Check(Reject(() => AeroQualificationSelection.Parse(new[] { "--continuum-aero-save", "scenarios", "--continuum-aero-save", "other", "--continuum-aero-checkpoint", "flight" })));
+        Check(Reject(() => AeroQualificationSelection.Parse(new[] { "--continuum-aero-save", "scenarios" })));
         var step = Step(); var drag = Publication(step, AeroPublicationKind.BodyDrag); var source = new[] { drag };
         var sample = new AeroCaptureSample(step, source); source[0] = null;
         Check(sample.publications[0] == drag && step.sessionId == "00000000-0000-0000-0000-000000000001");
