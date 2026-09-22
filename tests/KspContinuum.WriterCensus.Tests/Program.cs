@@ -108,9 +108,10 @@ static class Program
 
         var canaryReport = new PhysicsSubstitutionCanaryReport();
         var canary = new PhysicsSubstitutionCanary(canaryReport);
-        var admitted = Snapshot(); canary.Admit(admitted); canary.Installed(); Check(canary.Enter(Snapshot()));
+        var admitted = Snapshot(); canary.Admit(admitted); canary.Installed(); Check(canary.Enter(Snapshot(origin: 8, frameVelocity: 11)));
         var unchanged = Run(Snapshot(), Snapshot()).Report;
-        Check(canary.Observe(Snapshot(), Snapshot(), unchanged)); canary.Restored("native-node-restored");
+        Check(canary.CandidateCallback()); canary.Restored("native-node-restored");
+        Check(canary.Observe(Snapshot(origin: 8, frameVelocity: 11), Snapshot(origin: 8, frameVelocity: 11), unchanged));
         Check(canaryReport.status == "observed-skipped-native-tick" && canaryReport.candidateCallbacks == 1);
         Check(canaryReport.limitation.Contains("deliberately skipped") && canaryReport.skippedInterval.intervals.Length == 1);
         using (var json = JsonDocument.Parse(ReportJson.Encode(canaryReport)))
@@ -121,17 +122,18 @@ static class Program
         }
 
         canaryReport = new PhysicsSubstitutionCanaryReport(); canary = new PhysicsSubstitutionCanary(canaryReport);
-        canary.Admit(Snapshot()); canary.Installed(); Check(!canary.Enter(Snapshot(frameVelocity: 11)));
-        canary.Restored("native-node-restored"); Check(canaryReport.status == "invalid" && canaryReport.reason == "admitted-context-changed-before-callback");
+        canary.Admit(Snapshot()); canary.Installed(); Check(!canary.Enter(Snapshot(topology: "changed")));
+        canary.Restored("native-node-restored"); Check(canaryReport.status == "invalid" && canaryReport.reason == "admitted-membership-changed-before-bracket");
 
         canaryReport = new PhysicsSubstitutionCanaryReport(); canary = new PhysicsSubstitutionCanary(canaryReport);
         canary.Admit(Snapshot()); canary.Installed(); Check(canary.Enter(Snapshot()));
-        Check(!canary.Observe(Snapshot(), Snapshot(topology: "changed"), unchanged));
-        canary.Restored("native-node-restored"); Check(canaryReport.reason == "context-changed-during-callback");
+        Check(canary.CandidateCallback()); canary.Restored("native-node-restored");
+        Check(!canary.Observe(Snapshot(), Snapshot(frameVelocity: 11), unchanged));
+        Check(canaryReport.reason == "context-changed-across-physics-bracket");
 
         canaryReport = new PhysicsSubstitutionCanaryReport(); canary = new PhysicsSubstitutionCanary(canaryReport);
         canary.Admit(Snapshot()); canary.Installed(); Check(canary.Enter(Snapshot()));
-        Check(canary.Observe(Snapshot(), Snapshot(), unchanged)); canary.Restored("cleanup-error");
+        Check(canary.CandidateCallback()); Check(canary.Observe(Snapshot(), Snapshot(), unchanged)); canary.Restored("cleanup-error");
         Check(canaryReport.status == "invalid" && canaryReport.reason == "native-node-restoration-failed");
 
         Console.WriteLine("WriterCensus: " + checks + " assertions passed.");

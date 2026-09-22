@@ -54,29 +54,29 @@ namespace KspContinuum
                     report.markers[i] = row;
                     Acquire(row);
                 }
-                if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-playerloop") >= 0 ||
-                    Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-writer-census") >= 0)
-                {
-                    if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-writer-census") >= 0)
-                    {
-                        writerCensus = new ActiveVesselWriterCensus();
-                        report.writerCensus = writerCensus.Census.Report;
-                    }
-                    playerLoop = new PlayerLoopTiming(writerCensus == null ? null : writerCensus.Census);
-                    playerLoop.Start();
-                    report.playerLoop = playerLoop.Report;
-                }
+                string[] arguments = Environment.GetCommandLineArgs();
                 string canaryReason;
-                if (ActiveVesselPhysicsSubstitutionCanary.RequestedAndQualified(Environment.GetCommandLineArgs(), out canaryReason))
+                bool canaryRequested = ActiveVesselPhysicsSubstitutionCanary.RequestedAndQualified(arguments, out canaryReason);
+                if (canaryRequested && canaryReason != null)
                 {
-                    report.substitutionCanary = new PhysicsSubstitutionCanaryReport();
-                    if (canaryReason != null)
-                    {
-                        report.substitutionCanary.status = "invalid"; report.substitutionCanary.reason = canaryReason;
-                        throw new InvalidOperationException(canaryReason);
-                    }
+                    report.substitutionCanary = new PhysicsSubstitutionCanaryReport { status = "invalid", reason = canaryReason };
+                    throw new InvalidOperationException(canaryReason);
+                }
+                if (Array.IndexOf(arguments, "--continuum-writer-census") >= 0)
+                {
+                    writerCensus = new ActiveVesselWriterCensus(); report.writerCensus = writerCensus.Census.Report;
+                }
+                if (canaryRequested)
+                {
                     substitutionCanary = new ActiveVesselPhysicsSubstitutionCanary(writerCensus);
-                    report.substitutionCanary = substitutionCanary.Report; substitutionCanary.Start();
+                    report.substitutionCanary = substitutionCanary.Report;
+                }
+                if (Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null)
+                {
+                    IPlayerLoopBracketObserver observer = writerCensus == null ? null : writerCensus.Census;
+                    if (substitutionCanary != null) observer = new CompositePlayerLoopObserver(observer, substitutionCanary);
+                    playerLoop = new PlayerLoopTiming(observer); playerLoop.Start(); report.playerLoop = playerLoop.Report;
+                    if (substitutionCanary != null) substitutionCanary.Start();
                 }
                 if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-part-forces") >= 0)
                 {

@@ -2,12 +2,14 @@ using System;
 
 namespace KspContinuum
 {
-    internal sealed class ActiveVesselPhysicsSubstitutionCanary : IDisposable
+    internal sealed class ActiveVesselPhysicsSubstitutionCanary : IDisposable, IPlayerLoopBracketObserver
     {
         const string Scope = "UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate";
         readonly ActiveVesselWriterCensus source;
         readonly PhysicsSubstitutionCanary state;
+        readonly WriterCensus census;
         PhysicsBoundarySubstitution substitution;
+        WriterCensusSnapshot before;
         bool disposed;
         public PhysicsSubstitutionCanaryReport Report { get; private set; }
 
@@ -15,6 +17,7 @@ namespace KspContinuum
         {
             this.source = source ?? throw new ArgumentNullException("source");
             Report = new PhysicsSubstitutionCanaryReport(); state = new PhysicsSubstitutionCanary(Report);
+            census = new WriterCensus(source.Snapshot, 1);
         }
 
         public static bool RequestedAndQualified(string[] arguments, out string reason)
@@ -50,23 +53,40 @@ namespace KspContinuum
 
         void CandidateTick()
         {
-            WriterCensusSnapshot before = null;
             try
             {
                 if (!Eligible()) { state.Fail("qualified-lifecycle-changed-before-callback"); return; }
-                before = source.Snapshot();
-                if (state.Enter(before))
-                {
-                    var census = new WriterCensus(source.Snapshot, 1);
-                    census.Before(Scope, UnityEngine.Time.frameCount, UnityEngine.Time.fixedTime);
-                    census.After(Scope, UnityEngine.Time.frameCount, UnityEngine.Time.fixedTime);
-                    census.Finish();
-                    state.Observe(before, source.Snapshot(), census.Report);
-                }
+                state.CandidateCallback();
             }
             catch (Exception error) { state.Fail("candidate-callback-failed:" + error.GetType().Name); }
             finally { Restore(); }
         }
+
+        public void Before(string scope, int frame, double fixedTimeSeconds)
+        {
+            if (scope != Scope) return;
+            try
+            {
+                if (!Eligible()) { state.Fail("qualified-lifecycle-changed-before-bracket"); return; }
+                before = source.Snapshot();
+                if (state.Enter(before)) census.Before(scope, frame, fixedTimeSeconds);
+            }
+            catch (Exception error) { state.Fail("pre-bracket-capture-failed:" + error.GetType().Name); }
+        }
+
+        public void After(string scope, int frame, double fixedTimeSeconds)
+        {
+            if (scope != Scope) return;
+            try
+            {
+                census.After(scope, frame, fixedTimeSeconds); census.Finish();
+                state.Observe(before, source.Snapshot(), census.Report);
+            }
+            catch (Exception error) { state.Fail("post-bracket-capture-failed:" + error.GetType().Name); }
+        }
+
+        public void Fault(string scope, Exception error)
+        { if (scope == Scope) state.Fail("playerloop-bracket-failed:" + error.GetType().Name); }
 
         void Restore()
         {
@@ -80,6 +100,7 @@ namespace KspContinuum
         {
             if (disposed) return; disposed = true;
             if (substitution != null) { state.Fail("disposed-before-candidate-callback"); Restore(); }
+            census.Finish();
         }
 
         static bool HasValue(string[] arguments, string name)

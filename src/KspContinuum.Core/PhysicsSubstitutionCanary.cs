@@ -6,7 +6,7 @@ namespace KspContinuum
     {
         readonly PhysicsSubstitutionCanaryReport report;
         WriterCensusSnapshot admitted;
-        bool installed, entered, restored;
+        bool installed, entered, callback, observed, restored;
 
         public PhysicsSubstitutionCanary(PhysicsSubstitutionCanaryReport report)
         { this.report = report ?? throw new ArgumentNullException("report"); }
@@ -28,17 +28,24 @@ namespace KspContinuum
 
         public bool Enter(WriterCensusSnapshot snapshot)
         {
-            if (!installed || entered || restored) return Reject("unexpected-candidate-callback");
-            entered = true; report.candidateCallbacks++;
-            if (!SameContext(admitted, snapshot)) return Reject("admitted-context-changed-before-callback");
-            report.status = "skipping-one-native-physics-tick"; return true;
+            if (!installed || entered || restored) return Reject("unexpected-physics-bracket-entry");
+            entered = true;
+            if (!SameMembership(admitted, snapshot)) return Reject("admitted-membership-changed-before-bracket");
+            report.status = "entered-substituted-physics-bracket"; return true;
+        }
+
+        public bool CandidateCallback()
+        {
+            report.candidateCallbacks++;
+            if (!entered || callback || observed) return Reject("unexpected-candidate-callback");
+            callback = true; report.status = "skipping-one-native-physics-tick"; return true;
         }
 
         public bool Observe(WriterCensusSnapshot before, WriterCensusSnapshot after, WriterCensusReport interval)
         {
             report.before = before; report.after = after; report.skippedInterval = interval;
-            if (!entered || restored) return Reject("unexpected-post-callback-observation");
-            if (!SameContext(before, after) || !SameContext(admitted, after)) return Reject("context-changed-during-callback");
+            if (!entered || !callback || observed) return Reject("unexpected-post-bracket-observation");
+            if (!SameContext(before, after)) return Reject("context-changed-across-physics-bracket");
             if (interval == null || interval.status != "observed" || interval.invalidIntervals != 0 ||
                 interval.intervals == null || interval.intervals.Length != 1 || interval.intervals[0].status != "observed")
                 return Reject("skipped-interval-census-invalid");
@@ -46,19 +53,24 @@ namespace KspContinuum
             if (value.changedPositions != 0 || value.changedOrientations != 0 || value.changedVelocities != 0 || value.changedAngularVelocities != 0 ||
                 value.changedInternalPositions != 0 || value.changedInternalOrientations != 0 || value.changedInternalVelocities != 0 || value.changedInternalAngularVelocities != 0)
                 return Reject("state-changed-during-no-dynamics-callback");
-            report.status = "observed-pending-restoration"; return true;
+            observed = true; report.status = "observed-pending-restoration"; CompleteIfReady(); return report.status != "invalid";
         }
 
         public void Restored(string cleanupStatus)
         {
             if (restored) throw new InvalidOperationException("Canary restoration was already recorded.");
             restored = true; report.restorationStatus = cleanupStatus;
-            if (report.status == "observed-pending-restoration" && cleanupStatus == "native-node-restored")
-                report.status = "observed-skipped-native-tick";
-            else Reject(cleanupStatus == "native-node-restored" ? "canary-invalid-before-restoration" : "native-node-restoration-failed");
+            if (cleanupStatus != "native-node-restored") Reject("native-node-restoration-failed");
+            else CompleteIfReady();
         }
 
         public void Fail(string reason) { Reject(reason); }
+
+        void CompleteIfReady()
+        {
+            if (report.status == "invalid") return;
+            if (observed && restored) report.status = "observed-skipped-native-tick";
+        }
 
         bool Reject(string reason) { report.status = "invalid"; if (report.reason == null) report.reason = reason; return false; }
         static void RequireSnapshot(WriterCensusSnapshot value)
@@ -68,9 +80,16 @@ namespace KspContinuum
         }
         static bool SameContext(WriterCensusSnapshot a, WriterCensusSnapshot b)
         {
-            if (a == null || b == null || a.vesselId != b.vesselId || a.topologyKey != b.topologyKey ||
+            if (!SameMembership(a, b) ||
                 a.originGeneration != b.originGeneration || a.bodies == null || b.bodies == null || a.bodies.Length != b.bodies.Length) return false;
             return Same(a.frameVelocity, b.frameVelocity);
+        }
+        static bool SameMembership(WriterCensusSnapshot a, WriterCensusSnapshot b)
+        {
+            if (a == null || b == null || a.vesselId != b.vesselId || a.topologyKey != b.topologyKey ||
+                a.bodies == null || b.bodies == null || a.bodies.Length != b.bodies.Length) return false;
+            for (int i = 0; i < a.bodies.Length; i++) if (a.bodies[i].id != b.bodies[i].id) return false;
+            return true;
         }
         static bool Same(Vec a, Vec b) { return a.X == b.X && a.Y == b.Y && a.Z == b.Z; }
     }
