@@ -45,6 +45,23 @@ foreach (uint steps in stepCounts)
     Timing pack32 = Summarize(Measure(Samples, () => CopyToF32(canonical, packTarget32)), count);
     Timing publish32 = Summarize(Measure(Samples, () => PublishF32(native32, canonical)), count);
 
+    BodyD[] transactionState64 = Fixture(count);
+    BodyF64[] transactionBuffer64 = new BodyF64[count];
+    Timing endToEnd64 = Summarize(Measure(Samples, () =>
+    {
+        CopyToF64(transactionState64, transactionBuffer64);
+        Native.Integrate(transactionBuffer64, Dt, steps);
+        PublishF64(transactionBuffer64, transactionState64);
+    }), count);
+    BodyD[] transactionState32 = Fixture(count);
+    BodyF32[] transactionBuffer32 = new BodyF32[count];
+    Timing endToEnd32 = Summarize(Measure(Samples, () =>
+    {
+        CopyToF32(transactionState32, transactionBuffer32);
+        Native.Integrate(transactionBuffer32, (float)Dt, steps);
+        PublishF32(transactionBuffer32, transactionState32);
+    }), count);
+
     BodyF64[] expected64 = PackF64(Fixture(count));
     BodyF64[] observed64 = (BodyF64[])expected64.Clone();
     IntegrateF64(expected64, Dt, steps);
@@ -57,23 +74,21 @@ foreach (uint steps in stepCounts)
         throw new InvalidOperationException($"native result mismatch for {count} x {steps}");
 
     double f32Error = MaxPositionError(expected64, observed32);
-    double f64EndToEnd = pack64.MedianNs + nativeF64.MedianNs + publish64.MedianNs;
-    double f32EndToEnd = pack32.MedianNs + nativeF32.MedianNs + publish32.MedianNs;
-    rows.Add(new Row(count, steps, managedF64, nativeF64, pack64, publish64, f64EndToEnd,
-        managedF64.MedianNs / nativeF64.MedianNs, managedF64.MedianNs / f64EndToEnd,
-        managedF32, nativeF32, pack32, publish32, f32EndToEnd,
-        managedF32.MedianNs / nativeF32.MedianNs, managedF32.MedianNs / f32EndToEnd, f32Error));
+    rows.Add(new Row(count, steps, managedF64, nativeF64, pack64, publish64, endToEnd64,
+        managedF64.MedianNs / nativeF64.MedianNs, managedF64.MedianNs / endToEnd64.MedianNs,
+        managedF32, nativeF32, pack32, publish32, endToEnd32,
+        managedF32.MedianNs / nativeF32.MedianNs, managedF32.MedianNs / endToEnd32.MedianNs, f32Error));
 }
 
 var report = new Report(
-    "continuum-native-boundary-bench/v1",
+    "continuum-native-boundary-bench/v2",
     RuntimeInformation.ProcessArchitecture.ToString(),
     RuntimeInformation.OSDescription,
     RuntimeInformation.FrameworkDescription,
     Samples,
     new Timing(Summarize(noops, 1).MedianNs, Summarize(noops, 1).P95Ns, Summarize(noops, 1).NsPerBodyAtMedian),
     "synchronous P/Invoke into an x86_64 Rust cdylib; pinned blittable arrays are mutated in place; return is the synchronization boundary",
-    "pack and publication are timed separately; f64 preserves the canonical precision and f32 explicitly converts both ways",
+    "end-to-end is directly timed over one pack-call-publish transaction; component diagnostics are separate; f64 preserves canonical precision and f32 converts both ways",
     rows);
 using var stream = new FileStream(args[1], FileMode.CreateNew, FileAccess.Write);
 JsonSerializer.Serialize(stream, report, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
@@ -99,9 +114,9 @@ static Timing Summarize(long[] ticks,int bodies) { Array.Sort(ticks);double scal
 record struct BodyD(double Px,double Py,double Pz,double Vx,double Vy,double Vz,double Fx,double Fy,double Fz,double InverseMass);
 record Timing(double MedianNs,double P95Ns,double NsPerBodyAtMedian);
 record Row(int Bodies,uint Steps,Timing ManagedF64Kernel,Timing NativeF64Call,Timing F64Pack,Timing F64Publication,
-    double F64EndToEndMedianNs,double NativeF64CallSpeedup,double F64EndToEndSpeedup,
+    Timing F64EndToEnd,double NativeF64CallSpeedup,double F64EndToEndSpeedup,
     Timing ManagedF32Kernel,Timing NativeF32Call,Timing F32PackConversion,Timing F32PublicationConversion,
-    double F32EndToEndMedianNs,double NativeF32CallSpeedup,double F32EndToEndSpeedup,double F32MaximumPositionError);
+    Timing F32EndToEnd,double NativeF32CallSpeedup,double F32EndToEndSpeedup,double F32MaximumPositionError);
 record Report(string Schema,string ProcessArchitecture,string OperatingSystem,string Framework,int SamplesPerCase,Timing NoopBoundary,string NativeRoute,string TransportAndPrecision,List<Row> Rows);
 
 static partial class Native
