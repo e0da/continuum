@@ -11,6 +11,8 @@
   <ItemGroup>
     <Compile Include="../KspContinuum.Core/*.cs" Link="%(Filename)%(Extension)" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Harmony2 is a shared CKAN dependency. Compile against it; never bundle 0Harmony.dll. -->
+    <PackageReference Include="Lib.Harmony" Version="2.3.3" ExcludeAssets="runtime" />
     <Reference Include="Assembly-CSharp"><HintPath>$(KSP_MANAGED)/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(KSP_MANAGED)/UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(KSP_MANAGED)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>

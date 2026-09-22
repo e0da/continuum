@@ -17,6 +17,7 @@ namespace KspContinuum
         LifecycleTraceCapture lifecycleTrace;
         PhysicsBoundaryQualification physicsBoundary;
         StructuralExperimentCapture structuralExperiment;
+        AeroCaptureSession aeroCapture;
         string pendingStructuralMode;
         Coroutine lifecycleContinuation;
         bool lifecycleExportAttempted;
@@ -27,6 +28,7 @@ namespace KspContinuum
         public string LifecycleTraceReportPath { get; private set; }
         public string PhysicsBoundaryReportPath { get; private set; }
         public string StructuralExperimentReportPath { get; private set; }
+        public string AeroCaptureReportPath { get; private set; }
         string replayFile = "replay.csv";
         protected abstract bool IsMenu { get; }
         static bool Supported { get { return Versioning.version_major == 1 && Versioning.version_minor == 12 && Versioning.Revision == 5; } }
@@ -54,6 +56,8 @@ namespace KspContinuum
                 FinishPhysicsBoundaryQualification();
             }
             if (structuralExperiment != null) structuralExperiment.Tick();
+            if (aeroCapture != null && aeroCapture.ReachedBound) aeroCapture.Dispose();
+            FinishAeroCapture();
             if (shadow != null) shadow.Tick(true);
             if (timeline == null) return;
             if (Input.GetKeyDown(KeyCode.Escape) && timeline.IsReplaying) timeline.Stop();
@@ -189,6 +193,32 @@ namespace KspContinuum
             pendingStructuralMode = null;
             if (structuralExperiment != null) structuralExperiment.Dispose();
         }
+        public void BeginAeroCapture()
+        {
+            if (IsMenu || !Supported) throw new InvalidOperationException("Aerodynamic capture requires KSP 1.12.5 flight.");
+            if (aeroCapture != null) throw new InvalidOperationException("Aerodynamic capture is already active.");
+            AeroCaptureReportPath = null;
+            aeroCapture = new AeroCaptureSession();
+            aeroCapture.Start();
+            FinishAeroCapture();
+            status = aeroCapture == null ? status : "Read-only stock aerodynamic capture is running.";
+        }
+        public void StopAeroCapture()
+        {
+            if (aeroCapture == null) return;
+            aeroCapture.Dispose(); FinishAeroCapture();
+        }
+        void FinishAeroCapture()
+        {
+            if (aeroCapture == null || aeroCapture.Report == null) return;
+            try
+            {
+                AeroCaptureReportPath = Write("aero-capture", aeroCapture.Report);
+                status = "Aerodynamic capture saved in PluginData.";
+            }
+            catch (Exception error) { status = "Aerodynamic capture export failed: " + error.GetType().Name; Debug.LogException(error); }
+            finally { aeroCapture = null; }
+        }
         void RunBench()
         {
             bench = new Bench();
@@ -208,7 +238,7 @@ namespace KspContinuum
             try
             {
                 string encoded = ReportJson.Encode(report);
-                if ((kind == "shadow" || kind == "rigid-cluster-shadow" || kind == "lifecycle" || kind == "physics-boundary" || kind == "structural-experiment")
+                if ((kind == "shadow" || kind == "rigid-cluster-shadow" || kind == "lifecycle" || kind == "physics-boundary" || kind == "structural-experiment" || kind == "aero-capture")
                     && System.Text.Encoding.UTF8.GetByteCount(encoded) > 4 * 1024 * 1024)
                     throw new InvalidOperationException("Observation receipt exceeds its 4 MiB export bound.");
                 File.WriteAllText(temporary, encoded);
@@ -286,6 +316,12 @@ namespace KspContinuum
                 }
                 if (GUILayout.Button("Stop structural experiment")) StopStructuralExperiment();
                 GUILayout.Label(ShadowStatus);
+                if (GUILayout.Button("Start read-only stock aero capture"))
+                {
+                    try { BeginAeroCapture(); }
+                    catch (Exception ex) { status = ex.Message; }
+                }
+                if (GUILayout.Button("Stop stock aero capture")) StopAeroCapture();
                 if (GUILayout.Button("Start read-only worker shadow capture"))
                 {
                     try { BeginShadowCapture(); }
@@ -332,13 +368,14 @@ namespace KspContinuum
             }
             GUI.enabled = old; GUILayout.EndArea();
         }
-        public void OnDisable() { StopStructuralExperiment(); StopLifecycleTrace(); StopPhysicsBoundaryQualification(); }
+        public void OnDisable() { StopStructuralExperiment(); StopLifecycleTrace(); StopPhysicsBoundaryQualification(); StopAeroCapture(); }
         public void OnDestroy()
         {
             StopStructuralExperiment();
             StopLifecycleTrace();
             StopPhysicsBoundaryQualification();
             StopShadowCapture();
+            StopAeroCapture();
             StopAllCoroutines();
             if (bench != null) bench.Dispose();
             if (probe != null) probe.Dispose();

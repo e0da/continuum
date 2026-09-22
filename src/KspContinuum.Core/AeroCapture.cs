@@ -314,6 +314,110 @@ namespace KspContinuum
         }
     }
 
+    public interface IAeroCapturePatchRuntime
+    {
+        AeroProviderFingerprint Provider { get; }
+        AeroPatchProvenance Install(string owner);
+        AeroPatchProvenance Inspect(string owner);
+        AeroCleanupOutcome Remove(string owner);
+    }
+
+    public sealed class AeroCaptureRun : IDisposable
+    {
+        public const string Owner = "continuum.capture";
+        public const string StockAssemblySha256 = "8a20892953fc14c02f352b393eb6712c665156d94a7d846d16c20a7de3e22f27";
+        public const string StockAssemblyMvid = "10657063-2fc3-43a7-84fa-d39e75e877bf";
+        readonly IAeroCapturePatchRuntime runtime;
+        readonly List<AeroCaptureSample> samples = new List<AeroCaptureSample>();
+        AeroPatchProvenance provenance;
+        bool started, finished, installAttempted;
+        public AeroCaptureReport Report { get; private set; }
+        public int PublishedSamples { get { return samples.Count; } }
+
+        public AeroCaptureRun(IAeroCapturePatchRuntime runtime)
+        {
+            this.runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        }
+
+        public void Start()
+        {
+            if (started || finished) throw new InvalidOperationException("Aero capture supports one run.");
+            started = true;
+            AeroProviderFingerprint provider = runtime.Provider;
+            if (provider == null || provider.provider != "stock-flight-integrator" || provider.providerVersion != "1.12.5")
+            { Finish(AeroCaptureDisposition.Abstained, AeroCaptureReason.UnsupportedProvider); return; }
+            if (provider.assemblySha256 != StockAssemblySha256 || provider.assemblyMvid != StockAssemblyMvid)
+            { Finish(AeroCaptureDisposition.Invalid, AeroCaptureReason.ProviderFingerprintMismatch); return; }
+            try
+            {
+                installAttempted = true;
+                provenance = runtime.Install(Owner);
+                if (provenance == null || !provenance.HasExpectedCapturePatches())
+                    Finish(AeroCaptureDisposition.Invalid, AeroCaptureReason.PatchGraphMismatch);
+            }
+            catch { Finish(AeroCaptureDisposition.Invalid, AeroCaptureReason.HookFailure); }
+        }
+
+        public bool TryPublish(AeroCaptureSample sample)
+        {
+            if (!started || finished || sample == null) return false;
+            if (samples.Count >= AeroCaptureReport.MaximumSamples)
+            { Finish(AeroCaptureDisposition.Invalid, AeroCaptureReason.BoundsExceeded); return false; }
+            samples.Add(sample); return true;
+        }
+
+        public void Invalidate(AeroCaptureReason reason)
+        {
+            if (!started || finished) return;
+            if (reason == AeroCaptureReason.None || reason == AeroCaptureReason.UnsupportedProvider ||
+                reason == AeroCaptureReason.UnsupportedScene || reason == AeroCaptureReason.PackedVessel ||
+                reason == AeroCaptureReason.MissingRigidbody || reason == AeroCaptureReason.UnsupportedRegime)
+                throw new ArgumentException("Runtime invalidation requires an integrity reason.");
+            Finish(AeroCaptureDisposition.Invalid, reason);
+        }
+
+        void Finish(AeroCaptureDisposition disposition, AeroCaptureReason reason)
+        {
+            if (finished) return;
+            finished = true;
+            AeroCleanupOutcome cleanup = AeroCleanupOutcome.NotRegistered;
+            if (installAttempted)
+            {
+                try
+                {
+                    AeroPatchProvenance inspected = runtime.Inspect(Owner);
+                    if (inspected == null || !inspected.HasExpectedCapturePatches())
+                    { disposition = AeroCaptureDisposition.Invalid; reason = AeroCaptureReason.PatchGraphMismatch; }
+                    else provenance = inspected;
+                }
+                catch { disposition = AeroCaptureDisposition.Invalid; reason = AeroCaptureReason.PatchGraphMismatch; }
+                try { cleanup = runtime.Remove(Owner); }
+                catch { cleanup = AeroCleanupOutcome.Failed; }
+            }
+            if (cleanup == AeroCleanupOutcome.Failed)
+            { disposition = AeroCaptureDisposition.Invalid; reason = AeroCaptureReason.HookFailure; }
+            if (disposition == AeroCaptureDisposition.Valid && cleanup != AeroCleanupOutcome.RemovedOwnedPatches)
+            { disposition = AeroCaptureDisposition.Invalid; reason = AeroCaptureReason.HookFailure; }
+            Report = new AeroCaptureReport(provenance ?? EmptyProvenance(runtime.Provider), disposition, reason, cleanup,
+                disposition == AeroCaptureDisposition.Valid ? samples.ToArray() : new AeroCaptureSample[0]);
+        }
+
+        static AeroPatchProvenance EmptyProvenance(AeroProviderFingerprint provider)
+        {
+            provider = provider ?? new AeroProviderFingerprint("unknown", "unknown", "unknown", new string('0', 64), Guid.NewGuid().ToString("D"));
+            return new AeroPatchProvenance(provider, Owner, new[] {
+                new AeroPatchTarget("FlightIntegrator.UpdateAerodynamics", new AeroPatchEntry[0]),
+                new AeroPatchTarget("FlightIntegrator.ApplyAeroDrag", new AeroPatchEntry[0]),
+                new AeroPatchTarget("FlightIntegrator.ApplyAeroLift", new AeroPatchEntry[0]) });
+        }
+
+        public void Dispose()
+        {
+            if (!started || finished) return;
+            Finish(AeroCaptureDisposition.Valid, AeroCaptureReason.None);
+        }
+    }
+
     internal static class AeroCaptureValidation
     {
         internal static void Text(string value, int maximum) { if (string.IsNullOrWhiteSpace(value) || value.Length > maximum) throw new ArgumentException("Invalid text field."); }
