@@ -131,6 +131,7 @@ namespace KspContinuum
         int ordinal;
         bool disposed;
         public AeroCaptureReport Report { get { return run.Report; } }
+        public string FailureDetail { get; private set; }
 
         public AeroCaptureSession()
         {
@@ -183,7 +184,12 @@ namespace KspContinuum
                     atCenter ? AeroApplicationMode.AtCenterOfMass : AeroApplicationMode.AtWorldPosition,
                     forceSi, positionWorld, Vec.Cross(arm, forceSi)));
             }
-            catch { run.Invalidate(AeroCaptureReason.HookFailure); AeroCapture.Detach(this); }
+            catch (Exception error)
+            {
+                FailureDetail = error.GetType().Name + ": " + error.Message;
+                Debug.LogError("[KspContinuum] Aerodynamic capture hook failed: " + error);
+                run.Invalidate(AeroCaptureReason.HookFailure); AeroCapture.Detach(this);
+            }
         }
 
         static Vector3 ApplicationPosition(Part part, Rigidbody body, Vector3 offset, out bool atCenter)
