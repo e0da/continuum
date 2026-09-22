@@ -33,7 +33,7 @@ A plan accepts at most 4,096 objects. Default budgets are 100,000 pair tests, 10
 ```sh
 dotnet run --project tests/KspContinuum.Encounter.Tests -c Release
 dotnet run --project tests/KspContinuum.Encounter.Oracle.Tests -c Release
-python3 -m unittest discover -s tests -p test_encounter_bench.py -v
+cargo run --manifest-path tools/xtask/Cargo.toml -- portable
 dotnet run --project tools/KspContinuum.EncounterBench -c Release -- \
   --quiet 1024 --samples 5 --output artifacts/encounter-first.json
 ```

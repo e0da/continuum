@@ -1,0 +1,36 @@
+using System.Diagnostics;
+using System.Text.Json.Nodes;
+
+var root = FindRoot();
+var project = Path.Combine(root, "tools/KspContinuum.Tools");
+var temporary = Path.Combine(Path.GetTempPath(), "continuum-tools-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(temporary);
+try
+{
+    var timeline = "schema,ksp-continuum-input-timeline/v1\nduration,10\ntrack,name,min,max\ntrack,pitch,-1,1\nkey,track,time,value,mode,control1,control2\nkey,pitch,0,0,linear,0,0\nkey,pitch,10,1,step,1,1\nevent,time,name,value\n";
+    var left = Path.Combine(temporary, "left.csv"); var right = Path.Combine(temporary, "right.csv"); var comparison = Path.Combine(temporary, "comparison.json"); File.WriteAllText(left, timeline); File.WriteAllText(right, timeline);
+    Require(Run("compare-inputs", left, right, "--start", "0", "--end", "10", "--samples", "11", "--tolerance", "0", "--output", comparison) == 0, "comparison failed");
+    var report = JsonNode.Parse(File.ReadAllText(comparison))!.AsObject(); Require(report["overall"]!["withinTolerance"]!.GetValue<bool>(), "identical timelines diverged");
+    Require(Run("compare-inputs", left, right, "--start", "10", "--end", "0", "--samples", "11", "--tolerance", "0") != 0, "invalid domain accepted");
+
+    var telemetry = Path.Combine(temporary, "mission.csv"); File.WriteAllText(telemetry, "wall_s,ut_s,phase,body,situation,altitude_m,surface_speed_mps,throttle,stage,parts,packed,autopilot\n0,1,launch,Kerbin,PRELAUNCH,70,0,0,0,17,False,off\n"); var player = Path.Combine(temporary, "player.html"); Require(Run("telemetry-player", telemetry, "--title", "Test flight", "--output", player) == 0 && File.ReadAllText(player).Contains("Test flight", StringComparison.Ordinal), "telemetry player failed");
+
+    var mission = Path.Combine(temporary, "mission-session"); var inputs = Path.Combine(temporary, "inputs-session"); Directory.CreateDirectory(mission); Directory.CreateDirectory(inputs);
+    File.WriteAllText(Path.Combine(mission, "mission.txt"), $"status=running\ninputDirectory={inputs}\nstatus=passed\nreason=Landed safely.\n");
+    File.WriteAllText(Path.Combine(mission, "mission.csv"), "wall_s,ut_s,phase,body,situation,altitude_m,apoapsis_m,periapsis_m,surface_speed_mps,throttle,stage,parts,packed,autopilot\n0,100,Launch,Kerbin,FLYING,100,200,-10,50,1,2,17,False,ASCENT\n10,110,Landed,Minmus,LANDED,1,2,-1,0,0,1,17,False,IDLE\n");
+    File.WriteAllText(Path.Combine(mission, "screenshots.csv"), "10,requested,landing.png\n10.1,png-written,landing.png\n"); File.WriteAllBytes(Path.Combine(mission, "landing.png"), [1, 2, 3]); File.WriteAllText(Path.Combine(inputs, "segment-00000.csv"), timeline);
+    var metadata = Path.Combine(temporary, "metadata.json"); File.WriteAllText(metadata, new JsonObject { ["schema"] = "ksp-continuum-chronicle-metadata/v1", ["mission_id"] = "CSP-0001", ["name"] = "Minmus <Pathfinder>", ["attempt_id"] = "CSP-0001-A001", ["vehicle_design_id"] = "CV-0001-R01", ["objective"] = "Land safely", ["next_experiment"] = "Repeat" }.ToJsonString());
+    var chronicle = Path.Combine(temporary, "render-1"); Require(Run("chronicle", "--mission", mission, "--inputs", inputs, "--output", chronicle, "--metadata", metadata) == 0, "chronicle failed");
+    var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(chronicle, "manifest.json")))!.AsObject(); Require(manifest["outcome"]!.ToString() == "passed" && manifest["media"]!.AsArray().Count == 1 && File.Exists(Path.Combine(chronicle, "media", "landing.png")), "chronicle lost evidence"); Require(File.ReadAllText(Path.Combine(chronicle, "index.html")).Contains("Minmus &lt;Pathfinder&gt;", StringComparison.Ordinal), "chronicle did not escape metadata");
+    var archive = temporary; var catalog = Path.Combine(archive, "catalog.json"); File.WriteAllText(catalog, new JsonObject { ["schema"] = "ksp-continuum-space-program/v1", ["program"] = new JsonObject { ["name"] = "Continuum Space Program" }, ["missions"] = new JsonArray(new JsonObject { ["id"] = "CSP-0001", ["name"] = "Minmus Pathfinder", ["summary"] = "First mission" }), ["vehicles"] = new JsonArray(), ["sites"] = new JsonArray(), ["experiments"] = new JsonArray() }.ToJsonString()); var site = Path.Combine(archive, "site"); Require(Run("space-program", "--archive", archive, "--catalog", catalog, "--output", site) == 0 && File.Exists(Path.Combine(site, "attempts", "CSP-0001-A001", "media", "landing.png")), "space program lost connected media");
+
+    var qualification = Path.Combine(temporary, "qualification"); Directory.CreateDirectory(qualification); File.WriteAllText(Path.Combine(qualification, "scope.txt"), "bounded scope\n"); File.WriteAllText(Path.Combine(qualification, "status.txt"), "complete\n"); File.WriteAllText(Path.Combine(qualification, "coast-markers.json"), new JsonObject { ["status"] = "complete", ["requestedFrames"] = 2, ["completedFrames"] = 2, ["markers"] = new JsonArray(new JsonObject { ["name"] = "Physics.Simulate", ["status"] = "available-sampled" }) }.ToJsonString()); var qualificationOutput = Path.Combine(temporary, "qualification-report"); Require(Run("qualification-report", qualification, "--output", qualificationOutput) == 0 && File.ReadAllText(Path.Combine(qualificationOutput, "index.html")).Contains("Physics.Simulate", StringComparison.Ordinal), "qualification report lost markers");
+
+    var shadow = Path.Combine(temporary, "shadow.json"); File.WriteAllText(shadow, new JsonObject { ["schema"] = "ksp-continuum-flight-shadow/v2", ["status"] = "complete", ["strategy"] = "rigid-cluster", ["samples"] = new JsonArray(new JsonObject { ["comparisonStatus"] = "compared", ["bodies"] = 2, ["observedPositionMaxMeters"] = 2.0, ["observedPositionRmsMeters"] = 1.0, ["observedVelocityMaxMetersPerSecond"] = 4.0, ["observedVelocityRmsMetersPerSecond"] = 3.0 }) }.ToJsonString()); var shadowOutput = Path.Combine(temporary, "shadow-summary.json"); Require(Run("shadow-report", "--input", shadow, "--output", shadowOutput) == 0 && JsonNode.Parse(File.ReadAllText(shadowOutput))!["positionResidualMeters"]!["comparedBodies"]!.GetValue<int>() == 2, "shadow report lost weighted residual population");
+    Console.WriteLine("KspContinuum.Tools.Tests passed"); return 0;
+}
+finally { Directory.Delete(temporary, true); }
+
+int Run(params string[] arguments) { var start = new ProcessStartInfo("dotnet") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true }; start.ArgumentList.Add("run"); start.ArgumentList.Add("--project"); start.ArgumentList.Add(project); start.ArgumentList.Add("-c"); start.ArgumentList.Add("Release"); start.ArgumentList.Add("--no-build"); start.ArgumentList.Add("--"); foreach (var argument in arguments) start.ArgumentList.Add(argument); using var process = Process.Start(start)!; process.WaitForExit(); if (process.ExitCode != 0) Console.Error.Write(process.StandardError.ReadToEnd()); return process.ExitCode; }
+void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+string FindRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current is not null && !File.Exists(Path.Combine(current.FullName, "README.md"))) current = current.Parent; return current?.FullName ?? throw new InvalidOperationException("repository root not found"); }

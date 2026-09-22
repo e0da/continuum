@@ -3,7 +3,7 @@
 Generate a standalone page from an existing mission's `mission.csv`:
 
 ```sh
-python3 scripts/telemetry_player.py artifacts/mission/mission.csv \
+dotnet run --project tools/KspContinuum.Tools -c Release -- telemetry-player artifacts/mission/mission.csv \
   --title 'CSP-0002 A006 · Minmus landing' \
   --output artifacts/playback.html
 ```

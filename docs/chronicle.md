@@ -36,7 +36,7 @@ Create the archive parent first, then choose a new attempt directory. The destin
 
 ```sh
 mkdir -p artifacts/space-program
-python3 scripts/chronicle.py \
+dotnet run --project tools/KspContinuum.Tools -c Release -- chronicle \
   --mission /path/to/mission-session \
   --inputs /path/to/input-session \
   --metadata /path/to/CSP-0001-A003.json \
@@ -54,7 +54,7 @@ The `mission-v1` HTML template lives at `templates/chronicle/mission-v1.html`. I
 
 ## Build the connected program site
 
-`space_program.py` turns the immutable report archive and a maintained catalog into one browsable local website. It creates shared navigation and pages for missions, attempts, vehicles, sites, and experiments. Each attempt route uses the newest rendering for that stable attempt ID, lists earlier renderings as history, copies its confirmed report media and declared telemetry player, and adds links back to the immutable source report and its related catalog records. The source reports are never edited, and multiple renderings do not become multiple attempts.
+the `space-program` .NET command turns the immutable report archive and a maintained catalog into one browsable local website. It creates shared navigation and pages for missions, attempts, vehicles, sites, and experiments. Each attempt route uses the newest rendering for that stable attempt ID, lists earlier renderings as history, copies its confirmed report media and declared telemetry player, and adds links back to the immutable source report and its related catalog records. The source reports are never edited, and multiple renderings do not become multiple attempts.
 
 Keep the local catalog beside the reports under the ignored archive. This small example shows the complete schema; arrays may contain more records and facts or media may be empty.
 
@@ -114,13 +114,13 @@ An attempt with native checkpoint provenance links to its parent attempt and dis
 One command builds or safely refreshes the derived site:
 
 ```sh
-python3 scripts/space_program.py \
+dotnet run --project tools/KspContinuum.Tools -c Release -- space-program \
   --archive artifacts/space-program \
   --catalog artifacts/space-program/catalog.json \
   --output artifacts/space-program/site
 ```
 
-Serve the archive root and open `/site/index.html`; attempt pages link back to immutable reports alongside `site/`. For example, `python3 -m http.server 18762 --bind 127.0.0.1 --directory artifacts/space-program` keeps both the connected routes and original-report links available on the local machine. Serving only the `site/` directory leaves those original-report links outside the server root.
+Serve the archive root with a static file server and open `/site/index.html`; attempt pages link back to immutable reports alongside `site/`. Serving only the `site/` directory leaves those original-report links outside the server root.
 
 New chronicle manifests bind `telemetry.html` to the hashed `mission/mission.csv` source and record the generated player hash and row count. Archive and connected-site generators validate that descriptor before linking or copying it. Older manifests without the additive descriptor remain valid and simply have no playback link. The connected site adds its shared navigation to a derived player copy; `site-manifest.json` records both the immutable source-player hash and the navigation-enhanced output hash.
 
@@ -131,7 +131,7 @@ A rebuild replaces only a direct child of the archive that already carries the `
 Build a new local archive index after one or more reports exist:
 
 ```sh
-python3 scripts/chronicle_index.py \
+dotnet run --project tools/KspContinuum.Tools -c Release -- chronicle-index \
   --archive artifacts/space-program \
   --output index.html
 ```

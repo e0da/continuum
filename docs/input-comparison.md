@@ -1,11 +1,11 @@
 # Comparing recorded inputs
 
-`scripts/compare_inputs.py` compares two Continuum input timeline segment files channel by channel. It is intended for inspecting recorded control differences between trials. It does not compare vessel state, physics results, diagnostic events, or replay determinism.
+The `compare-inputs` .NET command compares two Continuum input timeline segment files channel by channel. It is intended for inspecting recorded control differences between trials. It does not compare vessel state, physics results, diagnostic events, or replay determinism.
 
 Run it with an explicit aligned interval, sample count, and absolute tolerance:
 
 ```sh
-python3 scripts/compare_inputs.py \
+dotnet run --project tools/KspContinuum.Tools -c Release -- compare-inputs \
   artifacts/run-a/segment-00005.csv \
   artifacts/run-b/segment-00005.csv \
   --start 0 \

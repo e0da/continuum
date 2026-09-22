@@ -20,7 +20,7 @@ Run:
 
 ```sh
 dotnet run --project tests/KspContinuum.Program.Tests -c Release
-python3 -m unittest tests.test_program_branch -v
+cargo run --manifest-path tools/xtask/Cargo.toml -- portable
 dotnet run --project tools/KspContinuum.ProgramBranchToy -c Release
 ```
 

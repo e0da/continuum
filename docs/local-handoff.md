@@ -50,7 +50,7 @@ Checkpoint replay restores the complete state needed by this small memoryless sp
 ```sh
 dotnet run --project tests/KspContinuum.Handoff.Tests -c Release
 dotnet run --project tests/KspContinuum.Contact.Tests -c Release
-python3 -m unittest discover -s tests -p test_handoff_bench.py -v
+cargo run --manifest-path tools/xtask/Cargo.toml -- portable
 dotnet run --project tools/KspContinuum.HandoffBench -c Release -- \
   --output artifacts/handoff-NEW.json
 ```

@@ -25,24 +25,7 @@ cmake --build artifacts/structural-bench/build --parallel 6
 ctest --test-dir artifacts/structural-bench/build --output-on-failure
 ```
 
-The checkpoint executable and consumer test are registered in this existing build. The consumer recomputes comparison metrics from raw samples. Preserve reports in ignored artifacts; engine source, compiled products and local evidence do not belong in Git.
-
-To retain a new receipt without overwriting an earlier one:
-
-```sh
-python3 - <<'PY'
-import datetime, pathlib, subprocess
-result = subprocess.run(['artifacts/structural-bench/build/continuum-checkpoint'], capture_output=True)
-stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-destination = pathlib.Path('artifacts/structural-bench') / ('checkpoint-' + stamp + '.json')
-with destination.open('xb') as output:
-    output.write(result.stdout)
-print(destination)
-if result.stderr:
-    print(result.stderr.decode(), end='')
-raise SystemExit(result.returncode)
-PY
-```
+The checkpoint executable and consumer test are registered in this existing build. The Rust task runner recomputes comparison metrics from raw samples. Preserve separately named reports in ignored artifacts; engine source, compiled products and local evidence do not belong in Git.
 
 Schema `ksp-continuum-checkpoint/v2` contains configuration, checkpoint evidence and four named raw trajectories. The first three retain their v1 meanings; `fresh-restored` adds the full-state fresh-world arm. Exit 0 means the fixture gates pass, exit 2 retains a completed report that fails a gate, and exit 1 indicates an execution error whose output may not be JSON. Gates require an observed floor contact, checkpoint speed greater than `1e-5` m/s, matching full-restore bytes and sampled motion, and identical exposed initial state for cold reconstruction. The consumer additionally checks identities, active states and independently recomputes reported trajectory differences, constraint error and center displacement. Fresh-world restoration must also reproduce the checkpoint bytes and all sampled states. Four incompatible-envelope cases must be rejected before any native restore call, preserving exposed state, full saved state and checked configuration. Cold divergence does not fail qualification.
 
