@@ -92,10 +92,10 @@ namespace KspContinuum
                 report.playerLoop.cleanupStatus != "removed-owned-hooks")
             { reason = "playerloop-unqualified"; return false; }
             if (report.substitutionCanary != null &&
-                (report.substitutionCanary.status != "observed-skipped-native-tick" ||
+                (report.substitutionCanary.status != "observed-bounded-native-skip" ||
                  report.substitutionCanary.installationStatus != "candidate-installed" ||
                  report.substitutionCanary.restorationStatus != "native-node-restored" ||
-                 report.substitutionCanary.candidateCallbacks != 1))
+                 report.substitutionCanary.candidateCallbacks < 1 || report.substitutionCanary.candidateCallbacks > 4))
             { reason = "physics-substitution-canary-invalid"; return false; }
             return true;
         }

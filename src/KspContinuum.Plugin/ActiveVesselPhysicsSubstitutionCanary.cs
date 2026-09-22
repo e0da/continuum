@@ -56,7 +56,7 @@ namespace KspContinuum
             try
             {
                 if (!Eligible()) { state.Fail("qualified-lifecycle-changed-before-callback"); return; }
-                state.CandidateCallback();
+                state.CandidateCallback(UnityEngine.Time.frameCount);
             }
             catch (Exception error) { state.Fail("candidate-callback-failed:" + error.GetType().Name); }
             finally { Restore(); }
