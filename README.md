@@ -32,18 +32,16 @@ Use a .NET 8 or newer SDK. Run the analytic tests without installing KSP:
 dotnet run --project tests/KspContinuum.Tests -c Release
 ```
 
-The repository owns the complete automated check contract through `scripts/check`:
+The repository owns the automated check contract through a Rust task runner:
 
 ```sh
-scripts/check portable   # .NET models and standard-library Python checks
-scripts/check field      # pinned NumPy field-gravity checks
-scripts/check structural # native Jolt fixture and CTest checks
-scripts/check all        # all three lanes in order
+cargo run --manifest-path tools/xtask/Cargo.toml -- portable
+cargo run --manifest-path tools/xtask/Cargo.toml -- field
+cargo run --manifest-path tools/xtask/Cargo.toml -- structural
+cargo run --manifest-path tools/xtask/Cargo.toml -- all
 ```
 
-The lane commands are independent of the CI runner. `field` installs the pinned
-requirements into the active Python environment; use a virtual environment for
-an isolated local run. The structural lane downloads its digest-pinned Jolt
+The lane commands are independent of the CI runner. The structural lane downloads its digest-pinned Jolt
 source into the ignored `artifacts/structural-ci` build directory.
 
 To compile the addon, point `KSP_MANAGED` at the `Managed` directory in your own KSP 1.12.5 installation. On macOS this is inside `KSP.app/Contents/Resources/Data`; on Windows/Linux it is typically under `KSP_x64_Data`.
