@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -121,7 +121,14 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
     if let Some(parent) = options.output.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&options.output, encoded).map_err(|e| e.to_string())?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&options.output)
+        .map_err(|e| format!("cannot create receipt: {e}"))?;
+    output
+        .write_all(&encoded)
+        .map_err(|e| format!("cannot write receipt: {e}"))?;
     println!("{}", options.output.display());
     Ok(())
 }
