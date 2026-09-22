@@ -290,10 +290,12 @@ namespace KspContinuum
                 "Structural admission identities do not bind the report.");
             if (report.runEligibility == "eligible")
             {
+                StructuralBodySample last = report.bodySamples[report.bodySamples.Length - 1];
                 Require(report.contactObservationStatus == "observed-none"
+                    && last != null
                     && value.installedContactSentinels == 2 && value.removedContactSentinels == 2
                     && value.contactWindowFirstEpoch == report.baseline.physicsEpoch
-                    && value.contactWindowLastEpoch == report.bodySamples[report.bodySamples.Length - 1].physicsEpoch
+                    && value.contactWindowLastEpoch == last.physicsEpoch
                     && value.contactObservationCount == report.bodySamples.Length
                     && value.detectedContactCount == 0 && value.jointBreakCount == 0,
                     "Structural contact sentinel evidence is incomplete or observed interference.");
@@ -342,7 +344,7 @@ namespace KspContinuum
             Vector(injection.bodyAImpulse, 3, "witness body A impulse");
             Vector(injection.bodyBImpulse, 3, "witness body B impulse");
             StructuralBodySample first = report.bodySamples[0];
-            Require(first.physicsEpoch == baseline.physicsEpoch && first.fixedTimeSeconds == baseline.fixedTimeSeconds
+            Require(first != null && first.physicsEpoch == baseline.physicsEpoch && first.fixedTimeSeconds == baseline.fixedTimeSeconds
                 && first.topologyGeneration == baseline.topologyGeneration && first.frameGeneration == baseline.frameGeneration
                 && first.originEventCount == baseline.originEventCount,
                 "Structural first response does not bind the pre-physics baseline.");

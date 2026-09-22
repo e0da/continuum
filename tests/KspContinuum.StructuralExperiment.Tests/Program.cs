@@ -131,6 +131,10 @@ static class Program
         Reject(() => StructuralExperiment.Validate(changed), "unbound baseline accepted");
         changed = Fixture(); changed.bodySamples[60].bodyAInstanceId = 2;
         Reject(() => StructuralExperiment.Validate(changed), "mid-run body swap accepted");
+        changed = Fixture(); changed.bodySamples[0] = null;
+        Reject(() => StructuralExperiment.Validate(changed), "missing first body sample accepted");
+        changed = Fixture(); changed.bodySamples[changed.bodySamples.Length - 1] = null;
+        Reject(() => StructuralExperiment.Validate(changed), "missing last body sample accepted");
         changed = Fixture(); changed.admission.dynamicBodyCount = 3;
         Reject(() => StructuralExperiment.Validate(changed), "extra dynamic body accepted");
         changed = Fixture(); changed.admission.jointType = "UnityEngine.FixedJoint";
