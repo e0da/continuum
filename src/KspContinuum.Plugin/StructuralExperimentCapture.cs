@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using UnityEngine;
 
@@ -12,12 +13,13 @@ namespace KspContinuum
         readonly string mode;
         readonly Action<StructuralExperimentReport> complete;
         readonly PhysicsBoundaryHooks hooks;
+        readonly Stopwatch clock = new Stopwatch();
         readonly List<StructuralBodySample> samples = new List<StructuralBodySample>();
         readonly List<StructuralTraceSample> trace = new List<StructuralTraceSample>();
         Vessel vessel; Rigidbody bodyA, bodyB; ConfigurableJoint joint;
         StructuralContactSentinel sentinelA, sentinelB;
         int originEvents; long cycle; bool started, active, cleanupRequested, destroyRequested, finished, disposed;
-        string topology; double[] axis, reference;
+        string topology; double[] axis, reference; int sentinelsRequestedForRemoval;
         public StructuralExperimentReport Report { get; private set; }
         public bool IsRunning { get { return started && !finished; } }
         public string Status { get; private set; }
@@ -63,6 +65,7 @@ namespace KspContinuum
                 Report.admission.bodyBSentinelTargetInstanceId = bodyB.GetInstanceID();
                 GameEvents.onFloatingOriginShift.Add(OnOriginShift);
                 hooks.Start(); active = true; Report.status = "running"; Status = "Structural " + mode + " capture running.";
+                clock.Start();
             }
             catch (Exception error) { Invalidate("Start failed: " + error.GetType().Name + ": " + error.Message); Cleanup(); }
         }
@@ -176,6 +179,7 @@ namespace KspContinuum
                 || bodyA == null || bodyB == null || originEvents != 0
                 || Math.Abs(Time.fixedDeltaTime - Report.stepSeconds) > 1e-9)
                 throw new InvalidOperationException("Structural context changed during capture.");
+            RequireSentinels();
             var candidate = Admission(); var scratch = new StructuralExperimentReport { bodyAInstanceId = Report.bodyAInstanceId,
                 bodyBInstanceId = Report.bodyBInstanceId, jointInstanceId = Report.jointInstanceId, admission = candidate };
             if (StructuralExperiment.ComputeTopology(scratch) != topology) throw new InvalidOperationException("Structural topology changed during capture.");
@@ -198,7 +202,13 @@ namespace KspContinuum
             RequireThread();
             if (active)
             {
-                try { hooks.Audit(); if (!hooks.IsValid) Invalidate(hooks.Detail ?? "Physics boundary changed."); }
+                try
+                {
+                    hooks.Audit();
+                    if (!hooks.IsValid) Invalidate(hooks.Detail ?? "Physics boundary changed.");
+                    else if (!Eligible() || vessel != FlightGlobals.ActiveVessel) Invalidate("Structural eligibility changed while awaiting physics.");
+                    else { RequireSentinels(); if (clock.Elapsed.TotalSeconds > 15) Invalidate("Structural capture timed out."); }
+                }
                 catch (Exception error) { Invalidate("Boundary audit failed: " + error.GetType().Name); }
             }
             if (cleanupRequested && !destroyRequested) Cleanup();
@@ -210,9 +220,10 @@ namespace KspContinuum
             active = false; cleanupRequested = false;
             try { hooks.Dispose(); } catch { }
             if (Report.admission != null) Report.admission.hookCleanupStatus = hooks.CleanupStatus;
+            if (hooks.CleanupStatus == "cleanup-error") { Report.status = "invalid"; Report.reason = "Physics-boundary hook cleanup failed."; }
             try { GameEvents.onFloatingOriginShift.Remove(OnOriginShift); } catch { }
-            if (sentinelA != null) { sentinelA.Owner = null; UnityEngine.Object.Destroy(sentinelA); }
-            if (sentinelB != null) { sentinelB.Owner = null; UnityEngine.Object.Destroy(sentinelB); }
+            if (sentinelA != null && sentinelA.Owner == this) { sentinelsRequestedForRemoval++; sentinelA.Owner = null; UnityEngine.Object.Destroy(sentinelA); }
+            if (sentinelB != null && sentinelB.Owner == this) { sentinelsRequestedForRemoval++; sentinelB.Owner = null; UnityEngine.Object.Destroy(sentinelB); }
             destroyRequested = true;
             if (sentinelA == null && sentinelB == null) FinalizeReport();
         }
@@ -222,7 +233,7 @@ namespace KspContinuum
             if (finished) return;
             if (Report.status == "running")
             {
-                Report.admission.removedContactSentinels = 2;
+                Report.admission.removedContactSentinels = sentinelsRequestedForRemoval;
                 Report.contactObservationStatus = "observed-none"; Report.runEligibility = "eligible";
                 Report.receiptValidity = "valid"; Report.cleanupStatus = "complete";
                 Report.retainedSamples = samples.Count; Report.bodySamples = samples.ToArray();
@@ -246,12 +257,22 @@ namespace KspContinuum
         void PrepareInvalid()
         {
             Report.status = "invalid"; Report.receiptValidity = "valid-invalidated-run"; Report.runEligibility = "ineligible";
-            Report.experimentQualified = "not-evaluated"; Report.cleanupStatus = "complete"; Report.retainedSamples = 0;
+            Report.experimentQualified = "not-evaluated";
+            Report.cleanupStatus = hooks.CleanupStatus == "cleanup-error" ? "cleanup-error" : "complete";
             Report.trace = null; Report.bodySamples = new StructuralBodySample[0]; Report.admission = null; Report.baseline = null; Report.injection = null;
             Report.worldAxis = new double[0]; Report.baselineBodyAWorldCenterOfMass = new double[0];
             Report.baselineBodyBWorldCenterOfMass = new double[0]; Report.referenceRelativeCenterOfMass = new double[0];
             Report.requestedBodyAImpulse = new double[0]; Report.requestedBodyBImpulse = new double[0]; Report.requestedNetImpulse = new double[0];
-            try { StructuralExperiment.Validate(Report); } catch (Exception error) { UnityEngine.Debug.LogException(error); }
+            if (Report.cleanupStatus == "complete")
+                try { StructuralExperiment.Validate(Report); } catch (Exception error) { UnityEngine.Debug.LogException(error); }
+        }
+
+        void RequireSentinels()
+        {
+            if (sentinelA == null || sentinelB == null || !sentinelA.enabled || !sentinelB.enabled
+                || sentinelA.Owner != this || sentinelB.Owner != this
+                || sentinelA.gameObject != bodyA.gameObject || sentinelB.gameObject != bodyB.gameObject)
+                throw new InvalidOperationException("Structural contact coverage changed.");
         }
 
         public void ObserveContact() { if (Report.admission != null) Report.admission.detectedContactCount++; }
