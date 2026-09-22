@@ -45,6 +45,8 @@ namespace KspContinuum
             physicsEpochs;
         public ShadowSample[] samples = new ShadowSample[0];
         public ShadowBody[] firstAcceptedBatch = new ShadowBody[0];
+        public StructuralLink[] firstAcceptedLinks = new StructuralLink[0];
+        public int firstAcceptedUnmappedJoints;
         public long firstAcceptedTick;
     }
 
@@ -150,6 +152,24 @@ namespace KspContinuum
             predictedPosition,
             predictedVelocity;
         public string forceSource = ShadowPhysicalInput.SyntheticZeroForce;
+    }
+
+    public sealed class StructuralLink
+    {
+        public int nativeInstanceId;
+        public int bodyId;
+        public int connectedBodyId;
+        public string jointType;
+        public double[] anchor;
+        public double[] connectedAnchor;
+        public double[] axis;
+        public double[] secondaryAxis;
+        public double breakForce;
+        public double breakTorque;
+        public bool collisionEnabled;
+        public bool preprocessingEnabled;
+        public double massScale;
+        public double connectedMassScale;
     }
 }
 

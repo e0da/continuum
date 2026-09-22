@@ -11,6 +11,7 @@ namespace KspContinuum
         public const string SyntheticZeroForce = "synthetic-zero-not-native-measurement";
         public const string AggregateForceUnavailable = "unavailable-not-captured";
         const int MaximumCapturedBodies = 512;
+        const int MaximumCapturedLinks = 2048;
         const double QuaternionNormTolerance = .001;
 
         public static void Validate(ShadowReport report)
@@ -39,9 +40,11 @@ namespace KspContinuum
                 "Aggregate force availability is ambiguous."
             );
             Require(
-                report.samples != null && report.firstAcceptedBatch != null,
+                report.samples != null && report.firstAcceptedBatch != null && report.firstAcceptedLinks != null,
                 "Shadow arrays are missing."
             );
+            Require(report.firstAcceptedUnmappedJoints >= 0, "Unmapped joint count is negative.");
+            Require(report.firstAcceptedLinks.Length <= MaximumCapturedLinks, "Structural link count exceeds its bound.");
             Require(
                 report.maxBodies > 0 && report.maxBodies <= MaximumCapturedBodies,
                 "Shadow body bound is invalid."
@@ -205,6 +208,28 @@ namespace KspContinuum
                 );
                 Vector(body.predictedPosition, 3, "predicted position");
                 Vector(body.predictedVelocity, 3, "predicted velocity");
+            }
+            var jointIds = new HashSet<int>();
+            for (int i = 0; i < report.firstAcceptedLinks.Length; i++)
+            {
+                StructuralLink link = report.firstAcceptedLinks[i];
+                Require(link != null, "Structural link is missing.");
+                Require(jointIds.Add(link.nativeInstanceId), "Structural joint IDs must be unique.");
+                Require(
+                    ids.Contains(link.bodyId) && ids.Contains(link.connectedBodyId) && link.bodyId != link.connectedBodyId,
+                    "Structural link endpoints are invalid."
+                );
+                Require(!String.IsNullOrEmpty(link.jointType), "Structural joint type is missing.");
+                Vector(link.anchor, 3, "joint anchor");
+                Vector(link.connectedAnchor, 3, "connected joint anchor");
+                Vector(link.axis, 3, "joint axis");
+                Vector(link.secondaryAxis, 3, "joint secondary axis");
+                Require((Finite(link.breakForce) || Double.IsPositiveInfinity(link.breakForce)) && link.breakForce >= 0,
+                    "Joint break force is invalid.");
+                Require((Finite(link.breakTorque) || Double.IsPositiveInfinity(link.breakTorque)) && link.breakTorque >= 0,
+                    "Joint break torque is invalid.");
+                Require(Finite(link.massScale) && link.massScale > 0 && Finite(link.connectedMassScale) && link.connectedMassScale > 0,
+                    "Joint mass scales are invalid.");
             }
         }
 
