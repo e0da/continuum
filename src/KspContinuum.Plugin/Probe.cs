@@ -22,6 +22,7 @@ namespace KspContinuum
         ProbeReport report;
         PlayerLoopTiming playerLoop;
         ActiveVesselWriterCensus writerCensus;
+        ActiveVesselPhysicsSubstitutionCanary substitutionCanary;
         PartForceObservation partForces;
         Action<ProbeReport> completion;
         bool started, finished;
@@ -64,6 +65,18 @@ namespace KspContinuum
                     playerLoop = new PlayerLoopTiming(writerCensus == null ? null : writerCensus.Census);
                     playerLoop.Start();
                     report.playerLoop = playerLoop.Report;
+                }
+                string canaryReason;
+                if (ActiveVesselPhysicsSubstitutionCanary.RequestedAndQualified(Environment.GetCommandLineArgs(), out canaryReason))
+                {
+                    report.substitutionCanary = new PhysicsSubstitutionCanaryReport();
+                    if (canaryReason != null)
+                    {
+                        report.substitutionCanary.status = "invalid"; report.substitutionCanary.reason = canaryReason;
+                        throw new InvalidOperationException(canaryReason);
+                    }
+                    substitutionCanary = new ActiveVesselPhysicsSubstitutionCanary(writerCensus);
+                    report.substitutionCanary = substitutionCanary.Report; substitutionCanary.Start();
                 }
                 if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-part-forces") >= 0)
                 {
@@ -174,6 +187,12 @@ namespace KspContinuum
             if (finished) return;
             finished = true;
             var errors = new List<string>();
+            if (substitutionCanary != null)
+            {
+                try { substitutionCanary.Dispose(); }
+                catch (Exception error) { errors.Add("SubstitutionCanary: " + error.GetType().Name); }
+                substitutionCanary = null;
+            }
             if (playerLoop != null)
             {
                 try { playerLoop.Dispose(); }
