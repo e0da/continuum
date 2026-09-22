@@ -195,6 +195,8 @@ namespace KspContinuum
                 || Math.Abs(Time.fixedDeltaTime - Report.stepSeconds) > 1e-9)
                 throw new InvalidOperationException("Structural context changed during capture.");
             RequireSentinels();
+            if (Report.admission.detectedContactCount != 0 || Report.admission.jointBreakCount != 0)
+                throw new InvalidOperationException("Contact or joint break invalidated the experiment.");
             var candidate = Admission(); var scratch = new StructuralExperimentReport { bodyAInstanceId = Report.bodyAInstanceId,
                 bodyBInstanceId = Report.bodyBInstanceId, jointInstanceId = Report.jointInstanceId, admission = candidate };
             if (StructuralExperiment.ComputeTopology(scratch) != topology) throw new InvalidOperationException("Structural topology changed during capture.");
