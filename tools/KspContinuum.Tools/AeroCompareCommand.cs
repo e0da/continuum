@@ -12,8 +12,28 @@ internal static class AeroCompareCommand
     public static int Run(string[] args)
     {
         var options = new Arguments(args);
-        Tooling.Require(options.Positionals.Count > 0, "usage: aero-compare RECEIPT [RECEIPT ...] [--output FILE]");
-        var reports = options.Positionals.Select(Parse).ToArray();
+        Tooling.Require(options.Positionals.Count > 0,
+            "usage: aero-compare DEVELOPMENT_RECEIPT [DEVELOPMENT_RECEIPT ...] [--held-out RECEIPT] [--output FILE]");
+        var heldOutPath = options.Optional("--held-out");
+        var developmentPaths = options.Positionals.Select(Path.GetFullPath).ToArray();
+        if (heldOutPath is not null)
+        {
+            heldOutPath = Path.GetFullPath(heldOutPath);
+            Tooling.Require(!developmentPaths.Contains(heldOutPath, StringComparer.Ordinal),
+                "held-out receipt must not also be a development receipt");
+        }
+        var developmentReports = developmentPaths.Select(Parse).ToArray();
+        var heldOutReport = heldOutPath is null ? null : Parse(heldOutPath);
+        if (heldOutReport is not null)
+        {
+            var heldOutHash = Tooling.Sha256(heldOutPath!);
+            Tooling.Require(developmentPaths.All(path => Tooling.Sha256(path) != heldOutHash),
+                "held-out receipt bytes must differ from every development receipt");
+            Tooling.Require(heldOutReport.SessionId is not null &&
+                developmentReports.All(report => report.SessionId is null || report.SessionId != heldOutReport.SessionId),
+                "held-out receipt must come from a different capture session");
+        }
+        var reports = heldOutReport is null ? developmentReports : developmentReports.Append(heldOutReport).ToArray();
         var provider = reports[0].Provider;
         Tooling.Require(reports.All(report => report.Provider == provider),
             "capture receipts contain mixed providers or provider versions");
@@ -53,6 +73,10 @@ internal static class AeroCompareCommand
             rows.Add(new Row(publication, candidate));
         }
 
+        var developmentSetDrag = EvaluateSetDrag(developmentReports);
+        var heldOutSetDrag = heldOutReport is null ? null : EvaluateSetDrag(new[] { heldOutReport });
+        var qualifiedHeldOutGate = developmentSetDrag.MeetsNumericGate &&
+            heldOutSetDrag is not null && heldOutSetDrag.MeetsNumericGate;
         var output = new JsonObject
         {
             ["schema"] = ComparisonSchema,
@@ -70,17 +94,30 @@ internal static class AeroCompareCommand
             },
             ["abstentionsByReason"] = Object(abstentions),
             ["errors"] = Metrics(rows),
-            ["setDragAreaReconstruction"] = SetDragMetrics(setDragRows, setDragAbstentions),
+            ["setDragAreaReconstruction"] = SetDragMetrics(setDragRows, setDragAbstentions,
+                qualifiedHeldOutGate),
+            ["setDragQualificationSplit"] = new JsonObject
+            {
+                ["development"] = SetDragMetrics(developmentSetDrag.Rows, developmentSetDrag.Abstentions, false),
+                ["heldOut"] = heldOutSetDrag is null
+                    ? null
+                    : SetDragMetrics(heldOutSetDrag.Rows, heldOutSetDrag.Abstentions, qualifiedHeldOutGate),
+                ["qualifiedHeldOutGate"] = qualifiedHeldOutGate
+            },
             ["stockDragScalarDiagnostics"] = StockDragScalarMetrics(scalarRows),
             ["regimes"] = new JsonArray(Regimes(rows).Select(item => (JsonNode)item).ToArray()),
             ["incompleteness"] = new JsonArray(
                 "One-step body-drag force labels only; body lift and lifting surfaces are excluded.",
-                "SetDrag area reconstruction is independent of the captured stock AreaDrag label, but requires a separate complete receipt for a held-out qualification split.",
+                heldOutSetDrag is null
+                    ? "SetDrag area reconstruction is independent of the captured stock AreaDrag label, but requires a separate complete receipt for a held-out qualification split."
+                    : "Development and held-out receipts are compared separately; held-out qualification covers SetDrag area only.",
                 "Stock drag scalar reconstruction evaluates the no-ocean-multiplier product for every body-drag row because capture v3 cannot identify submerged samples; disagreement may reflect the omitted ocean multiplier.",
                 "The baseline omits Mach curves, pseudo-Reynolds corrections, stock drag-cube interpolation details, shielding transitions, heating, and provider-specific clamps.",
                 "Application-point torque is compared, but no angular impulse or trajectory behavior is qualified.",
                 "Receipt-wide provenance detects mixed input receipts; the capture schema has no per-publication provider fingerprint.",
-                "No train/test split or repeated-provider envelope is established by this report.")
+                heldOutSetDrag is null
+                    ? "No train/test split or repeated-provider envelope is established by this report."
+                    : "Receipt roles establish an explicit development/held-out split, but craft-family and regime independence remain procedural and no repeated-provider envelope is established.")
         };
         var destination = FindOption(args, "--output");
         if (destination is null) Console.WriteLine(output.ToJsonString(Tooling.Json));
@@ -96,12 +133,39 @@ internal static class AeroCompareCommand
         ["torqueVectorNormNewtonMeters"] = Distribution(rows.Select(row => row.TorqueError))
     };
 
-    private static JsonObject SetDragMetrics(IReadOnlyList<SetDragRow> rows, Dictionary<string, int> abstentions)
+    private static SetDragEvaluation EvaluateSetDrag(IEnumerable<ParsedReport> reports)
+    {
+        var rows = new List<SetDragRow>();
+        var abstentions = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var publication in reports.SelectMany(report => report.Publications)
+            .Where(publication => publication.Kind == AeroPublicationKind.BodyDrag))
+        {
+            var result = AeroSetDragReconstruction.Evaluate(publication.Context);
+            if (result.Disposition == AeroSetDragDisposition.Valid) rows.Add(new SetDragRow(publication, result));
+            else
+            {
+                var reason = result.Reason.ToString();
+                abstentions[reason] = abstentions.GetValueOrDefault(reason) + 1;
+            }
+        }
+        return new SetDragEvaluation(rows, abstentions, MeetsNumericGate(rows, abstentions));
+    }
+
+    private static bool MeetsNumericGate(IReadOnlyList<SetDragRow> rows, Dictionary<string, int> abstentions)
+    {
+        var relative = rows.Where(row => row.StockAreaDragSquareMeters > 1e-5).Select(row => row.RelativeError).ToArray();
+        var nearZero = rows.Where(row => row.StockAreaDragSquareMeters <= 1e-5).Select(row => row.AbsoluteErrorSquareMeters).ToArray();
+        return rows.Count > 0 && abstentions.Count == 0 &&
+            PercentileOrInfinity(relative, .99) <= 1e-5 &&
+            (relative.Length == 0 ? 0 : relative.Max()) <= 1e-4 &&
+            (nearZero.Length == 0 ? 0 : nearZero.Max()) <= 1e-5;
+    }
+
+    private static JsonObject SetDragMetrics(IReadOnlyList<SetDragRow> rows, Dictionary<string, int> abstentions,
+        bool qualifiedHeldOutGate)
     {
         var relative = rows.Where(row => row.StockAreaDragSquareMeters > 1e-5).Select(row => row.RelativeError).ToArray();
         var absoluteNearZero = rows.Where(row => row.StockAreaDragSquareMeters <= 1e-5).Select(row => row.AbsoluteErrorSquareMeters).ToArray();
-        double p99 = PercentileOrInfinity(relative, .99), maximum = relative.Length == 0 ? 0 : relative.Max();
-        double nearZeroMaximum = absoluteNearZero.Length == 0 ? 0 : absoluteNearZero.Max();
         return new JsonObject
         {
             ["scope"] = "stock DragCubeList.SetDrag area only; lift excluded",
@@ -111,9 +175,8 @@ internal static class AeroCompareCommand
             ["absoluteErrorSquareMeters"] = Distribution(rows.Select(row => row.AbsoluteErrorSquareMeters)),
             ["relativeErrorForStockAreaAbove1e-5"] = Distribution(relative),
             ["absoluteErrorForStockAreaAtMost1e-5"] = Distribution(absoluteNearZero),
-            ["meetsNumericGate"] = rows.Count > 0 && abstentions.Count == 0 &&
-                p99 <= 1e-5 && maximum <= 1e-4 && nearZeroMaximum <= 1e-5,
-            ["qualifiedHeldOutGate"] = false
+            ["meetsNumericGate"] = MeetsNumericGate(rows, abstentions),
+            ["qualifiedHeldOutGate"] = qualifiedHeldOutGate
         };
     }
 
@@ -244,7 +307,7 @@ internal static class AeroCompareCommand
             }
             Tooling.Require(parts.Count <= AeroCaptureReport.MaximumPartsPerSample, $"{path}: part bound exceeded");
         }
-        return new ParsedReport(provider, samples.Count, publications);
+        return new ParsedReport(provider, samples.Count, session, publications);
     }
 
     private static void ValidatePatchGraph(JsonObject provenance, string path)
@@ -342,8 +405,11 @@ internal static class AeroCompareCommand
     private static void RequireFinite(Vec value, string name) => Tooling.Require(double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z), $"{name} is nonfinite");
     private static string? FindOption(string[] args, string name) { for (var i = 0; i < args.Length - 1; i++) if (args[i] == name) return args[i + 1]; return null; }
 
-    private sealed record ParsedReport(Provider Provider, int SampleCount, IReadOnlyList<Publication> Publications)
+    private sealed record ParsedReport(Provider Provider, int SampleCount, string? SessionId,
+        IReadOnlyList<Publication> Publications)
     { public int BodyDragCount => Publications.Count(item => item.Kind == AeroPublicationKind.BodyDrag); }
+    private sealed record SetDragEvaluation(IReadOnlyList<SetDragRow> Rows,
+        Dictionary<string, int> Abstentions, bool MeetsNumericGate);
     private sealed record Provider(string Name, string Version, string Assembly, string Sha256, string Mvid)
     { public JsonObject ToJson() => new() { ["name"] = Name, ["version"] = Version, ["assembly"] = Assembly, ["assemblySha256"] = Sha256, ["assemblyMvid"] = Mvid }; }
     private sealed class Publication

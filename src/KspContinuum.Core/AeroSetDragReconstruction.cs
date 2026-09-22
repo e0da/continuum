@@ -66,7 +66,7 @@ namespace KspContinuum
             }
             catch (CurveDomainException)
             { return new AeroSetDragResult(AeroSetDragDisposition.Abstained, AeroSetDragReason.OutsideCurveDomain, 0); }
-            if (!double.IsFinite(areaDrag) || areaDrag < 0)
+            if (double.IsNaN(areaDrag) || double.IsInfinity(areaDrag) || areaDrag < 0)
                 return new AeroSetDragResult(AeroSetDragDisposition.Abstained, AeroSetDragReason.NonfiniteResult, 0);
             return new AeroSetDragResult(AeroSetDragDisposition.Valid, AeroSetDragReason.None, areaDrag);
         }

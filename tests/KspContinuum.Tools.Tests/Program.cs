@@ -44,6 +44,31 @@ try
     Require(setDragMetrics["meetsNumericGate"]!.GetValue<bool>() &&
         !setDragMetrics["qualifiedHeldOutGate"]!.GetValue<bool>(),
         "portable SetDrag fixture either missed its numeric gate or overstated held-out qualification");
+    Require(aeroComparison["setDragQualificationSplit"]!["heldOut"] is null,
+        "ordinary comparison invented a held-out dataset");
+    var heldOut = Path.Combine(temporary, "aero-held-out.json");
+    File.WriteAllText(heldOut, ReportJson.Encode(AeroReceipt("1.12.5", "00000000-0000-0000-0000-000000000003")));
+    var qualifiedOutput = Path.Combine(temporary, "aero-qualified.json");
+    Require(Run("aero-compare", aero, "--held-out", heldOut, "--output", qualifiedOutput) == 0,
+        "development/held-out comparison failed");
+    var qualified = JsonNode.Parse(File.ReadAllText(qualifiedOutput))!.AsObject();
+    Require(qualified["setDragQualificationSplit"]!["development"]!["meetsNumericGate"]!.GetValue<bool>() &&
+        qualified["setDragQualificationSplit"]!["heldOut"]!["meetsNumericGate"]!.GetValue<bool>() &&
+        qualified["setDragQualificationSplit"]!["qualifiedHeldOutGate"]!.GetValue<bool>() &&
+        qualified["setDragAreaReconstruction"]!["qualifiedHeldOutGate"]!.GetValue<bool>(),
+        "separate passing receipt did not satisfy held-out SetDrag gate");
+    Require(qualified["incompleteness"]!.AsArray().Any(item =>
+        item!.ToString().Contains("explicit development/held-out split", StringComparison.Ordinal) &&
+        item.ToString().Contains("craft-family and regime independence remain procedural", StringComparison.Ordinal)) &&
+        !qualified["incompleteness"]!.AsArray().Any(item =>
+            item!.ToString().StartsWith("No train/test split", StringComparison.Ordinal)),
+        "held-out report contradicted its admitted split or overstated independence");
+    Require(Run("aero-compare", aero, "--held-out", aero) != 0,
+        "same receipt was accepted as development and held-out evidence");
+    var sameSession = Path.Combine(temporary, "aero-same-session.json");
+    File.WriteAllText(sameSession, JsonNode.Parse(File.ReadAllText(aero))!.ToJsonString(new() { WriteIndented = true }));
+    Require(Run("aero-compare", aero, "--held-out", sameSession) != 0,
+        "reformatted receipt from the development capture session was accepted as held-out evidence");
     var scalarDiagnostics = aeroComparison["stockDragScalarDiagnostics"]!;
     Require(scalarDiagnostics["count"]!.GetValue<int>() == 2, "stock diagnostics did not cover every body-drag label");
     Require(scalarDiagnostics["scope"]!.ToString() ==
@@ -119,7 +144,7 @@ finally { Directory.Delete(temporary, true); }
 int Run(params string[] arguments) { var start = new ProcessStartInfo("dotnet") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true }; start.ArgumentList.Add("run"); start.ArgumentList.Add("--project"); start.ArgumentList.Add(project); start.ArgumentList.Add("-c"); start.ArgumentList.Add("Release"); start.ArgumentList.Add("--no-build"); start.ArgumentList.Add("--"); foreach (var argument in arguments) start.ArgumentList.Add(argument); using var process = Process.Start(start)!; process.WaitForExit(); if (process.ExitCode != 0) Console.Error.Write(process.StandardError.ReadToEnd()); return process.ExitCode; }
 void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 string FindRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current is not null && !File.Exists(Path.Combine(current.FullName, "README.md"))) current = current.Parent; return current?.FullName ?? throw new InvalidOperationException("repository root not found"); }
-AeroCaptureReport AeroReceipt(string version)
+AeroCaptureReport AeroReceipt(string version, string sessionId = "00000000-0000-0000-0000-000000000001")
 {
     const string hash = "8a20892953fc14c02f352b393eb6712c665156d94a7d846d16c20a7de3e22f27";
     var provider = new AeroProviderFingerprint("stock-flight-integrator", version, "Assembly-CSharp", hash, "10657063-2fc3-43a7-84fa-d39e75e877bf");
@@ -131,7 +156,7 @@ AeroCaptureReport AeroReceipt(string version)
             Entry("KspContinuum.AeroCapture.UpdateFinalizer", "finalizer", 2, AeroPatchEntry.PriorityLast)]),
         new AeroPatchTarget("FlightIntegrator.ApplyAeroDrag", [Entry("KspContinuum.AeroCapture.DragPrefix", "prefix", 0)]),
         new AeroPatchTarget("FlightIntegrator.ApplyAeroLift", [Entry("KspContinuum.AeroCapture.LiftPrefix", "prefix", 0)])]);
-    AeroCaptureContext Step(int ordinal) => new("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", "frame", 1, 1, 1, 1, 1, ordinal, 100, 2, .02);
+    AeroCaptureContext Step(int ordinal) => new(sessionId, "00000000-0000-0000-0000-000000000002", "frame", 1, 1, 1, 1, 1, ordinal, 100, 2, .02);
     var faces = new[] { 1d, 1, 1, 1, 1, 1 };
     var curve = new AeroFloatCurveDefinition(0, 0, [new AeroCurveKey(0, 1, 0, 0, 0, 0, 0)]);
     var setDragInputs = new AeroSetDragInputs([0, 3, 0, 0, 0, 0], faces,

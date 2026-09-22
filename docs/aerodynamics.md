@@ -171,6 +171,10 @@ Current force receipts are not training data for stock aero. They omit stock aer
 
 `continuum-tools aero-compare RECEIPT [RECEIPT ...] --output REPORT` evaluates the deterministic drag-cube baseline against the captured body-drag publications. The report separates finite comparisons from abstentions, summarizes force magnitude, force vector, direction and torque errors, and buckets results by dynamic pressure and Mach regime. It rejects malformed capture contracts and refuses to combine different receipt-wide provider fingerprints. The capture format has only receipt-wide provider provenance, so the comparison cannot independently prove per-publication provider homogeneity; that limitation is recorded in every output report.
 
+For the first SetDrag qualification, collect two independent v3 receipts from separate stock runs. Use the first while developing the reconstruction, keep the second untouched, then run `continuum-tools aero-compare development.json --held-out held-out.json --output set-drag-qualification.json`.
+
+The tool rejects the same path, identical bytes, or the same capture session in both roles, requires an identical stock provider fingerprint, and reports development and held-out metrics separately. Both splits must pass the numeric gate before `qualifiedHeldOutGate` becomes true. That gate applies only to the bounded SetDrag area reconstruction; it does not authorize force publication or claim parity for lift, ocean drag, trajectories, or the complete stock aerodynamic provider. The capture remains observational and does not mutate KSP physics.
+
 ## Evaluation
 
 Split by complete attempt, trajectory, craft design and craft family. Adjacent physics steps are near duplicates and may not cross train/test boundaries. Keep provider and version splits exact. Required adversaries include zero density/speed, transonic flight, high angle of attack, spin, staging, shielding changes, deployed surfaces and reentry extremes.
