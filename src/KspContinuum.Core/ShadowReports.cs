@@ -1,5 +1,24 @@
+using System;
+
 namespace KspContinuum
 {
+    public static class StructuralThreshold
+    {
+        public static double Value(double value)
+        {
+            if (Double.IsPositiveInfinity(value)) return 0;
+            if (Double.IsNaN(value) || Double.IsInfinity(value) || value < 0)
+                throw new ArgumentOutOfRangeException("value");
+            return value;
+        }
+
+        public static string Status(double value)
+        {
+            Value(value);
+            return Double.IsPositiveInfinity(value) ? "unbreakable" : "finite";
+        }
+    }
+
     public sealed class ShadowReport
     {
         public string evidence = "native-adapter-observation";
@@ -45,6 +64,8 @@ namespace KspContinuum
             physicsEpochs;
         public ShadowSample[] samples = new ShadowSample[0];
         public ShadowBody[] firstAcceptedBatch = new ShadowBody[0];
+        public StructuralLink[] firstAcceptedLinks = new StructuralLink[0];
+        public int firstAcceptedUnmappedJoints;
         public long firstAcceptedTick;
     }
 
@@ -150,6 +171,26 @@ namespace KspContinuum
             predictedPosition,
             predictedVelocity;
         public string forceSource = ShadowPhysicalInput.SyntheticZeroForce;
+    }
+
+    public sealed class StructuralLink
+    {
+        public int nativeInstanceId;
+        public int bodyId;
+        public int connectedBodyId;
+        public string jointType;
+        public double[] anchor;
+        public double[] connectedAnchor;
+        public double[] axis;
+        public double[] secondaryAxis;
+        public double breakForce;
+        public double breakTorque;
+        public string breakForceStatus;
+        public string breakTorqueStatus;
+        public bool collisionEnabled;
+        public bool preprocessingEnabled;
+        public double massScale;
+        public double connectedMassScale;
     }
 }
 

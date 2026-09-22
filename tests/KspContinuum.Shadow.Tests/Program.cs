@@ -829,6 +829,26 @@ static class Program
         physical = PhysicalReport();
         physical.firstAcceptedBatch = new ShadowBody[0];
         Reject(() => ShadowPhysicalInput.Validate(physical));
+        physical = PhysicalReport();
+        var linked = PhysicalBody();
+        linked.id = 1;
+        linked.nativeInstanceId = -43;
+        physical.firstAcceptedBatch = new[] { physical.firstAcceptedBatch[0], linked };
+        physical.firstAcceptedLinks = new[] { new StructuralLink {
+            nativeInstanceId = -99, bodyId = 0, connectedBodyId = 1, jointType = "UnityEngine.ConfigurableJoint",
+            anchor = new double[3], connectedAnchor = new[] { 1.0, 0, 0 }, axis = new[] { 1.0, 0, 0 },
+            secondaryAxis = new[] { 0.0, 1, 0 }, breakForce = double.PositiveInfinity,
+            breakTorque = 100, breakForceStatus = "unbreakable", breakTorqueStatus = "finite",
+            massScale = 1, connectedMassScale = 1,
+        } };
+        physical.firstAcceptedLinks[0].breakForce = 0;
+        ShadowPhysicalInput.Validate(physical);
+        Check(true, "valid structural link rejected");
+        Check(ReportJson.Encode(physical).Contains("\"breakForceStatus\":\"unbreakable\""), "structural link did not serialize");
+        Check(StructuralThreshold.Status(double.PositiveInfinity) == "unbreakable"
+            && StructuralThreshold.Value(double.PositiveInfinity) == 0, "unbreakable threshold canonicalization");
+        physical.firstAcceptedLinks[0].connectedBodyId = 0;
+        Reject(() => ShadowPhysicalInput.Validate(physical));
         ShadowPhysicalInput.Validate(
             new ShadowReport { status = "unavailable", reason = "No eligible state." }
         );

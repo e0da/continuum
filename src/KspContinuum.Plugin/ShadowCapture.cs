@@ -23,6 +23,8 @@ namespace KspContinuum
         SimulationBatch pending;
         ShadowSample pendingSample;
         ShadowBody[] pendingPhysical;
+        StructuralLink[] pendingLinks;
+        int pendingUnmappedJoints;
         double activeStart = -1,
             submittedAt;
         long physicsEpoch,
@@ -208,6 +210,8 @@ namespace KspContinuum
                     pending = null;
                     pendingSample = null;
                     pendingPhysical = null;
+                    pendingLinks = null;
+                    pendingUnmappedJoints = 0;
                     pendingGravity = null;
                     if (samples.Count >= report.requestedSamples && !comparison.IsPending)
                     {
@@ -292,6 +296,9 @@ namespace KspContinuum
                         forceSource = ShadowPhysicalInput.SyntheticZeroForce,
                     };
             }
+            StructuralLink[] links = null;
+            int unmappedJoints = 0;
+            if (physical != null) links = CaptureLinks(vessel, bodies, out unmappedJoints);
             var batch = SimulationBatch.FromColumns(
                 epoch.CaptureStamp(),
                 Time.fixedDeltaTime,
@@ -380,6 +387,8 @@ namespace KspContinuum
             pending = batch;
             pendingSample = sample;
             pendingPhysical = physical;
+            pendingLinks = links;
+            pendingUnmappedJoints = unmappedJoints;
             lastCaptureEpoch = physicsEpoch;
             report.submitted++;
             Status =
@@ -432,7 +441,33 @@ namespace KspContinuum
                     bodies.Add(rb);
                 }
             }
+            Joint[] joints = vessel.GetComponentsInChildren<Joint>(true);
+            if (joints.Length > 2048)
+                throw new InvalidOperationException("Shadow joint count exceeds 2048; capture is not truncated.");
+            Array.Sort(joints, (left, right) => left.GetInstanceID().CompareTo(right.GetInstanceID()));
+            foreach (Joint joint in joints)
+            {
+                if (joint == null) throw new InvalidOperationException("Vessel contains a missing joint.");
+                Rigidbody host = joint.GetComponent<Rigidbody>();
+                signature.Append("|j:").Append(joint.GetInstanceID()).Append(':')
+                    .Append(joint.GetType().FullName).Append(':')
+                    .Append(host == null ? 0 : host.GetInstanceID()).Append(':')
+                    .Append(joint.connectedBody == null ? 0 : joint.connectedBody.GetInstanceID()).Append(':')
+                    .Append(StructuralThreshold.Status(joint.breakForce)).Append(':')
+                    .Append(F(StructuralThreshold.Value(joint.breakForce))).Append(':')
+                    .Append(StructuralThreshold.Status(joint.breakTorque)).Append(':')
+                    .Append(F(StructuralThreshold.Value(joint.breakTorque))).Append(':')
+                    .Append(joint.enableCollision).Append(':').Append(joint.enablePreprocessing).Append(':')
+                    .Append(F(joint.massScale)).Append(':').Append(F(joint.connectedMassScale));
+                Append(signature, joint.anchor); Append(signature, joint.connectedAnchor); Append(signature, joint.axis);
+                if (joint is ConfigurableJoint) Append(signature, ((ConfigurableJoint)joint).secondaryAxis);
+            }
             return signature.ToString();
+        }
+
+        static void Append(StringBuilder signature, Vector3 value)
+        {
+            signature.Append(':').Append(F(value.x)).Append(':').Append(F(value.y)).Append(':').Append(F(value.z));
         }
 
         void Accept(SimulationBatch result, string topology, string physicalFrame)
@@ -467,6 +502,8 @@ namespace KspContinuum
                     pendingPhysical[i].predictedVelocity = A(result.GetVelocity(i));
                 }
                 report.firstAcceptedBatch = pendingPhysical;
+                report.firstAcceptedLinks = pendingLinks ?? new StructuralLink[0];
+                report.firstAcceptedUnmappedJoints = pendingUnmappedJoints;
             }
             comparison.Attach(pendingSample, result, topology, physicalFrame);
             if (pendingGravity != null)
@@ -484,6 +521,42 @@ namespace KspContinuum
                 );
             comparisonSample = pendingSample;
             report.accepted++;
+        }
+
+        static StructuralLink[] CaptureLinks(Vessel vessel, List<Rigidbody> bodies, out int unmapped)
+        {
+            var bodyIds = new Dictionary<Rigidbody, int>();
+            for (int i = 0; i < bodies.Count; i++) bodyIds.Add(bodies[i], i);
+            var seen = new HashSet<int>();
+            var links = new List<StructuralLink>();
+            unmapped = 0;
+            Joint[] joints = vessel.GetComponentsInChildren<Joint>(true);
+            if (joints.Length > 2048)
+                throw new InvalidOperationException("Shadow joint count exceeds 2048; capture is not truncated.");
+            Array.Sort(joints, (left, right) => left.GetInstanceID().CompareTo(right.GetInstanceID()));
+            foreach (Joint joint in joints)
+            {
+                if (joint == null || !seen.Add(joint.GetInstanceID())) continue;
+                Rigidbody host = joint.GetComponent<Rigidbody>();
+                int hostId, connectedId;
+                if (host == null || joint.connectedBody == null || !bodyIds.TryGetValue(host, out hostId)
+                    || !bodyIds.TryGetValue(joint.connectedBody, out connectedId) || hostId == connectedId)
+                {
+                    unmapped++;
+                    continue;
+                }
+                links.Add(new StructuralLink {
+                    nativeInstanceId = joint.GetInstanceID(), bodyId = hostId, connectedBodyId = connectedId,
+                    jointType = joint.GetType().FullName, anchor = A(joint.anchor), connectedAnchor = A(joint.connectedAnchor),
+                    axis = A(joint.axis), secondaryAxis = A(joint is ConfigurableJoint ? ((ConfigurableJoint)joint).secondaryAxis : Vector3.zero),
+                    breakForce = StructuralThreshold.Value(joint.breakForce), breakTorque = StructuralThreshold.Value(joint.breakTorque),
+                    breakForceStatus = StructuralThreshold.Status(joint.breakForce), breakTorqueStatus = StructuralThreshold.Status(joint.breakTorque),
+                    collisionEnabled = joint.enableCollision,
+                    preprocessingEnabled = joint.enablePreprocessing, massScale = joint.massScale,
+                    connectedMassScale = joint.connectedMassScale,
+                });
+            }
+            return links.ToArray();
         }
 
         static double Distance(Vec a, Vec b)

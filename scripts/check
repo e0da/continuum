@@ -26,6 +26,7 @@ portable() {
     tests/KspContinuum.AeroCapture.Tests \
     tests/KspContinuum.LifecycleTrace.Tests \
     tests/KspContinuum.Shadow.Tests \
+    tests/KspContinuum.StructuralResponse.Tests \
     src/KspContinuum.Mission/Tests/Mission.Tests.csproj
   do
     run dotnet run --project "$project" -c Release

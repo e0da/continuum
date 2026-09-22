@@ -66,6 +66,7 @@ namespace KspContinuum
                 type != typeof(ForceObservationBatch) && type != typeof(ForcePartObservation) &&
                 type != typeof(ForceAtPositionObservation) && type != typeof(Vec) &&
                 type != typeof(ShadowReport) && type != typeof(ShadowSample) && type != typeof(ShadowBody) &&
+                type != typeof(StructuralLink) &&
                 type != typeof(AeroCaptureReport) && type != typeof(AeroProviderFingerprint) && type != typeof(AeroPatchProvenance) &&
                 type != typeof(AeroPatchTarget) && type != typeof(AeroPatchEntry) && type != typeof(AeroCaptureSample) &&
                 type != typeof(AeroCaptureContext) && type != typeof(AeroPartContext) && type != typeof(AeroBodyPublication) &&
