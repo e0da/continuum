@@ -27,22 +27,20 @@ jobs:
     with:
       runner: ksp-continuum-linux-arm64
       dotnet-version: "8.0.x"
-      python-version: "3.11"
-      command: scripts/check portable
+      command: cargo run --manifest-path tools/xtask/Cargo.toml -- portable
 
   field:
     uses: e0da/actions/.github/workflows/ci-command.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
-      python-version: "3.11"
-      command: scripts/check field
+      command: cargo run --manifest-path tools/xtask/Cargo.toml -- field
 
   structural:
     uses: e0da/actions/.github/workflows/ci-command.yml@6b25329eb695f788cf91749877be77b28c8f815a
     with:
       runner: ksp-continuum-linux-arm64
-      system-deps: cmake build-essential ninja-build python3
-      command: scripts/check structural
+      system-deps: cmake build-essential ninja-build
+      command: cargo run --manifest-path tools/xtask/Cargo.toml -- structural
 
   hosted-drift:
     uses: e0da/actions/.github/workflows/hosted-drift-report.yml@6b25329eb695f788cf91749877be77b28c8f815a

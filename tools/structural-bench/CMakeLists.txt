@@ -47,10 +47,11 @@ target_compile_definitions(continuum-structural PRIVATE
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(continuum-structural PRIVATE -Wall -Wextra -Werror)
 endif()
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
 enable_testing()
-add_test(NAME structural-report COMMAND "${Python3_EXECUTABLE}"
-  "${CMAKE_CURRENT_SOURCE_DIR}/test_report.py" "$<TARGET_FILE:continuum-structural>")
+add_test(NAME structural-report COMMAND "${CARGO_EXECUTABLE}" run --quiet
+  --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/../xtask/Cargo.toml" --
+  verify-structural-report "$<TARGET_FILE:continuum-structural>")
 
 add_executable(continuum-checkpoint checkpoint.cpp)
 target_link_libraries(continuum-checkpoint PRIVATE Jolt)
@@ -60,5 +61,6 @@ target_compile_definitions(continuum-checkpoint PRIVATE
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(continuum-checkpoint PRIVATE -Wall -Wextra -Werror)
 endif()
-add_test(NAME checkpoint-report COMMAND "${Python3_EXECUTABLE}"
-  "${CMAKE_CURRENT_SOURCE_DIR}/checkpoint_test.py" "$<TARGET_FILE:continuum-checkpoint>")
+add_test(NAME checkpoint-report COMMAND "${CARGO_EXECUTABLE}" run --quiet
+  --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/../xtask/Cargo.toml" --
+  verify-checkpoint-report "$<TARGET_FILE:continuum-checkpoint>")
