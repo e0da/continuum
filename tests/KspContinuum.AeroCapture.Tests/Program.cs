@@ -38,13 +38,19 @@ static class Program
     static AeroPartContext Part(AeroCaptureContext step, long flightId = 1, double density = 1.2, AeroDragCubeState[] cubes = null) => new AeroPartContext(step, flightId,
         checked((int)flightId + 3), checked((int)flightId + 4), 100, density, 101325, 288.15, 340, .8, 2, 1.5, false,
         new Vec(1, 2, 3), new Vec(20, 0, 0), new Vec(-20, 0, 0), new Vec(0, .1, 0), new Vec(), 1,
-        cubes ?? new[] { Cube() });
+        cubes ?? new[] { Cube() }, SetDragInputs());
     static AeroDragCubeState Cube(double weight = .75) => new AeroDragCubeState("Default", weight, new Vec(.1, .2, .3), new Vec(1, 2, 3),
         new[] { 1d, 2, 3, 4, 5, 6 }, new[] { .1, .2, .3, .4, .5, .6 }, new[] { 2d, 3, 4, 5, 6, 7 }, new[] { 1d, 1, 1, 1, 1, 1 });
     static AeroStockDragScalars DragScalars() => new AeroStockDragScalars(1.75, 240, .91, 1.2, .8, .32);
     static AeroPartContext PartAtCenter(AeroCaptureContext step, Vec center) => new AeroPartContext(step, 1, 4, 5,
         100, 1.2, 101325, 288.15, 340, .8, 2, 1.5, false, center, new Vec(20, 0, 0),
-        new Vec(-20, 0, 0), new Vec(0, .1, 0), new Vec(), 1, new[] { Cube() });
+        new Vec(-20, 0, 0), new Vec(0, .1, 0), new Vec(), 1, new[] { Cube() }, SetDragInputs());
+    static AeroSetDragInputs SetDragInputs()
+    {
+        var curve = new AeroFloatCurveDefinition(0, 0, new[] { new AeroCurveKey(0, 1, -.25, .5, .1, .2, 3) });
+        return new AeroSetDragInputs(new[] { 1d, 2, 3, 4, 5, 6 }, new[] { .1, .2, .3, .4, .5, .6 },
+            new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
+    }
     static AeroBodyPublication Publication(AeroCaptureContext step, AeroPublicationKind kind, long flightId = 1, double density = 1.2) =>
         new AeroBodyPublication(Part(step, flightId, density), kind, AeroApplicationMode.AtWorldPosition,
             new Vec(0, -2, 0), new Vec(2, 2, 3), new Vec(0, 0, -2),
@@ -66,7 +72,7 @@ static class Program
         Check(readOnly);
         var report = new AeroCaptureReport(Provenance(), AeroCaptureDisposition.Valid, AeroCaptureReason.None,
             AeroCleanupOutcome.RemovedOwnedPatches, new[] { sample });
-        Check(report.schema == "ksp-continuum-aero-capture/v2" && report.samples.Count == 1 && report.provenance.targets.Count == 3);
+        Check(report.schema == "ksp-continuum-aero-capture/v3" && report.samples.Count == 1 && report.provenance.targets.Count == 3);
         Check(report.provenance.provider.assemblySha256 == Hash);
         var faces = new[] { 1d, 2, 3, 4, 5, 6 };
         var cube = new AeroDragCubeState("Asymmetric", .25, new Vec(), new Vec(1, 2, 3), faces,
@@ -75,12 +81,33 @@ static class Program
         var cubeSource = new[] { Cube(.75), cube };
         var blended = Part(step, cubes: cubeSource); cubeSource[0] = null;
         Check(cube.area[5] == 6 && blended.dragCubes.Count == 2 && blended.dragCubes[1].weight == .25);
+        var occluded = new[] { 1d, 2, 3, 4, 5, 6 };
+        var weighted = new[] { .1, .2, .3, .4, .5, .6 };
+        var keyed = new[] { new AeroCurveKey(0, 1, -.25, .5, .1, .2, 3) };
+        var definition = new AeroFloatCurveDefinition(1, 2, keyed);
+        string curveHash = definition.contentSha256;
+        keyed[0] = null;
+        var capturedInputs = new AeroSetDragInputs(occluded, weighted,
+            new AeroSurfaceCurveDefinitions(definition, definition, definition, definition), definition, definition);
+        occluded[0] = 99; weighted[0] = 99;
+        Check(capturedInputs.areaOccludedSquareMeters[0] == 1 && capturedInputs.weightedDragCoefficients[0] == .1 &&
+            capturedInputs.dragCurveCd.keys[0].outTangent == .5 && curveHash.Length == 64);
+        Check(curveHash != new AeroFloatCurveDefinition(1, 2,
+            new[] { new AeroCurveKey(0, 1, -.25, .6, .1, .2, 3) }).contentSha256);
+        Check(Reject(() => new AeroFloatCurveDefinition(0, 0, new AeroCurveKey[AeroFloatCurveDefinition.MaximumKeys + 1])));
+        Check(Reject(() => new AeroSetDragInputs(new double[5], new double[6],
+            new AeroSurfaceCurveDefinitions(definition, definition, definition, definition), definition, definition)));
         Check(Reject(() => Part(step, cubes: new AeroDragCubeState[AeroDragCubeState.MaximumBlendedCubes + 1])));
         using (var json = JsonDocument.Parse(ReportJson.Encode(report)))
         {
             Check(json.RootElement.GetProperty("disposition").GetString() == "Valid");
             Check(json.RootElement.GetProperty("provenance").GetProperty("targets").GetArrayLength() == 3);
             Check(json.RootElement.GetProperty("samples")[0].GetProperty("publications")[0].GetProperty("context").GetProperty("dragCubes")[0].GetProperty("area")[5].GetDouble() == 6);
+            var setDrag = json.RootElement.GetProperty("samples")[0].GetProperty("publications")[0].GetProperty("context").GetProperty("setDragInputs");
+            Check(setDrag.GetProperty("areaOccludedSquareMeters").GetArrayLength() == 6 &&
+                setDrag.GetProperty("weightedDragCoefficients")[5].GetDouble() == .6 &&
+                setDrag.GetProperty("surfaceCurves").GetProperty("tail").GetProperty("contentSha256").GetString().Length == 64 &&
+                setDrag.GetProperty("dragCurveCd").GetProperty("keys")[0].GetProperty("weightedMode").GetInt32() == 3);
             var scalars = json.RootElement.GetProperty("samples")[0].GetProperty("publications")[0].GetProperty("stockDragScalars");
             Check(scalars.GetProperty("areaDragSquareMeters").GetDouble() == 1.75 &&
                 scalars.GetProperty("dynamicPressurePascals").GetDouble() == 240 &&
@@ -127,11 +154,11 @@ static class Program
         Check(Reject(() => Step(AeroCaptureReport.MaximumPartsPerSample * 2)));
         Check(Reject(() => Part(step, density: double.NaN)));
         Check(Reject(() => new AeroPartContext(step, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, false,
-            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .5, Array.Empty<AeroDragCubeState>())));
+            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .5, Array.Empty<AeroDragCubeState>(), SetDragInputs())));
         Check(new AeroPartContext(step, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, false,
-            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .999996, Array.Empty<AeroDragCubeState>()).worldAttitudeW == .999996);
+            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .999996, Array.Empty<AeroDragCubeState>(), SetDragInputs()).worldAttitudeW == .999996);
         Check(Reject(() => new AeroPartContext(step, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, false,
-            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .99999, Array.Empty<AeroDragCubeState>())));
+            new Vec(), new Vec(), new Vec(), new Vec(), new Vec(), .99999, Array.Empty<AeroDragCubeState>(), SetDragInputs())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyDrag, AeroApplicationMode.AtCenterOfMass,
             new Vec(1, 0, 0), new Vec(), new Vec(), DragScalars())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,

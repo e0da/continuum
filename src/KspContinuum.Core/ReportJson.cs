@@ -46,6 +46,7 @@ namespace KspContinuum
                 value is ReadOnlyCollection<AeroPatchTarget> || value is ReadOnlyCollection<AeroPatchEntry> ||
                 value is ReadOnlyCollection<AeroCaptureSample> || value is ReadOnlyCollection<AeroBodyPublication> ||
                 value is ReadOnlyCollection<AeroDragCubeState> || value is ReadOnlyCollection<double> ||
+                value is ReadOnlyCollection<AeroCurveKey> ||
                 value is ReadOnlyCollection<string>)
             {
                 output.Append('['); bool first = true;
@@ -75,7 +76,9 @@ namespace KspContinuum
                 type != typeof(AeroCaptureReport) && type != typeof(AeroProviderFingerprint) && type != typeof(AeroPatchProvenance) &&
                 type != typeof(AeroPatchTarget) && type != typeof(AeroPatchEntry) && type != typeof(AeroCaptureSample) &&
                 type != typeof(AeroCaptureContext) && type != typeof(AeroPartContext) && type != typeof(AeroBodyPublication) &&
-                type != typeof(AeroDragCubeState) && type != typeof(AeroStockDragScalars))
+                type != typeof(AeroDragCubeState) && type != typeof(AeroStockDragScalars) &&
+                type != typeof(AeroSetDragInputs) && type != typeof(AeroSurfaceCurveDefinitions) &&
+                type != typeof(AeroFloatCurveDefinition) && type != typeof(AeroCurveKey))
                 throw new ArgumentException("Unsupported report type: " + type.FullName);
             output.Append('{'); bool firstField = true;
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))

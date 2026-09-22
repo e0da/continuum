@@ -127,6 +127,13 @@ the final part `dragScalar`. Mach remains in the shared part context. These read
 error from stock magnitude multipliers without retaining KSP objects or expanding the sample and part bounds. The
 ocean scalar remains unobserved, so submerged samples cannot close the full stock magnitude product.
 
+Capture schema v3 adds the bounded inputs required to reproduce stock `DragCubeList.SetDrag` area drag: six
+post-attachment-occlusion face areas in square meters, six post-occlusion weighted drag coefficients, the four surface
+curves (tail, surface, multiplier, and tip), and `DragCurveCd` plus `DragCurveCdPower`. Each curve contains at most 64
+ordered keys with time, value, in/out tangents, in/out weights, weighted mode, and pre/post wrap modes. Its SHA-256 is
+derived from those exact parameters and is checked again while parsing. The adapter copies these values during the
+existing read-only callback and retains no Unity or KSP object references.
+
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
 The default archive and metadata filenames include the archive's full SHA-256, and the metadata points to that immutable

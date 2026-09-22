@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Security.Cryptography;
 
 namespace KspContinuum
 {
@@ -165,10 +167,11 @@ namespace KspContinuum
             worldAttitudeXYZ;
         public readonly double worldAttitudeW;
         public readonly ReadOnlyCollection<AeroDragCubeState> dragCubes;
+        public readonly AeroSetDragInputs setDragInputs;
         public AeroPartContext(AeroCaptureContext step, long flightId, int partId, int rigidbodyId, double mass, double density,
             double pressure, double temperature, double speedOfSound, double mach, double aerodynamicArea, double exposedArea,
             bool shielded, Vec center, Vec velocity, Vec airVelocity, Vec angularVelocity, Vec attitudeXYZ, double attitudeW,
-            AeroDragCubeState[] dragCubes)
+            AeroDragCubeState[] dragCubes, AeroSetDragInputs setDragInputs)
         {
             if (step == null || flightId < 1 || flightId > uint.MaxValue || mass <= 0 || density < 0 || pressure < 0 ||
                 temperature < 0 || speedOfSound < 0 || mach < 0 || aerodynamicArea < 0 || exposedArea < 0)
@@ -176,7 +179,8 @@ namespace KspContinuum
             foreach (double value in new[] { mass, density, pressure, temperature, speedOfSound, mach, aerodynamicArea, exposedArea, attitudeW }) AeroCaptureValidation.Number(value);
             foreach (var value in new[] { center, velocity, airVelocity, angularVelocity, attitudeXYZ }) AeroCaptureValidation.Vector(value);
             double norm = attitudeXYZ.X * attitudeXYZ.X + attitudeXYZ.Y * attitudeXYZ.Y + attitudeXYZ.Z * attitudeXYZ.Z + attitudeW * attitudeW;
-            if (Math.Abs(norm - 1) > FloatQuaternionNormTolerance || dragCubes == null || dragCubes.Length > AeroDragCubeState.MaximumBlendedCubes)
+            if (Math.Abs(norm - 1) > FloatQuaternionNormTolerance || dragCubes == null ||
+                dragCubes.Length > AeroDragCubeState.MaximumBlendedCubes || setDragInputs == null)
                 throw new ArgumentException("Invalid stock geometry state.");
             foreach (var cube in dragCubes) if (cube == null) throw new ArgumentException("Null drag cube.");
             this.step = step; this.flightId = flightId; nativePartInstanceId = partId; nativeRigidbodyInstanceId = rigidbodyId;
@@ -186,6 +190,7 @@ namespace KspContinuum
             worldCenterOfMass = center; worldVelocity = velocity; relativeAirVelocity = airVelocity; worldAngularVelocity = angularVelocity;
             worldAttitudeXYZ = attitudeXYZ; worldAttitudeW = attitudeW;
             this.dragCubes = Array.AsReadOnly((AeroDragCubeState[])dragCubes.Clone());
+            this.setDragInputs = setDragInputs;
         }
         public bool SameState(AeroPartContext other) => other != null && flightId == other.flightId && nativePartInstanceId == other.nativePartInstanceId &&
             nativeRigidbodyInstanceId == other.nativeRigidbodyInstanceId && massKilograms == other.massKilograms && densityKilogramsPerCubicMeter == other.densityKilogramsPerCubicMeter &&
@@ -193,13 +198,118 @@ namespace KspContinuum
             mach == other.mach && aerodynamicAreaSquareMeters == other.aerodynamicAreaSquareMeters && exposedAreaSquareMeters == other.exposedAreaSquareMeters && shielded == other.shielded &&
             AeroCaptureValidation.Equal(worldCenterOfMass, other.worldCenterOfMass) && AeroCaptureValidation.Equal(worldVelocity, other.worldVelocity) &&
             AeroCaptureValidation.Equal(relativeAirVelocity, other.relativeAirVelocity) && AeroCaptureValidation.Equal(worldAngularVelocity, other.worldAngularVelocity) &&
-            AeroCaptureValidation.Equal(worldAttitudeXYZ, other.worldAttitudeXYZ) && worldAttitudeW == other.worldAttitudeW && SameCubes(other.dragCubes);
+            AeroCaptureValidation.Equal(worldAttitudeXYZ, other.worldAttitudeXYZ) && worldAttitudeW == other.worldAttitudeW &&
+            SameCubes(other.dragCubes) && setDragInputs.SameState(other.setDragInputs);
         bool SameCubes(ReadOnlyCollection<AeroDragCubeState> other)
         {
             if (dragCubes.Count != other.Count) return false;
             for (int i = 0; i < dragCubes.Count; i++) if (!dragCubes[i].SameState(other[i])) return false;
             return true;
         }
+    }
+
+    public sealed class AeroSetDragInputs
+    {
+        public readonly ReadOnlyCollection<double> areaOccludedSquareMeters, weightedDragCoefficients;
+        public readonly AeroSurfaceCurveDefinitions surfaceCurves;
+        public readonly AeroFloatCurveDefinition dragCurveCd, dragCurveCdPower;
+        public AeroSetDragInputs(double[] areaOccluded, double[] weightedDrag, AeroSurfaceCurveDefinitions surfaces,
+            AeroFloatCurveDefinition cd, AeroFloatCurveDefinition cdPower)
+        {
+            areaOccludedSquareMeters = Faces(areaOccluded, "Occluded face area");
+            weightedDragCoefficients = Faces(weightedDrag, "Weighted drag coefficient");
+            surfaceCurves = surfaces ?? throw new ArgumentNullException(nameof(surfaces));
+            dragCurveCd = cd ?? throw new ArgumentNullException(nameof(cd));
+            dragCurveCdPower = cdPower ?? throw new ArgumentNullException(nameof(cdPower));
+        }
+        static ReadOnlyCollection<double> Faces(double[] source, string name)
+        {
+            if (source == null || source.Length != AeroDragCubeState.FaceCount) throw new ArgumentException(name + " requires six faces.");
+            var copy = (double[])source.Clone();
+            foreach (double value in copy) { AeroCaptureValidation.Number(value); if (value < 0) throw new ArgumentException(name + " cannot be negative."); }
+            return Array.AsReadOnly(copy);
+        }
+        internal bool SameState(AeroSetDragInputs other) => other != null && Same(areaOccludedSquareMeters, other.areaOccludedSquareMeters) &&
+            Same(weightedDragCoefficients, other.weightedDragCoefficients) && surfaceCurves.SameState(other.surfaceCurves) &&
+            dragCurveCd.SameState(other.dragCurveCd) && dragCurveCdPower.SameState(other.dragCurveCdPower);
+        static bool Same(ReadOnlyCollection<double> left, ReadOnlyCollection<double> right)
+        { for (int i = 0; i < AeroDragCubeState.FaceCount; i++) if (left[i] != right[i]) return false; return true; }
+    }
+
+    public sealed class AeroSurfaceCurveDefinitions
+    {
+        public readonly AeroFloatCurveDefinition tail, surface, multiplier, tip;
+        public AeroSurfaceCurveDefinitions(AeroFloatCurveDefinition tail, AeroFloatCurveDefinition surface,
+            AeroFloatCurveDefinition multiplier, AeroFloatCurveDefinition tip)
+        {
+            this.tail = tail ?? throw new ArgumentNullException(nameof(tail));
+            this.surface = surface ?? throw new ArgumentNullException(nameof(surface));
+            this.multiplier = multiplier ?? throw new ArgumentNullException(nameof(multiplier));
+            this.tip = tip ?? throw new ArgumentNullException(nameof(tip));
+        }
+        internal bool SameState(AeroSurfaceCurveDefinitions other) => other != null && tail.SameState(other.tail) &&
+            surface.SameState(other.surface) && multiplier.SameState(other.multiplier) && tip.SameState(other.tip);
+    }
+
+    public sealed class AeroFloatCurveDefinition
+    {
+        public const int MaximumKeys = 64;
+        public readonly string contentSha256;
+        public readonly int preWrapMode, postWrapMode;
+        public readonly ReadOnlyCollection<AeroCurveKey> keys;
+        public AeroFloatCurveDefinition(int preWrapMode, int postWrapMode, AeroCurveKey[] keys)
+        {
+            if (preWrapMode < 0 || postWrapMode < 0 || keys == null || keys.Length < 1 || keys.Length > MaximumKeys)
+                throw new ArgumentException("Invalid float curve definition.");
+            var copy = (AeroCurveKey[])keys.Clone();
+            double previous = double.NegativeInfinity;
+            foreach (AeroCurveKey key in copy)
+            {
+                if (key == null || key.time <= previous) throw new ArgumentException("Curve keys must be non-null and strictly ordered.");
+                previous = key.time;
+            }
+            this.preWrapMode = preWrapMode; this.postWrapMode = postWrapMode; this.keys = Array.AsReadOnly(copy);
+            contentSha256 = Hash(preWrapMode, postWrapMode, copy);
+        }
+        static string Hash(int preWrapMode, int postWrapMode, AeroCurveKey[] keys)
+        {
+            using (var bytes = new MemoryStream())
+            using (var writer = new BinaryWriter(bytes))
+            using (var sha = SHA256.Create())
+            {
+                writer.Write(preWrapMode); writer.Write(postWrapMode); writer.Write(keys.Length);
+                foreach (AeroCurveKey key in keys)
+                {
+                    writer.Write(key.time); writer.Write(key.value); writer.Write(key.inTangent); writer.Write(key.outTangent);
+                    writer.Write(key.inWeight); writer.Write(key.outWeight); writer.Write(key.weightedMode);
+                }
+                writer.Flush();
+                return BitConverter.ToString(sha.ComputeHash(bytes.ToArray())).Replace("-", "").ToLowerInvariant();
+            }
+        }
+        internal bool SameState(AeroFloatCurveDefinition other)
+        {
+            if (other == null || contentSha256 != other.contentSha256 || keys.Count != other.keys.Count) return false;
+            for (int i = 0; i < keys.Count; i++) if (!keys[i].SameState(other.keys[i])) return false;
+            return true;
+        }
+    }
+
+    public sealed class AeroCurveKey
+    {
+        public readonly double time, value, inTangent, outTangent, inWeight, outWeight;
+        public readonly int weightedMode;
+        public AeroCurveKey(double time, double value, double inTangent, double outTangent,
+            double inWeight, double outWeight, int weightedMode)
+        {
+            foreach (double item in new[] { time, value, inTangent, outTangent, inWeight, outWeight }) AeroCaptureValidation.Number(item);
+            if (inWeight < 0 || outWeight < 0 || weightedMode < 0) throw new ArgumentException("Invalid curve key parameters.");
+            this.time = time; this.value = value; this.inTangent = inTangent; this.outTangent = outTangent;
+            this.inWeight = inWeight; this.outWeight = outWeight; this.weightedMode = weightedMode;
+        }
+        internal bool SameState(AeroCurveKey other) => other != null && time == other.time && value == other.value &&
+            inTangent == other.inTangent && outTangent == other.outTangent && inWeight == other.inWeight &&
+            outWeight == other.outWeight && weightedMode == other.weightedMode;
     }
 
     public sealed class AeroDragCubeState
@@ -303,7 +413,7 @@ namespace KspContinuum
     public sealed class AeroCaptureReport
     {
         public const int MaximumSamples = 64, MaximumPartsPerSample = 128;
-        public readonly string schema = "ksp-continuum-aero-capture/v2";
+        public readonly string schema = "ksp-continuum-aero-capture/v3";
         public readonly AeroPatchProvenance provenance;
         public readonly AeroCaptureDisposition disposition;
         public readonly AeroCaptureReason reason;
