@@ -6,6 +6,7 @@ namespace KspContinuum.Tools;
 internal static class AeroCompareCommand
 {
     private const string CaptureSchema = "ksp-continuum-aero-capture/v1";
+    private const long MaximumCaptureBytes = 32 * 1024 * 1024;
     private const string ComparisonSchema = "ksp-continuum-aero-comparison/v1";
 
     public static int Run(string[] args)
@@ -130,7 +131,7 @@ internal static class AeroCompareCommand
 
     private static ParsedReport Parse(string path)
     {
-        var root = Tooling.ReadObject(path);
+        var root = Tooling.ReadObject(path, MaximumCaptureBytes);
         Tooling.Require(Text(root, "schema") == CaptureSchema, $"{path}: unsupported capture schema");
         Tooling.Require(Text(root, "disposition") == "Valid", $"{path}: capture is not valid");
         Tooling.Require(Text(root, "reason") == "None", $"{path}: valid capture has a failure reason");
