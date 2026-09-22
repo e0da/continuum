@@ -81,6 +81,8 @@ Native structural dependencies are fetched by pinned digest into ignored build a
 
 ## Research direction
 
+The [Continuum and Gimbal boundary](docs/continuum-gimbal-boundary.md) defines Continuum as the reusable engine, Gimbal as the game and experience layer, Gimbal KSP as a compatibility game mode, and this KSP addon as the strangler bridge and behavioral oracle. That direction does not change the current experimental status or bypass the replacement evidence gates below.
+
 The longer-term experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, GPU compute, and [learned or stochastic candidates](docs/learned-compute.md) remain measurable strategies rather than assumed winners. [Aerodynamic strategies](docs/aerodynamics.md) define a stock/FAR oracle boundary, multiresolution geometry and the first truth-capture experiment. [Behavioral qualification](docs/aero-behavior.md) defines rocket, plane and reentry envelopes for stock, FAR and Realism Overhaul composition profiles.
 
 Development advances along independent worker/backend, profiling, replay/input, and space-program/chronicle tracks. Missions provide workloads and acceptance evidence; landing precision does not gate unrelated simulation infrastructure. The current free-body worker proves a compute boundary, not complete force capture or a shadow vessel solver.
