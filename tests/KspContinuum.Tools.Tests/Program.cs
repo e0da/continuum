@@ -57,6 +57,28 @@ try
     Require(packageMetadata["download_hash"]!["sha256"]!.ToString() == Sha256(package).ToUpperInvariant(), "metadata does not bind exact archive with CKAN-compatible hash casing");
     Require(packageMetadata["download_hash"]!["sha1"]!.ToString().All(character => !char.IsLetter(character) || char.IsUpper(character)), "CKAN SHA-1 hash is not uppercase");
     using (var packaged = ZipFile.OpenRead(package)) Require(!packaged.Entries.Any(entry => string.Equals(Path.GetFileName(entry.FullName), "0Harmony.dll", StringComparison.OrdinalIgnoreCase)), "package bundled Harmony runtime");
+    var localPackageHint = Path.Combine(temporary, "local-package.zip");
+    Require(Run("package", "--plugin", plugin, "--output", localPackageHint) == 0, "local package generation failed");
+    var firstLocalArchive = Directory.GetFiles(temporary, "local-package-*.zip").Single();
+    var firstLocalMetadata = Path.ChangeExtension(firstLocalArchive, ".ckan");
+    var firstLocalHash = Sha256(firstLocalArchive);
+    var firstLocalCkan = JsonNode.Parse(File.ReadAllText(firstLocalMetadata))!.AsObject();
+    Require(Path.GetFileNameWithoutExtension(firstLocalArchive).EndsWith(firstLocalHash, StringComparison.Ordinal), "local archive name is not content-addressed");
+    Require(firstLocalCkan["download"]!.ToString() == new Uri(firstLocalArchive).AbsoluteUri, "local metadata does not download its content-addressed archive");
+    File.WriteAllBytes(plugin, [7, 8, 9]);
+    Require(Run("package", "--plugin", plugin, "--output", localPackageHint) == 0, "changed local package generation failed");
+    var localArchives = Directory.GetFiles(temporary, "local-package-*.zip").Order().ToArray();
+    Require(localArchives.Length == 2, "changed package bytes reused or replaced the prior local archive path");
+    Require(localArchives.All(path => File.Exists(Path.ChangeExtension(path, ".ckan"))), "content-addressed archive is missing sibling metadata");
+    Require(localArchives.Select(Sha256).Distinct(StringComparer.Ordinal).Count() == 2, "changed plugin bytes produced the same package bytes");
+    foreach (var localArchive in localArchives)
+    {
+        var localHash = Sha256(localArchive);
+        var localCkan = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(localArchive, ".ckan")))!.AsObject();
+        Require(Path.GetFileNameWithoutExtension(localArchive).EndsWith(localHash, StringComparison.Ordinal), "local package filename does not match its bytes");
+        Require(localCkan["download"]!.ToString() == new Uri(localArchive).AbsoluteUri, "local package metadata points CKAN at a stale archive path");
+        Require(localCkan["download_hash"]!["sha256"]!.ToString() == localHash.ToUpperInvariant(), "local metadata hash does not match its named archive");
+    }
     var rejectedPackage = Path.Combine(temporary, "invalid-download.zip");
     Require(Run("package", "--plugin", plugin, "--output", rejectedPackage, "--download-url", "relative/package.zip") != 0 && !File.Exists(rejectedPackage), "package accepted a relative download URL");
     Require(Run("package", "--plugin", plugin, "--output", rejectedPackage, "--download-url", "ftp://packages.example.invalid/continuum.zip") != 0 && !File.Exists(rejectedPackage), "package accepted an unsupported download URL scheme");
