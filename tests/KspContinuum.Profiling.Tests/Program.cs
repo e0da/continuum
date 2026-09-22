@@ -55,6 +55,23 @@ static class Program
         candidatePerformance.workload.items = 64;
         candidatePerformance.compute.milliseconds = new[] { double.NaN, 1.0, 1.0 };
         Check(Reject(() => PerformanceObservations.Validate(candidatePerformance)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.environmentSha256 = new string('b', 64);
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.workload.configurationSha256 = new string('c', 64);
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0 }, new long[] { 50, 60 });
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.sampleProtocol = "different-protocol";
+        Check(Reject(() => PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05)));
+        candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
+        candidatePerformance.total.allocations = new PerformanceAllocationSamples();
+        performance = PerformanceObservations.Compare(baselinePerformance, candidatePerformance, 0.05);
+        Check(!performance.candidateToBaselineAllocationRatio.HasValue);
+        candidatePerformance.workload.fixtureSha256 = new string('z', 64);
+        Check(Reject(() => PerformanceObservations.Validate(candidatePerformance)));
 
         marker.summary = summary;
         var report = new ProbeReport { markers = new[] { marker }, frames = new[] { new ProfileFrame {
@@ -142,11 +159,15 @@ static class Program
     static PerformanceObservation Observation(string strategy, double[] totals, long[] allocations)
     {
         var workload = new PerformanceWorkloadIdentity { system = "test-system", workload = "free-body",
-            fixtureSha256 = new string('a', 64), items = 64, steps = 1 };
+            fixtureSha256 = new string('a', 64), configurationSha256 = new string('b', 64),
+            items = 64, steps = 1, stepSeconds = 0.02 };
         PerformancePhaseSamples Phase(double value) => new PerformancePhaseSamples {
-            milliseconds = new[] { value, value, value }, allocatedBytes = new long[] { 0, 0, 0 } };
-        return new PerformanceObservation { workload = workload, strategy = strategy,
+            milliseconds = new[] { value, value, value }, allocations = new PerformanceAllocationSamples {
+                available = true, kind = "managed-allocated-bytes", scope = "current-thread", bytes = new long[] { 0, 0, 0 } } };
+        return new PerformanceObservation { workload = workload, strategy = strategy, environmentSha256 = new string('c', 64),
+            measurementProtocol = "test-clock-v1", sampleProtocol = "test-samples-v1",
             capture = Phase(0.1), pack = Phase(0.2), compute = Phase(0.5), synchronize = Phase(0), publish = Phase(0.2),
-            total = new PerformancePhaseSamples { milliseconds = totals, allocatedBytes = allocations } };
+            total = new PerformancePhaseSamples { milliseconds = totals, allocations = new PerformanceAllocationSamples {
+                available = true, kind = "managed-allocated-bytes", scope = "current-thread", bytes = allocations } } };
     }
 }

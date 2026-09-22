@@ -12,7 +12,7 @@ using KspContinuum;
 
 static class Program
 {
-    const string Schema = "ksp-continuum-layout-bench/v1";
+    const string Schema = "ksp-continuum-layout-bench/v2";
     const double StepSeconds = 0.02;
     const double Coupling = 0.125;
     const int BlockWidth = 8;
@@ -43,14 +43,16 @@ static class Program
                 Strategies = Strategies,
                 Workloads = Workloads
             };
+            string configurationSha256 = HashText(configuration.Canonical());
+            string environmentSha256 = HashText(environment.Canonical());
             var report = new Report {
                 Configuration = configuration,
                 Environment = environment,
-                ConfigurationSha256 = HashText(configuration.Canonical()),
-                EnvironmentSha256 = HashText(environment.Canonical()),
+                ConfigurationSha256 = configurationSha256,
+                EnvironmentSha256 = environmentSha256,
             };
             foreach (int bodyCount in options.BodyCounts)
-                report.Cases.Add(MeasureCase(bodyCount, options.Samples, options.Seed));
+                report.Cases.Add(MeasureCase(bodyCount, options.Samples, options.Seed, configurationSha256, environmentSha256));
             Console.WriteLine(JsonSerializer.Serialize(report, new JsonSerializerOptions {
                 WriteIndented = true,
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -64,7 +66,7 @@ static class Program
         }
     }
 
-    static CaseReport MeasureCase(int bodyCount, int samples, int seed)
+    static CaseReport MeasureCase(int bodyCount, int samples, int seed, string configurationSha256, string environmentSha256)
     {
         BodySeed[] source = Fixture(bodyCount);
         string fixtureSha256 = HashFixture(source);
@@ -102,7 +104,7 @@ static class Program
                 .ThenBy(result => result.Strategy, StringComparer.Ordinal).ToList()
         };
         foreach (ResultReport result in report.Results)
-            result.Finish(bodyCount, fixtureSha256);
+            result.Finish(bodyCount, fixtureSha256, configurationSha256, environmentSha256);
         return report;
     }
 
@@ -619,12 +621,16 @@ static class Program
             SynchronizeAllocatedBytes.Add(value.SynchronizeAllocatedBytes);
             ConsumeAllocatedBytes.Add(value.ConsumeAllocatedBytes); EndToEndAllocatedBytes.Add(value.EndToEndAllocatedBytes);
         }
-        public void Finish(int bodies, string fixtureSha256)
+        public void Finish(int bodies, string fixtureSha256, string configurationSha256, string environmentSha256)
         {
             Observation = new PerformanceObservation {
                 workload = new PerformanceWorkloadIdentity { system = "layout-integration", workload = Workload,
-                    fixtureSha256 = fixtureSha256, items = bodies, steps = 1 },
+                    fixtureSha256 = fixtureSha256, configurationSha256 = configurationSha256,
+                    items = bodies, steps = 1, stepSeconds = StepSeconds },
                 strategy = Strategy,
+                environmentSha256 = environmentSha256,
+                measurementProtocol = "stopwatch-v1/direct-total/current-thread-allocation",
+                sampleProtocol = "layout-randomized-order-v1/10-warmups",
                 capture = Phase(CaptureMilliseconds, CaptureAllocatedBytes),
                 pack = Phase(PackingMilliseconds, PackingAllocatedBytes),
                 compute = Phase(KernelMilliseconds, KernelAllocatedBytes),
@@ -636,7 +642,8 @@ static class Program
         }
         static PerformancePhaseSamples Phase(List<double> milliseconds, List<long> bytes)
         {
-            return new PerformancePhaseSamples { milliseconds = milliseconds.ToArray(), allocatedBytes = bytes.ToArray() };
+            return new PerformancePhaseSamples { milliseconds = milliseconds.ToArray(), allocations = new PerformanceAllocationSamples {
+                available = true, kind = "managed-allocated-bytes", scope = "current-thread", bytes = bytes.ToArray() } };
         }
     }
 }
