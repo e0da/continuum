@@ -251,7 +251,7 @@ namespace KspContinuum
                 throw new ArgumentException("Center application must use the captured center of mass.");
             var expected = Vec.Cross(new Vec(position.X - context.worldCenterOfMass.X, position.Y - context.worldCenterOfMass.Y,
                 position.Z - context.worldCenterOfMass.Z), force);
-            if (!AeroCaptureValidation.Equal(expected, torque)) throw new ArgumentException("Published torque is inconsistent with force application.");
+            if (!AeroCaptureValidation.EqualWithinOneUlp(expected, torque)) throw new ArgumentException("Published torque is inconsistent with force application.");
             this.context = context; this.kind = kind; applicationMode = mode; forceNewtons = force;
             worldApplicationPosition = position; torqueAboutPartCenterOfMassNewtonMeters = torque; stockDragScalars = dragScalars;
         }
@@ -453,5 +453,14 @@ namespace KspContinuum
             foreach (char c in value) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) throw new ArgumentException("Invalid SHA-256.");
         }
         internal static bool Equal(Vec a, Vec b) => a.X == b.X && a.Y == b.Y && a.Z == b.Z;
+        internal static bool EqualWithinOneUlp(Vec a, Vec b) =>
+            EqualWithinOneUlp(a.X, b.X) && EqualWithinOneUlp(a.Y, b.Y) && EqualWithinOneUlp(a.Z, b.Z);
+        static bool EqualWithinOneUlp(double a, double b)
+        {
+            if (a == b) return true;
+            long left = BitConverter.DoubleToInt64Bits(a), right = BitConverter.DoubleToInt64Bits(b);
+            if ((left < 0) != (right < 0)) return false;
+            return left == right - 1 || left == right + 1;
+        }
     }
 }

@@ -42,6 +42,9 @@ static class Program
     static AeroDragCubeState Cube(double weight = .75) => new AeroDragCubeState("Default", weight, new Vec(.1, .2, .3), new Vec(1, 2, 3),
         new[] { 1d, 2, 3, 4, 5, 6 }, new[] { .1, .2, .3, .4, .5, .6 }, new[] { 2d, 3, 4, 5, 6, 7 }, new[] { 1d, 1, 1, 1, 1, 1 });
     static AeroStockDragScalars DragScalars() => new AeroStockDragScalars(1.75, 240, .91, 1.2, .8, .32);
+    static AeroPartContext PartAtCenter(AeroCaptureContext step, Vec center) => new AeroPartContext(step, 1, 4, 5,
+        100, 1.2, 101325, 288.15, 340, .8, 2, 1.5, false, center, new Vec(20, 0, 0),
+        new Vec(-20, 0, 0), new Vec(0, .1, 0), new Vec(), 1, new[] { Cube() });
     static AeroBodyPublication Publication(AeroCaptureContext step, AeroPublicationKind kind, long flightId = 1, double density = 1.2) =>
         new AeroBodyPublication(Part(step, flightId, density), kind, AeroApplicationMode.AtWorldPosition,
             new Vec(0, -2, 0), new Vec(2, 2, 3), new Vec(0, 0, -2),
@@ -133,6 +136,19 @@ static class Program
             new Vec(1, 0, 0), new Vec(), new Vec(), DragScalars())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,
             new Vec(0, -2, 0), new Vec(2, 2, 3), new Vec(0, 0, 2))));
+        var roundTripContext = PartAtCenter(step, new Vec(23.35545539855957, 0.45627954602241516, 14.332162857055664));
+        var roundTripForce = new Vec(-18.780317306518555, 2.7390270233154297, 40.869235992431641);
+        var roundTripPosition = new Vec(23.443403244018555, 0.45435145497322083, 14.2846097946167);
+        var roundTripTorque = new Vec(0.0514495149573122, -2.701299649588691, 0.2046813636547995);
+        var roundTripArm = new Vec(roundTripPosition.X - roundTripContext.worldCenterOfMass.X,
+            roundTripPosition.Y - roundTripContext.worldCenterOfMass.Y, roundTripPosition.Z - roundTripContext.worldCenterOfMass.Z);
+        var recomputedTorque = Vec.Cross(roundTripArm, roundTripForce);
+        Check(roundTripTorque.X != recomputedTorque.X &&
+            Math.Abs(BitConverter.DoubleToInt64Bits(roundTripTorque.X) - BitConverter.DoubleToInt64Bits(recomputedTorque.X)) == 1);
+        Check(new AeroBodyPublication(roundTripContext, AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,
+            roundTripForce, roundTripPosition, roundTripTorque).torqueAboutPartCenterOfMassNewtonMeters.Z == roundTripTorque.Z);
+        Check(Reject(() => new AeroBodyPublication(roundTripContext, AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,
+            roundTripForce, roundTripPosition, new Vec(roundTripTorque.X, roundTripTorque.Y, roundTripTorque.Z + .001))));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
             new Vec(), new Vec(1, 2, 3), new Vec())));
         Check(Reject(() => new AeroBodyPublication(Part(step), AeroPublicationKind.BodyLift, AeroApplicationMode.AtWorldPosition,
