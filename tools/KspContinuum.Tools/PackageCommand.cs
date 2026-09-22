@@ -16,7 +16,7 @@ internal static class PackageCommand
         Tooling.Require(File.Exists(plugin), "Build the Release plugin first.");
         var addon = parsed.Optional("--mission-addon") ?? Path.Combine(root, "src/KspContinuum.Mission/bin/Release/net48/KspContinuum.Mission.dll");
         Tooling.Require(!mission || File.Exists(addon), "Build the Release mission addon first.");
-        var output = Path.GetFullPath(parsed.Optional("--output") ?? Path.Combine(root, "artifacts", mission ? "ksp-continuum-0.1.0-mission.zip" : "ksp-continuum-0.1.0-experiment.zip"));
+        var output = Path.GetFullPath(parsed.Optional("--output") ?? Path.Combine(root, "artifacts", mission ? "ksp-continuum-0.2.0-mission.zip" : "ksp-continuum-0.2.0-experiment.zip"));
         var download = DownloadUri(parsed.Optional("--download-url"), output);
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         File.Delete(output);
