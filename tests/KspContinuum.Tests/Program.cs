@@ -53,12 +53,16 @@ static class Program
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
-            var report = new BenchReport { samples = new[] { new Sample { boxes = 128, millisecondsPerStep = 0.125 } } };
+            var report = new BenchReport { samples = new[] { new Sample { boxes = 128, millisecondsPerStep = 0.125 } },
+                queuedForceIsolation = new[] { new QueuedForceIsolationSample { strategy = "kinematic-toggle",
+                    expectedDeltaVelocity = .1f, observedDeltaVelocity = 0, queuedForceStatus = "cleared" } } };
             using (var json = JsonDocument.Parse(ReportJson.Encode(report)))
             {
                 Near(1, json.RootElement.GetProperty("samples").GetArrayLength());
                 Near(128, json.RootElement.GetProperty("samples")[0].GetProperty("boxes").GetInt32());
                 Near(0.125, json.RootElement.GetProperty("samples")[0].GetProperty("millisecondsPerStep").GetDouble());
+                if (json.RootElement.GetProperty("queuedForceIsolation")[0].GetProperty("queuedForceStatus").GetString() != "cleared")
+                    throw new Exception("Queued-force result changed");
             }
             var text = "quote\" slash\\ newline\n control\u0001 rocket🚀";
             using (var json = JsonDocument.Parse(ReportJson.Encode(new VesselReport {

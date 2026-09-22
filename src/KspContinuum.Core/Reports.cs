@@ -17,6 +17,7 @@ namespace KspContinuum
         public float splitInitialPoseError, splitLinearMomentumError, splitAngularMomentumError;
         public bool splitInitialPosePassed, splitPassed, collisionPassed;
         public float collisionFinalY;
+        public QueuedForceIsolationSample[] queuedForceIsolation;
         public bool Passed()
         {
             if (!splitPassed || !collisionPassed || samples == null || samples.Length != 36) return false;
@@ -27,6 +28,12 @@ namespace KspContinuum
                     (sample.compound && sample.maxSpacingError > 1e-4f)) return false;
             return true;
         }
+    }
+    [Serializable] public sealed class QueuedForceIsolationSample
+    {
+        public string strategy;
+        public float expectedDeltaVelocity, observedDeltaVelocity;
+        public string queuedForceStatus;
     }
     [Serializable] public sealed class Sample
     {

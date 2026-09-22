@@ -57,7 +57,7 @@ namespace KspContinuum
                 output.Append(']'); return;
             }
             var type = value.GetType();
-            if (type != typeof(BenchReport) && type != typeof(Sample) && type != typeof(VesselReport) &&
+            if (type != typeof(BenchReport) && type != typeof(Sample) && type != typeof(QueuedForceIsolationSample) && type != typeof(VesselReport) &&
                 type != typeof(PartReport) && type != typeof(ProbeReport) && type != typeof(MarkerReport) &&
                 type != typeof(ProfileFrame) && type != typeof(ProfileDistribution) && type != typeof(ProfileMarkerSummary) &&
                 type != typeof(LoopTimingReport) && type != typeof(LoopTimingScope) && type != typeof(LoopTimingSample) &&
