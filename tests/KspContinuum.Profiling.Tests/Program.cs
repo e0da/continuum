@@ -21,6 +21,16 @@ static class Program
         Check(Reject(() => ProfilingSummary.Distribution(new double[] { double.PositiveInfinity })));
         Check(Reject(() => ProfilingSummary.Distribution(new double[] { -1 })));
 
+        var census = new StructuralCensusAccumulator();
+        // Model overlapping Part descendants, explicit Part.rb ownership, and the
+        // Vessel root view. Each native component must contribute exactly once.
+        census.AddBody(-11); census.AddBody(-12); census.AddBody(-11); census.AddBody(-13);
+        census.AddJoint(-21); census.AddJoint(-21); census.AddJoint(-22);
+        census.AddCollider(-31); census.AddCollider(-32); census.AddCollider(-31);
+        StructuralCensusResult censusResult = census.Snapshot();
+        Check(censusResult.rigidbodies == 3 && censusResult.joints == 2 && censusResult.colliders == 2);
+        Check(Reject(() => census.AddBody(0)));
+
         var marker = new MarkerReport { name = "Example", nanoseconds = new long[] { 1000000, 0, 0, 3000000 },
             blocks = new int[] { 2, 0, 0, 1 }, available = new bool[] { true, true, false, true } };
         var summary = ProfilingSummary.Marker(marker);

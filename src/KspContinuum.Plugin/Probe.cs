@@ -151,9 +151,10 @@ namespace KspContinuum
             // perturb the same part-count scaling this probe is intended to measure.
             if (structuralRigidbodies < 0 || completed == 0 || completed == FrameCount - 1)
             {
-                structuralRigidbodies = vessel.GetComponentsInChildren<Rigidbody>(true).Length;
-                structuralJoints = vessel.GetComponentsInChildren<Joint>(true).Length;
-                structuralColliders = vessel.GetComponentsInChildren<Collider>(true).Length;
+                StructuralCensusResult census = StructuralCensusCapture.Capture(vessel);
+                structuralRigidbodies = census.rigidbodies;
+                structuralJoints = census.joints;
+                structuralColliders = census.colliders;
             }
             frame.rigidbodies = structuralRigidbodies; frame.joints = structuralJoints; frame.colliders = structuralColliders;
             frame.body = vessel.mainBody == null ? null : vessel.mainBody.bodyName;

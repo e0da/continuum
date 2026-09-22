@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace KspContinuum
 {
@@ -12,12 +11,8 @@ namespace KspContinuum
             if (vessel == null || !vessel.loaded) throw new InvalidOperationException("A loaded vessel is required");
             var report = new VesselReport { parts = vessel.parts.Count, packed = vessel.packed };
             var rows = new List<PartReport>();
-            var bodies = new HashSet<Rigidbody>(); var joints = new HashSet<Joint>(); var colliders = new HashSet<Collider>();
             foreach (var part in vessel.parts)
             {
-                foreach (var rb in part.GetComponentsInChildren<Rigidbody>(true)) bodies.Add(rb);
-                foreach (var joint in part.GetComponentsInChildren<Joint>(true)) joints.Add(joint);
-                foreach (var collider in part.GetComponentsInChildren<Collider>(true)) colliders.Add(collider);
                 string name = part.partInfo == null ? "unknown" : part.partInfo.name;
                 string exclusion = !Structural.Contains(name) ? "outside-structural-allowlist" :
                     vessel.packed ? "packed-vessel" : part.parent == null ? "root" :
@@ -29,7 +24,8 @@ namespace KspContinuum
                 rows.Add(new PartReport { partType = name, index = vessel.parts.IndexOf(part),
                     parentIndex = part.parent == null ? -1 : vessel.parts.IndexOf(part.parent), dryMass = part.mass, exclusion = exclusion });
             }
-            report.rigidbodies = bodies.Count; report.joints = joints.Count; report.colliders = colliders.Count;
+            StructuralCensusResult census = StructuralCensusCapture.Capture(vessel);
+            report.rigidbodies = census.rigidbodies; report.joints = census.joints; report.colliders = census.colliders;
             report.inventory = rows.ToArray(); return report;
         }
     }
