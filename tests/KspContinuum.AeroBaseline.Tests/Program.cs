@@ -20,7 +20,12 @@ static class Program
         bool shielded = false, AeroDragCubeState[] cubes = null, int ordinal = 0) => new AeroPartContext(Step(ordinal), id,
         checked((int)id + 10), checked((int)id + 20), 10, density, 100000, 280, 330, .5, 1, 1, shielded,
         center, air * -1, air, new Vec(), new Vec(attitude.X, attitude.Y, attitude.Z), attitude.W,
-        cubes ?? new[] { Cube(new Vec(.2, -.1, .3)) });
+        cubes ?? new[] { Cube(new Vec(.2, -.1, .3)) }, SetDragInputs());
+    static AeroSetDragInputs SetDragInputs()
+    {
+        var curve = new AeroFloatCurveDefinition(0, 0, new[] { new AeroCurveKey(0, 1, 0, 0, 0, 0, 0) });
+        return new AeroSetDragInputs(new double[6], new double[6], new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
+    }
 
     static void DynamicPressureAndFaces()
     {

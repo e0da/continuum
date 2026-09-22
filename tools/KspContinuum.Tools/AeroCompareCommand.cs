@@ -5,7 +5,7 @@ namespace KspContinuum.Tools;
 
 internal static class AeroCompareCommand
 {
-    private const string CaptureSchema = "ksp-continuum-aero-capture/v2";
+    private const string CaptureSchema = "ksp-continuum-aero-capture/v3";
     private const long MaximumCaptureBytes = 32 * 1024 * 1024;
     private const string ComparisonSchema = "ksp-continuum-aero-comparison/v1";
 
@@ -64,7 +64,7 @@ internal static class AeroCompareCommand
             ["regimes"] = new JsonArray(Regimes(rows).Select(item => (JsonNode)item).ToArray()),
             ["incompleteness"] = new JsonArray(
                 "One-step body-drag force labels only; body lift and lifting surfaces are excluded.",
-                "Stock drag scalar reconstruction evaluates the no-ocean-multiplier product for every body-drag row because capture v2 cannot identify submerged samples; disagreement may reflect the omitted ocean multiplier.",
+                "Stock drag scalar reconstruction evaluates the no-ocean-multiplier product for every body-drag row because capture v3 cannot identify submerged samples; disagreement may reflect the omitted ocean multiplier.",
                 "The baseline omits Mach curves, pseudo-Reynolds corrections, stock drag-cube interpolation details, shielding transitions, heating, and provider-specific clamps.",
                 "Application-point torque is compared, but no angular impulse or trajectory behavior is qualified.",
                 "Receipt-wide provenance detects mixed input receipts; the capture schema has no per-publication provider fingerprint.",
@@ -250,13 +250,33 @@ internal static class AeroCompareCommand
             return new AeroDragCubeState(Text(cube, "name"), Number(cube, "weight"), Vector(cube, "center"), Vector(cube, "size"),
                 Numbers(cube, "area", 6), Numbers(cube, "drag", 6), Numbers(cube, "depth", 6), Numbers(cube, "dragModifiers", 6));
         }).ToArray();
+        var setDrag = Child(value, "setDragInputs");
+        var surface = Child(setDrag, "surfaceCurves");
+        var setDragInputs = new AeroSetDragInputs(Numbers(setDrag, "areaOccludedSquareMeters", 6),
+            Numbers(setDrag, "weightedDragCoefficients", 6),
+            new AeroSurfaceCurveDefinitions(ParseCurve(Child(surface, "tail")), ParseCurve(Child(surface, "surface")),
+                ParseCurve(Child(surface, "multiplier")), ParseCurve(Child(surface, "tip"))),
+            ParseCurve(Child(setDrag, "dragCurveCd")), ParseCurve(Child(setDrag, "dragCurveCdPower")));
         return new AeroPartContext(ParseStep(Child(value, "step")), Long(value, "flightId"), Integer(value, "nativePartInstanceId"),
             Integer(value, "nativeRigidbodyInstanceId"), Number(value, "massKilograms"), Number(value, "densityKilogramsPerCubicMeter"),
             Number(value, "staticPressurePascals"), Number(value, "temperatureKelvin"), Number(value, "speedOfSoundMetersPerSecond"),
             Number(value, "mach"), Number(value, "aerodynamicAreaSquareMeters"), Number(value, "exposedAreaSquareMeters"),
             Boolean(value, "shielded"), Vector(value, "worldCenterOfMass"), Vector(value, "worldVelocity"),
             Vector(value, "relativeAirVelocity"), Vector(value, "worldAngularVelocity"), Vector(value, "worldAttitudeXYZ"),
-            Number(value, "worldAttitudeW"), cubes);
+            Number(value, "worldAttitudeW"), cubes, setDragInputs);
+    }
+
+    private static AeroFloatCurveDefinition ParseCurve(JsonObject value)
+    {
+        var keys = Array(value, "keys").Select(node =>
+        {
+            var key = Object(node, "curve key");
+            return new AeroCurveKey(Number(key, "time"), Number(key, "value"), Number(key, "inTangent"),
+                Number(key, "outTangent"), Number(key, "inWeight"), Number(key, "outWeight"), Integer(key, "weightedMode"));
+        }).ToArray();
+        var curve = new AeroFloatCurveDefinition(Integer(value, "preWrapMode"), Integer(value, "postWrapMode"), keys);
+        Tooling.Require(curve.contentSha256 == Hex(value, "contentSha256"), "curve content hash does not match its parameters");
+        return curve;
     }
 
     private static AeroStockDragScalars ParseDragScalars(JsonObject value) => new(

@@ -219,11 +219,32 @@ namespace KspContinuum
                     Doubles(cube.Area), Doubles(cube.Drag), Doubles(cube.Depth), Doubles(cube.DragModifiers)));
             }
             Quaternion attitude = part.transform.rotation;
+            DragCubeList dragCubes = part.DragCubes;
+            PhysicsGlobals.SurfaceCurvesList surfaceCurves = dragCubes.SurfaceCurves;
+            var setDragInputs = new AeroSetDragInputs(Doubles(dragCubes.AreaOccluded), Doubles(dragCubes.WeightedDrag),
+                new AeroSurfaceCurveDefinitions(Curve(surfaceCurves.dragCurveTail), Curve(surfaceCurves.dragCurveSurface),
+                    Curve(surfaceCurves.dragCurveMultiplier), Curve(surfaceCurves.dragCurveTip)),
+                Curve(dragCubes.DragCurveCd), Curve(dragCubes.DragCurveCdPower));
             return new AeroPartContext(step, part.flightID, part.GetInstanceID(), body.GetInstanceID(), body.mass * 1000d,
                 FlightGlobals.ActiveVessel.atmDensity, part.staticPressureAtm * 101325d, part.temperature,
                 FlightGlobals.ActiveVessel.speedOfSound, part.machNumber, part.aerodynamicArea, part.exposedArea,
                 part.ShieldedFromAirstream, Vector(body.worldCenterOfMass), Vector(body.velocity), Vector(part.dragVector),
-                Vector(body.angularVelocity), new Vec(attitude.x, attitude.y, attitude.z), attitude.w, cubes.ToArray());
+                Vector(body.angularVelocity), new Vec(attitude.x, attitude.y, attitude.z), attitude.w, cubes.ToArray(), setDragInputs);
+        }
+
+        static AeroFloatCurveDefinition Curve(FloatCurve source)
+        {
+            if (source == null || source.Curve == null) throw new InvalidOperationException("Stock drag curve is unavailable.");
+            Keyframe[] sourceKeys = source.Curve.keys;
+            if (sourceKeys.Length > AeroFloatCurveDefinition.MaximumKeys) throw new InvalidOperationException("Stock drag curve exceeds capture bound.");
+            var keys = new AeroCurveKey[sourceKeys.Length];
+            for (int index = 0; index < sourceKeys.Length; index++)
+            {
+                Keyframe key = sourceKeys[index];
+                keys[index] = new AeroCurveKey(key.time, key.value, key.inTangent, key.outTangent,
+                    key.inWeight, key.outWeight, (int)key.weightedMode);
+            }
+            return new AeroFloatCurveDefinition((int)source.Curve.preWrapMode, (int)source.Curve.postWrapMode, keys);
         }
 
         static double[] Doubles(float[] source)

@@ -58,8 +58,13 @@ try
     Require(aeroComparison["counts"]!["bodyLiftLabelsExcluded"]!.GetValue<int>() == 1 && !aeroComparison["qualifiedForAuthority"]!.GetValue<bool>(), "aero comparison overstated coverage");
     var otherAero = Path.Combine(temporary, "aero-other.json"); File.WriteAllText(otherAero, ReportJson.Encode(AeroReceipt("1.12.5-other")));
     Require(Run("aero-compare", aero, otherAero) != 0, "mixed providers accepted");
-    var malformedAero = Path.Combine(temporary, "aero-malformed.json"); File.WriteAllText(malformedAero, "{\"schema\":\"ksp-continuum-aero-capture/v2\",\"disposition\":\"Valid\"}");
+    var malformedAero = Path.Combine(temporary, "aero-malformed.json"); File.WriteAllText(malformedAero, "{\"schema\":\"ksp-continuum-aero-capture/v3\",\"disposition\":\"Valid\"}");
     Require(Run("aero-compare", malformedAero) != 0, "malformed aero receipt accepted");
+    var alteredCurve = Path.Combine(temporary, "aero-altered-curve.json");
+    var alteredRoot = JsonNode.Parse(File.ReadAllText(aero))!.AsObject();
+    alteredRoot["samples"]![0]!["publications"]![0]!["context"]!["setDragInputs"]!["dragCurveCd"]!["keys"]![0]!["value"] = 2;
+    File.WriteAllText(alteredCurve, alteredRoot.ToJsonString());
+    Require(Run("aero-compare", alteredCurve) != 0, "curve parameters changed without a matching content address");
 
     var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]); var package = Path.Combine(temporary, "continuum.zip"); var download = "https://packages.example.invalid/ksp-continuum.zip";
     Require(Run("package", "--plugin", plugin, "--output", package, "--download-url", download) == 0, "package generation failed");
@@ -121,9 +126,12 @@ AeroCaptureReport AeroReceipt(string version)
         new AeroPatchTarget("FlightIntegrator.ApplyAeroLift", [Entry("KspContinuum.AeroCapture.LiftPrefix", "prefix", 0)])]);
     AeroCaptureContext Step(int ordinal) => new("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", "frame", 1, 1, 1, 1, 1, ordinal, 100, 2, .02);
     var faces = new[] { 1d, 1, 1, 1, 1, 1 };
+    var curve = new AeroFloatCurveDefinition(0, 0, [new AeroCurveKey(0, 1, 0, 0, 0, 0, 0)]);
+    var setDragInputs = new AeroSetDragInputs(new double[6], new double[6],
+        new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
     AeroPartContext Part(long id, int ordinal, bool cubes) => new(Step(ordinal), id, (int)id + 10, (int)id + 20, 10, 1.2, 100000, 280, 330, .5, 1, 1, false,
         new Vec(id, 0, 0), new Vec(-10, 0, 0), new Vec(10, 0, 0), new Vec(), new Vec(), 1,
-        cubes ? [new AeroDragCubeState("Default", 1, new Vec(), new Vec(1, 1, 1), faces, faces, faces, faces)] : []);
+        cubes ? [new AeroDragCubeState("Default", 1, new Vec(), new Vec(1, 1, 1), faces, faces, faces, faces)] : [], setDragInputs);
     var dragContext = Part(1, 0, true); var exact = AeroDragCubeBaseline.Evaluate(dragContext);
     var drag = new AeroBodyPublication(dragContext, AeroPublicationKind.BodyDrag, AeroApplicationMode.AtWorldPosition,
         exact.ForceNewtons, exact.WorldApplicationPosition, exact.TorqueAboutPartCenterOfMassNewtonMeters,

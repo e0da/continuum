@@ -47,7 +47,15 @@ namespace KspContinuum
                 DensityKilogramsPerCubicMeter, StaticPressurePascals, TemperatureKelvin,
                 SpeedOfSoundMetersPerSecond, Mach, 1, 1, false, new Vec(), new Vec(speed, 0, 0),
                 new Vec(speed, 0, 0), new Vec(), new Vec(attitude.X, attitude.Y, attitude.Z), attitude.W,
-                new[] { GeometryCube(Geometry) });
+                new[] { GeometryCube(Geometry) }, SyntheticSetDragInputs());
+        }
+
+        static AeroSetDragInputs SyntheticSetDragInputs()
+        {
+            var key = new[] { new AeroCurveKey(0, 1, 0, 0, 0, 0, 0) };
+            var curve = new AeroFloatCurveDefinition(0, 0, key);
+            return new AeroSetDragInputs(new double[6], new double[6],
+                new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
         }
 
         static AeroDragCubeState GeometryCube(AeroGeometryCase geometry)

@@ -36,7 +36,12 @@ static class Program
         return new AeroPartContext(Step(index % 256), index + 1, index + 100, index + 200, 10, 1.2, 101325, 288,
             340, .7, 1, 1, false, new Vec(index, 0, 0), new Vec(100, 0, 0),
             rotation.Rotate(new Vec(-100, index % 9 - 4, index % 7 - 3)), new Vec(),
-            new Vec(rotation.X, rotation.Y, rotation.Z), rotation.W, new[] { cube });
+            new Vec(rotation.X, rotation.Y, rotation.Z), rotation.W, new[] { cube }, SetDragInputs());
+    }
+    static AeroSetDragInputs SetDragInputs()
+    {
+        var curve = new AeroFloatCurveDefinition(0, 0, new[] { new AeroCurveKey(0, 1, 0, 0, 0, 0, 0) });
+        return new AeroSetDragInputs(new double[6], new double[6], new AeroSurfaceCurveDefinitions(curve, curve, curve, curve), curve, curve);
     }
     static bool Same(AeroBaselineResult[] left, AeroBaselineResult[] right)
     {
