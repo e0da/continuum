@@ -113,6 +113,82 @@ static class Program
         Reject<ArgumentOutOfRangeException>(() => new SemanticAttachment("invalid", "a", "b", (AttachmentBehavior)128),
             "unknown attachment behavior accepted");
 
+        var capturedParts = new[]
+        {
+            new StructuralPartFact("engine", 1, PartBoundaryRole.None),
+            new StructuralPartFact("tank-a", 2, PartBoundaryRole.None),
+            new StructuralPartFact("tank-b", 3, PartBoundaryRole.None),
+            new StructuralPartFact("tank-c", 4, PartBoundaryRole.None),
+            new StructuralPartFact("command", 4, PartBoundaryRole.None),
+            new StructuralPartFact("adapter", 4, PartBoundaryRole.None),
+            new StructuralPartFact("decoupler", 5, PartBoundaryRole.None),
+            new StructuralPartFact("payload-tank", 6, PartBoundaryRole.None),
+            new StructuralPartFact("payload-probe", 6, PartBoundaryRole.None),
+            new StructuralPartFact("wheel-left", 7, PartBoundaryRole.IndependentlySimulated),
+            new StructuralPartFact("wheel-right", 8, PartBoundaryRole.IndependentlySimulated),
+            new StructuralPartFact("docking-port", 9, PartBoundaryRole.ExternalInterface),
+            new StructuralPartFact("science", 10, (PartBoundaryRole?)null),
+            new StructuralPartFact("solar-left", 6, PartBoundaryRole.None),
+            new StructuralPartFact("solar-right", 6, PartBoundaryRole.None),
+            new StructuralPartFact("antenna", 6, PartBoundaryRole.None),
+            new StructuralPartFact("battery", 6, PartBoundaryRole.None)
+        };
+        var capturedAttachments = new[]
+        {
+            new StructuralAttachmentFact("j01", "engine", "tank-a", 101, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("j02", "tank-a", "tank-b", 102, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("j03", "tank-b", "tank-c", 103, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("logical-command", "tank-c", "command", null, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("logical-adapter", "command", "adapter", null, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("j04", "command", "decoupler", 104, AttachmentBehavior.Detachable),
+            new StructuralAttachmentFact("j05", "decoupler", "payload-tank", 105, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("logical-probe", "payload-tank", "payload-probe", null, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("j06", "payload-tank", "wheel-left", 106, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("j07", "payload-tank", "wheel-right", 107, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("j08", "payload-probe", "docking-port", 108, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("j09", "payload-probe", "science", 109, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("logical-solar-left", "payload-tank", "solar-left", null, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("logical-solar-right", "payload-tank", "solar-right", null, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("logical-antenna", "payload-probe", "antenna", null, AttachmentBehavior.Rigid),
+            new StructuralAttachmentFact("logical-battery", "payload-probe", "battery", null, AttachmentBehavior.Rigid)
+        };
+        StructuralClusterCandidate candidate = StructuralClusterCandidateCompiler.Compile(
+            new StructuralCensusResult(10, 9, 17), capturedParts, capturedAttachments);
+        Check(candidate.MappedSourceBodies == 10 && candidate.MappedSourceJoints == 9,
+            "representative capture did not account for every observed body and joint");
+        Check(candidate.Plan.Clusters.Count == 6 && candidate.ProjectedBodies == 6 && candidate.BodyReduction == 4,
+            "17-part/10-body capture did not compile to the expected six-body candidate");
+        Check(candidate.Plan.SplitSeams.Count == 5 && candidate.ProjectedJoints == 5,
+            "candidate did not preserve five observed semantic seams");
+        Check(candidate.Abstentions.Count == 1
+            && candidate.Abstentions[0] == "part:science:unknown-boundary-semantics",
+            "unknown part semantics were not retained as an explicit abstention");
+        ClusterSplitSeam unknownSeam = null;
+        foreach (ClusterSplitSeam seam in candidate.Plan.SplitSeams)
+            if (seam.AttachmentId == "j09") unknownSeam = seam;
+        Check(unknownSeam != null && (unknownSeam.Reasons & ClusterSeamReason.UnknownSemantics) != 0,
+            "unknown science-part semantics were silently compiled as rigid");
+
+        var incomplete = StructuralClusterCandidateCompiler.Compile(new StructuralCensusResult(11, 10, 17),
+            capturedParts, capturedAttachments);
+        Check(incomplete.ProjectedBodies == 7 && incomplete.ProjectedJoints == 6
+            && incomplete.Abstentions.Count == 3,
+            "unmapped census bodies or joints were discarded instead of retained");
+        var unknownAttachment = StructuralClusterCandidateCompiler.Compile(new StructuralCensusResult(2, 1, 0),
+            new[] { new StructuralPartFact("a", 1, PartBoundaryRole.None),
+                new StructuralPartFact("b", 2, PartBoundaryRole.None) },
+            new[] { new StructuralAttachmentFact("edge", "a", "b", 1, null) });
+        Check(unknownAttachment.ProjectedBodies == 2 && unknownAttachment.ProjectedJoints == 1
+            && unknownAttachment.Abstentions.Count == 1
+            && unknownAttachment.Plan.SplitSeams[0].Reasons == ClusterSeamReason.UnknownSemantics,
+            "unknown attachment behavior was silently compiled as rigid");
+        Reject<InvalidOperationException>(() => StructuralClusterCandidateCompiler.Compile(
+            new StructuralCensusResult(1, 0, 0),
+            new[] { new StructuralPartFact("a", 1, PartBoundaryRole.None),
+                new StructuralPartFact("b", 1, PartBoundaryRole.IndependentlySimulated) },
+            new[] { new StructuralAttachmentFact("edge", "a", "b", null, AttachmentBehavior.Rigid) }),
+            "one captured body was allowed to cross a proposed seam");
+
         Console.WriteLine("PASS " + checks + " semantic cluster compiler assertions");
         return 0;
     }

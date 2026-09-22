@@ -11,7 +11,8 @@ namespace KspContinuum
     {
         None = 0,
         IndependentlySimulated = 1,
-        ExternalInterface = 2
+        ExternalInterface = 2,
+        UnknownSemantics = 4
     }
 
     public enum AttachmentBehavior
@@ -20,7 +21,8 @@ namespace KspContinuum
         Detachable,
         Articulated,
         Compliant,
-        ExternalInterface
+        ExternalInterface,
+        UnknownSemantics
     }
 
     [Flags]
@@ -31,7 +33,8 @@ namespace KspContinuum
         Articulated = 2,
         Compliant = 4,
         IndependentlySimulated = 8,
-        ExternalInterface = 16
+        ExternalInterface = 16,
+        UnknownSemantics = 32
     }
 
     public sealed class SemanticPart
@@ -40,7 +43,8 @@ namespace KspContinuum
         {
             if (string.IsNullOrWhiteSpace(logicalId))
                 throw new ArgumentException("A nonempty logical part ID is required.", "logicalId");
-            const PartBoundaryRole allowed = PartBoundaryRole.IndependentlySimulated | PartBoundaryRole.ExternalInterface;
+            const PartBoundaryRole allowed = PartBoundaryRole.IndependentlySimulated
+                | PartBoundaryRole.ExternalInterface | PartBoundaryRole.UnknownSemantics;
             if ((boundaryRoles & ~allowed) != 0)
                 throw new ArgumentOutOfRangeException("boundaryRoles");
             LogicalId = logicalId;
@@ -220,6 +224,7 @@ namespace KspContinuum
                 case AttachmentBehavior.Articulated: result |= ClusterSeamReason.Articulated; break;
                 case AttachmentBehavior.Compliant: result |= ClusterSeamReason.Compliant; break;
                 case AttachmentBehavior.ExternalInterface: result |= ClusterSeamReason.ExternalInterface; break;
+                case AttachmentBehavior.UnknownSemantics: result |= ClusterSeamReason.UnknownSemantics; break;
             }
             result |= PartReasons(partA.BoundaryRoles);
             result |= PartReasons(partB.BoundaryRoles);
@@ -232,6 +237,7 @@ namespace KspContinuum
             if ((roles & PartBoundaryRole.IndependentlySimulated) != 0)
                 result |= ClusterSeamReason.IndependentlySimulated;
             if ((roles & PartBoundaryRole.ExternalInterface) != 0) result |= ClusterSeamReason.ExternalInterface;
+            if ((roles & PartBoundaryRole.UnknownSemantics) != 0) result |= ClusterSeamReason.UnknownSemantics;
             return result;
         }
 
