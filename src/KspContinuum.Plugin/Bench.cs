@@ -158,6 +158,31 @@ namespace KspContinuum
             report.collisionFinalY = body.position.y;
             report.collisionPassed = body.position.y > -1.1f && body.position.y < -0.8f && Mathf.Abs(body.velocity.y) < 0.05f;
         }
+        QueuedForceIsolationSample QueuedForce(string strategy)
+        {
+            const float force = 10, mass = 2;
+            var obj = NewObject("queued-force-" + strategy, Vector3.zero);
+            var body = Body(obj, mass, new Vec(1, 1, 1));
+            body.AddForce(Vector3.right * force, ForceMode.Force);
+            if (strategy == "kinematic-toggle")
+            {
+                body.isKinematic = true;
+                body.isKinematic = false;
+            }
+            else if (strategy == "sleep-wake")
+            {
+                body.Sleep();
+                body.WakeUp();
+            }
+            else if (strategy == "velocity-rewrite") body.velocity = body.velocity;
+            active.GetPhysicsScene().Simulate(Dt);
+            float expected = force / mass * Dt;
+            float observed = body.velocity.x;
+            string status = Mathf.Abs(observed) <= 1e-6f ? "cleared" :
+                Mathf.Abs(observed - expected) <= 1e-5f ? "retained" : "changed";
+            return new QueuedForceIsolationSample { strategy = strategy, expectedDeltaVelocity = expected,
+                observedDeltaVelocity = observed, queuedForceStatus = status };
+        }
         public IEnumerator Run(Action<BenchReport> complete)
         {
             var report = new BenchReport { unity = Application.unityVersion, ksp = Versioning.GetVersionString(),
@@ -180,6 +205,14 @@ namespace KspContinuum
                 NewScene(); Collision(report);
                 var collisionCleanup = SceneManager.UnloadSceneAsync(active); active = default(Scene);
                 yield return collisionCleanup;
+                var forceSamples = new List<QueuedForceIsolationSample>();
+                foreach (string strategy in new[] { "baseline", "kinematic-toggle", "sleep-wake", "velocity-rewrite" })
+                {
+                    NewScene(); forceSamples.Add(QueuedForce(strategy));
+                    var forceCleanup = SceneManager.UnloadSceneAsync(active); active = default(Scene);
+                    yield return forceCleanup;
+                }
+                report.queuedForceIsolation = forceSamples.ToArray();
                 report.samples = samples.ToArray();
                 complete(report);
             }

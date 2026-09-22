@@ -53,13 +53,32 @@ static class Program
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
-            var report = new BenchReport { samples = new[] { new Sample { boxes = 128, millisecondsPerStep = 0.125 } } };
+            var report = new BenchReport { samples = new[] { new Sample { boxes = 128, millisecondsPerStep = 0.125 } },
+                queuedForceIsolation = new[] { new QueuedForceIsolationSample { strategy = "kinematic-toggle",
+                    expectedDeltaVelocity = .1f, observedDeltaVelocity = 0, queuedForceStatus = "cleared" } } };
             using (var json = JsonDocument.Parse(ReportJson.Encode(report)))
             {
                 Near(1, json.RootElement.GetProperty("samples").GetArrayLength());
                 Near(128, json.RootElement.GetProperty("samples")[0].GetProperty("boxes").GetInt32());
                 Near(0.125, json.RootElement.GetProperty("samples")[0].GetProperty("millisecondsPerStep").GetDouble());
+                if (json.RootElement.GetProperty("queuedForceIsolation")[0].GetProperty("queuedForceStatus").GetString() != "cleared")
+                    throw new Exception("Queued-force result changed");
             }
+            var forceRows = new[] {
+                new QueuedForceIsolationSample { strategy = "baseline", expectedDeltaVelocity = .1f, observedDeltaVelocity = .1f, queuedForceStatus = "retained" },
+                new QueuedForceIsolationSample { strategy = "kinematic-toggle", expectedDeltaVelocity = .1f, observedDeltaVelocity = 0, queuedForceStatus = "cleared" },
+                new QueuedForceIsolationSample { strategy = "sleep-wake", expectedDeltaVelocity = .1f, observedDeltaVelocity = .1f, queuedForceStatus = "retained" },
+                new QueuedForceIsolationSample { strategy = "velocity-rewrite", expectedDeltaVelocity = .1f, observedDeltaVelocity = .1f, queuedForceStatus = "retained" } };
+            if (!new BenchReport { queuedForceIsolation = forceRows }.QueuedForceIsolationPassed())
+                throw new Exception("Complete queued-force probe rejected");
+            forceRows[3].strategy = "baseline";
+            if (new BenchReport { queuedForceIsolation = forceRows }.QueuedForceIsolationPassed())
+                throw new Exception("Duplicate queued-force strategy accepted");
+            forceRows[3].strategy = "velocity-rewrite";
+            forceRows[3].observedDeltaVelocity = float.NaN;
+            if (new BenchReport { queuedForceIsolation = forceRows }.QueuedForceIsolationPassed())
+                throw new Exception("Nonfinite queued-force result accepted");
+            count += 3;
             var text = "quote\" slash\\ newline\n control\u0001 rocket🚀";
             using (var json = JsonDocument.Parse(ReportJson.Encode(new VesselReport {
                 inventory = new[] { new PartReport { partType = text, parentIndex = -1 } } })))

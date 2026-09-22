@@ -17,9 +17,10 @@ namespace KspContinuum
         public float splitInitialPoseError, splitLinearMomentumError, splitAngularMomentumError;
         public bool splitInitialPosePassed, splitPassed, collisionPassed;
         public float collisionFinalY;
+        public QueuedForceIsolationSample[] queuedForceIsolation;
         public bool Passed()
         {
-            if (!splitPassed || !collisionPassed || samples == null || samples.Length != 36) return false;
+            if (!splitPassed || !collisionPassed || samples == null || samples.Length != 36 || !QueuedForceIsolationPassed()) return false;
             foreach (var sample in samples)
                 if (sample.colliderRayHits != sample.boxes || double.IsNaN(sample.millisecondsPerStep) ||
                     double.IsInfinity(sample.millisecondsPerStep) || sample.millisecondsPerStep <= 0 ||
@@ -27,6 +28,32 @@ namespace KspContinuum
                     (sample.compound && sample.maxSpacingError > 1e-4f)) return false;
             return true;
         }
+        public bool QueuedForceIsolationPassed()
+        {
+            string[] expectedStrategies = { "baseline", "kinematic-toggle", "sleep-wake", "velocity-rewrite" };
+            if (queuedForceIsolation == null || queuedForceIsolation.Length != expectedStrategies.Length) return false;
+            var seen = new bool[expectedStrategies.Length];
+            foreach (QueuedForceIsolationSample sample in queuedForceIsolation)
+            {
+                if (sample == null) return false;
+                int strategy = Array.IndexOf(expectedStrategies, sample.strategy);
+                if (strategy < 0 || seen[strategy]) return false;
+                seen[strategy] = true;
+                if (!(sample.expectedDeltaVelocity > 0) || float.IsNaN(sample.expectedDeltaVelocity) ||
+                    float.IsInfinity(sample.expectedDeltaVelocity) || float.IsNaN(sample.observedDeltaVelocity) ||
+                    float.IsInfinity(sample.observedDeltaVelocity) ||
+                    (sample.queuedForceStatus != "retained" && sample.queuedForceStatus != "cleared" &&
+                    sample.queuedForceStatus != "changed")) return false;
+                if (sample.strategy == "baseline" && sample.queuedForceStatus != "retained") return false;
+            }
+            return true;
+        }
+    }
+    [Serializable] public sealed class QueuedForceIsolationSample
+    {
+        public string strategy;
+        public float expectedDeltaVelocity, observedDeltaVelocity;
+        public string queuedForceStatus;
     }
     [Serializable] public sealed class Sample
     {
