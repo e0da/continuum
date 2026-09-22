@@ -146,9 +146,49 @@ static class Program
             Near(run[index].Baseline.ForceNewtons, replay[index].Baseline.ForceNewtons, "matrix replay " + index, 0);
     }
 
+    static void SetDragCaptureSufficiency()
+    {
+        var cube = new AeroDragCubeState("0", 1, new Vec(0, 0, -5.3640002306565293E-7),
+            new Vec(2.5, 7.5479998588562012, 2.5),
+            new[] { 57d, 57, 6.25, 6.25, 57, 57 },
+            new[] { 0.80440002679824829, 0.80440002679824829, 0.80440002679824829,
+                0.80440002679824829, 0.80440002679824829, 0.80440002679824829 },
+            new[] { 2.1710000038146973, 2.1710000038146973, 6.2290000915527344,
+                6.2290000915527344, 2.1710000038146973, 2.1710000038146973 }, new double[6]);
+        var cubes = new[] { cube };
+        var firstDirection = new Vec(-0.029881614937938034, 0.9995357712381214, -0.005964350166957455);
+        var secondDirection = new Vec(-0.029890425402045367, 0.999535451188317, -0.005966529116822439);
+        AeroSetDragInputAudit audit = AeroSetDragDiagnostic.Audit(firstDirection, cubes);
+        Check(audit.Disposition == AeroSetDragReproductionDisposition.Insufficient,
+            "captured drag cubes do not contain SetDrag runtime state");
+        Check(audit.MissingRuntimeInputs.Contains("DragCubeList.areaOccluded[6]"),
+            "occluded face areas are the dynamic missing input");
+        Check(audit.MissingRuntimeInputs.Contains("DragCubeList.weightedDrag[6] after attachment occlusion"),
+            "post-occlusion drag coefficients are also dynamic missing inputs");
+        Check(audit.MissingRuntimeInputs.Contains("DragCubeList.SurfaceCurves") &&
+            audit.MissingRuntimeInputs.Contains("DragCubeList.DragCurveCd") &&
+            audit.MissingRuntimeInputs.Contains("DragCubeList.DragCurveCdPower"),
+            "stock curve parameters are also outside the capture schema");
+
+        AeroSetDragComparison comparison = AeroSetDragDiagnostic.Compare(firstDirection, 3.5900653078953515,
+            1.7085930109024048, secondDirection, 3.5900653078953515, 2.5672118663787842,
+            cubes, 1e-4, .3);
+        Check(comparison.ExposesHiddenRuntimeState, "representative live labels expose hidden SetDrag state");
+        Check(comparison.DirectionDelta < 1e-5 && comparison.MachDelta == 0 && comparison.ProxyRelativeDelta < 1e-4,
+            "representative captured inputs are near-identical");
+        Check(comparison.ObservedRelativeDelta > .33,
+            "near-identical captured inputs have materially different stock AreaDrag labels");
+
+        var neighboring = AeroSetDragDiagnostic.Compare(firstDirection, 3.5900653078953515,
+            1.7085930109024048, new Vec(-0.02988575325752721, 0.9995356576634218, -0.005966136361507335),
+            3.5900653078953515, 1.7088568210601807, cubes, 1e-4, .3);
+        Check(!neighboring.ExposesHiddenRuntimeState && neighboring.ObservedRelativeDelta < .001,
+            "diagnostic does not flag neighboring live labels that agree");
+    }
+
     static int Main()
     {
-        DynamicPressureAndFaces(); MetamorphicBehavior(); DomainAndBatches(); RegimeMatrix();
+        DynamicPressureAndFaces(); MetamorphicBehavior(); DomainAndBatches(); RegimeMatrix(); SetDragCaptureSufficiency();
         Console.WriteLine("PASS " + checks + " aerodynamic baseline assertions");
         return 0;
     }
