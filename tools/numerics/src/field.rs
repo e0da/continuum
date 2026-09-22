@@ -83,7 +83,7 @@ pub fn mesh(p: &[V3], m: &[f64], n: usize) -> Result<Vec<V3>, String> {
     Ok(a)
 }
 pub fn split_pair(r: f64) -> Result<(f64, f64, f64, f64), String> {
-    if !r.is_finite() || r < 0. || r > 1e12 {
+    if !r.is_finite() || !(0. ..=1e12).contains(&r) {
         return Err("invalid split radius".into());
     }
     let u = -1. / (r * r + EPSILON * EPSILON).sqrt();
@@ -189,8 +189,8 @@ mod tests {
         let p = [[3., 4., 4.], [4.5, 4., 4.]];
         let m = [2., 5.];
         for a in [direct(&p, &m).unwrap(), mesh(&p, &m, 17).unwrap()] {
-            for k in 0..3 {
-                assert!((m[0] * a[0][k] + m[1] * a[1][k]).abs() < 1e-12)
+            for (left, right) in a[0].iter().zip(a[1]) {
+                assert!((m[0] * left + m[1] * right).abs() < 1e-12)
             }
         }
     }
