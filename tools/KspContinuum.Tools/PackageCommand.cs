@@ -5,7 +5,7 @@ namespace KspContinuum.Tools;
 
 internal static class PackageCommand
 {
-    private static readonly string[] Docs = ["experiment.md", "replacement.md", "validation.md", "compatibility.md", "input-timeline.md", "integration-map.md", "minmus-mission.md", "space-program.md", "naming.md", "wiki-templates.md", "chronicle.md", "simulation-worker.md", "profiling.md", "input-comparison.md", "worker-benchmark.md", "structural-benchmark.md", "orbital-fixture.md", "layout-benchmark.md", "telemetry-playback.md", "shadow-worker.md", "field-gravity.md", "field-trajectory.md", "modal-reduction.md", "interaction-regimes.md", "encounter-scheduler.md", "worldline-tubes.md", "force-observation.md", "qualification-report.md", "learned-compute.md", "aerodynamics.md", "aero-behavior.md"];
+    private static readonly string[] Docs = ["experiment.md", "replacement.md", "validation.md", "compatibility.md", "input-timeline.md", "integration-map.md", "minmus-mission.md", "space-program.md", "naming.md", "wiki-templates.md", "chronicle.md", "simulation-worker.md", "execution-views.md", "profiling.md", "input-comparison.md", "worker-benchmark.md", "structural-benchmark.md", "orbital-fixture.md", "layout-benchmark.md", "telemetry-playback.md", "shadow-worker.md", "field-gravity.md", "field-trajectory.md", "modal-reduction.md", "interaction-regimes.md", "encounter-scheduler.md", "worldline-tubes.md", "force-observation.md", "qualification-report.md", "learned-compute.md", "aerodynamics.md", "aero-behavior.md"];
 
     public static int Run(string[] args)
     {
