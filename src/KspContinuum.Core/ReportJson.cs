@@ -61,6 +61,7 @@ namespace KspContinuum
                 type != typeof(PartReport) && type != typeof(ProbeReport) && type != typeof(MarkerReport) &&
                 type != typeof(ProfileFrame) && type != typeof(ProfileDistribution) && type != typeof(ProfileMarkerSummary) &&
                 type != typeof(LoopTimingReport) && type != typeof(LoopTimingScope) && type != typeof(LoopTimingSample) &&
+                type != typeof(WriterCensusReport) && type != typeof(WriterCensusInterval) &&
                 type != typeof(ForceObservationReport) && type != typeof(ForceObservationContext) &&
                 type != typeof(LifecycleTraceReport) && type != typeof(LifecycleTraceEvent) &&
                 type != typeof(LifecycleTraceContext) && type != typeof(LifecyclePartSample) &&

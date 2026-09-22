@@ -18,12 +18,14 @@ namespace KspContinuum
             public PlayerLoopSystem.UpdateFunction Before, After; public LoopTimingBuffer Buffer;
         }
         readonly Scope[] scopes;
+        readonly IPlayerLoopBracketObserver observer;
         PlayerLoopSystem original;
         bool active, installed, disposed, valid = true, started;
         public LoopTimingReport Report { get; private set; }
 
-        public PlayerLoopTiming()
+        public PlayerLoopTiming(IPlayerLoopBracketObserver observer = null)
         {
+            this.observer = observer;
             Report = new LoopTimingReport { status = "unavailable", integrityStatus = "not-installed", cleanupStatus = "not-installed",
                 clockFrequency = Stopwatch.Frequency, timerReadFloorTicks = long.MaxValue };
             for (int i = 0; i < 128; i++) { long before = Stopwatch.GetTimestamp(); Report.timerReadFloorTicks = Math.Min(Report.timerReadFloorTicks, Stopwatch.GetTimestamp() - before); }
@@ -43,9 +45,10 @@ namespace KspContinuum
             scope.Before = () => { if (!active) return; try {
                 double time = timeDomain == "fixed" ? UnityEngine.Time.fixedTime : UnityEngine.Time.time;
                 double delta = timeDomain == "fixed" ? UnityEngine.Time.fixedDeltaTime : UnityEngine.Time.deltaTime;
+                if (observer != null) observer.Before(scope.Name, UnityEngine.Time.frameCount, time);
                 scope.Buffer.Begin(Stopwatch.GetTimestamp(), UnityEngine.Time.frameCount, time, delta);
-            } catch (Exception) { scope.Buffer.Fault(); Invalidate("Timing callback failed."); } };
-            scope.After = () => { if (!active) return; try { scope.Buffer.End(Stopwatch.GetTimestamp(), UnityEngine.Time.frameCount); } catch (Exception) { scope.Buffer.Fault(); Invalidate("Timing callback failed."); } };
+            } catch (Exception error) { if (observer != null) observer.Fault(scope.Name, error); scope.Buffer.Fault(); Invalidate("Timing callback failed."); } };
+            scope.After = () => { if (!active) return; try { scope.Buffer.End(Stopwatch.GetTimestamp(), UnityEngine.Time.frameCount); if (observer != null) observer.After(scope.Name, UnityEngine.Time.frameCount, timeDomain == "fixed" ? UnityEngine.Time.fixedTime : UnityEngine.Time.time); } catch (Exception error) { if (observer != null) observer.Fault(scope.Name, error); scope.Buffer.Fault(); Invalidate("Timing callback failed."); } };
             return scope;
         }
 
