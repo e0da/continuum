@@ -43,18 +43,23 @@ try
     var malformedAero = Path.Combine(temporary, "aero-malformed.json"); File.WriteAllText(malformedAero, "{\"schema\":\"ksp-continuum-aero-capture/v1\",\"disposition\":\"Valid\"}");
     Require(Run("aero-compare", malformedAero) != 0, "malformed aero receipt accepted");
 
-    var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]); var package = Path.Combine(temporary, "continuum.zip");
-    Require(Run("package", "--plugin", plugin, "--output", package) == 0, "package generation failed");
+    var plugin = Path.Combine(temporary, "KspContinuum.dll"); File.WriteAllBytes(plugin, [4, 5, 6]); var package = Path.Combine(temporary, "continuum.zip"); var download = "https://packages.example.invalid/ksp-continuum.zip";
+    Require(Run("package", "--plugin", plugin, "--output", package, "--download-url", download) == 0, "package generation failed");
     var packageMetadata = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(package, ".ckan")))!.AsObject();
     Require(packageMetadata["identifier"]!.ToString() == "KspContinuum", "package identifier changed");
+    Require(packageMetadata["version"]!.ToString().StartsWith("0.2.0-aero.", StringComparison.Ordinal), "qualification package version is not above the installed 0.1.x line");
     Require(packageMetadata["release_status"]!.ToString() == "testing", "local package was presented as a release");
     Require(packageMetadata["license"]!.ToString() == "restricted", "package claimed an ungranted license");
     Require(packageMetadata["depends"]!.AsArray().Any(item => item!["name"]!.ToString() == "Harmony2"), "package omitted shared Harmony2 dependency");
     Require(packageMetadata["install"]!.AsArray().Single()!["find"]!.ToString() == "KspContinuum", "package install root changed");
-    Require(packageMetadata["download"]!.ToString() == new Uri(package).AbsoluteUri, "metadata does not target the local archive");
+    Require(packageMetadata["download"]!.ToString() == download, "metadata lost the reachable download URL override");
     Require(packageMetadata["download_size"]!.GetValue<long>() == new FileInfo(package).Length, "metadata archive size changed");
-    Require(packageMetadata["download_hash"]!["sha256"]!.ToString() == Sha256(package), "metadata does not bind exact archive");
+    Require(packageMetadata["download_hash"]!["sha256"]!.ToString() == Sha256(package).ToUpperInvariant(), "metadata does not bind exact archive with CKAN-compatible hash casing");
+    Require(packageMetadata["download_hash"]!["sha1"]!.ToString().All(character => !char.IsLetter(character) || char.IsUpper(character)), "CKAN SHA-1 hash is not uppercase");
     using (var packaged = ZipFile.OpenRead(package)) Require(!packaged.Entries.Any(entry => string.Equals(Path.GetFileName(entry.FullName), "0Harmony.dll", StringComparison.OrdinalIgnoreCase)), "package bundled Harmony runtime");
+    var rejectedPackage = Path.Combine(temporary, "invalid-download.zip");
+    Require(Run("package", "--plugin", plugin, "--output", rejectedPackage, "--download-url", "relative/package.zip") != 0 && !File.Exists(rejectedPackage), "package accepted a relative download URL");
+    Require(Run("package", "--plugin", plugin, "--output", rejectedPackage, "--download-url", "ftp://packages.example.invalid/continuum.zip") != 0 && !File.Exists(rejectedPackage), "package accepted an unsupported download URL scheme");
     Console.WriteLine("KspContinuum.Tools.Tests passed"); return 0;
 }
 finally { Directory.Delete(temporary, true); }
