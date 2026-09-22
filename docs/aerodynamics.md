@@ -121,9 +121,10 @@ publishes no partial samples.
 
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
-The metadata points to the local archive; the repository does not yet publish release or NetKAN metadata. Source
-compilation and portable lifecycle tests do not establish patch coexistence, callback ordering, field units, or receipt
-validity in KSP.
+The metadata defaults to the local archive. `--download-url` accepts an absolute `file`, `http`, or `https` URI when the
+CKAN runtime cannot resolve the host path, while the recorded hashes continue to bind the locally built archive. The
+repository does not yet publish release or NetKAN metadata. Source compilation and portable lifecycle tests do not
+establish patch coexistence, callback ordering, field units, or receipt validity in KSP.
 
 The automated entrypoint is `--continuum-aero-capture-001`. Launch an owned qualification instance directly into a
 controlled stock atmospheric flight save with KSP's `-loadfile` argument plus `-batchmode -nographics`. The addon waits
