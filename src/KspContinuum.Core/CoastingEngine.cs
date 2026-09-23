@@ -80,6 +80,10 @@ namespace KspContinuum
         }
 
         public CoastingSnapshot Current { get { return current; } }
+        internal double SeedEpochSeconds { get { return epoch; } }
+        internal double GravitationalParameter { get { return mu; } }
+        internal int SeedBodyCount { get { return origin.Length; } }
+        internal CoastingBody SeedBody(int index) { return origin[index]; }
 
         public CoastingSnapshot SampleAt(double timeSeconds)
         {

@@ -20,7 +20,7 @@ static class Program
             .SampleBodyAt(id, seconds);
         return new CoastingBody(id, state.Position, state.Velocity);
     }
-    static RadiusCrossingEvent Run(int count, int batch, double scan, double publication, out double elapsedMilliseconds)
+    static RadiusCrossingEvent Run(int count, int batch, double publication, out double elapsedMilliseconds)
     {
         const double mu = 3.5316e12, semiMajor = 732639.5703, eccentricity = .00888570, epoch = 123456789;
         double meanMotion = Math.Sqrt(mu / (semiMajor * semiMajor * semiMajor));
@@ -29,7 +29,7 @@ static class Program
         for (int i = 0; i < count; i++) bodies.Add(Periapsis(i, mu, semiMajor, eccentricity, i * 2 * Math.PI / count));
         var engine = new CoastingEngine(epoch, mu, bodies, batch); var clock = Stopwatch.StartNew();
         RadiusCrossingEvent found = CoastingEventScheduler.FindFirst(engine, new RadiusCrossingSearch(epoch, expected + 200,
-            semiMajor, RadiusCrossingDirection.Outward, scan, 1e-7));
+            semiMajor, RadiusCrossingDirection.Outward, 1e-7));
         clock.Stop(); elapsedMilliseconds = clock.Elapsed.TotalMilliseconds;
         Check(found != null && found.Kind == "radius-crossing" && found.BodyId == 0, "first outward crossing changed identity");
         Check(Math.Abs(found.TimeSeconds - expected) <= 2e-7, "refined crossing missed analytic eccentric anomaly time");
@@ -44,22 +44,18 @@ static class Program
     static int Main()
     {
         double oneMs, sevenMs, allMs;
-        RadiusCrossingEvent one = Run(1, 1, 113, 3, out oneMs);
-        RadiusCrossingEvent seven = Run(1, 7, 113, 17, out sevenMs);
-        RadiusCrossingEvent all = Run(1, int.MaxValue, 113, 0, out allMs);
+        RadiusCrossingEvent one = Run(1, 1, 3, out oneMs);
+        RadiusCrossingEvent seven = Run(1, 7, 17, out sevenMs);
+        RadiusCrossingEvent all = Run(1, int.MaxValue, 0, out allMs);
         Check(one.TimeSeconds == seven.TimeSeconds && one.TimeSeconds == all.TimeSeconds,
             "work batch or presentation cadence changed refined event time");
-        double alternateScanMs;
-        RadiusCrossingEvent alternateScan = Run(1, 1, 251, 0, out alternateScanMs);
-        Check(Math.Abs(one.TimeSeconds - alternateScan.TimeSeconds) <= 2e-7,
-            "alternate valid scan changed event beyond refinement tolerance");
         const double kerbinMu = 3.5316e12, semiMajor = 732639.5703, eccentricity = .00888570, epoch = 123456789;
         double meanMotion = Math.Sqrt(kerbinMu / (semiMajor * semiMajor * semiMajor));
         double inwardExpected = epoch + (3 * Math.PI / 2 + eccentricity) / meanMotion;
         var inwardEngine = new CoastingEngine(epoch, kerbinMu,
             new[] { Periapsis(3, kerbinMu, semiMajor, eccentricity) }, 1);
         RadiusCrossingEvent inward = CoastingEventScheduler.FindFirst(inwardEngine, new RadiusCrossingSearch(epoch,
-            inwardExpected + 100, semiMajor, RadiusCrossingDirection.Inward, 113, 1e-7));
+            inwardExpected + 100, semiMajor, RadiusCrossingDirection.Inward, 1e-7));
         Check(inward != null && inward.BodyId == 3 && Math.Abs(inward.TimeSeconds - inwardExpected) <= 2e-7,
             "inward crossing missed analytic eccentric-anomaly time");
         double outwardAfterPeriapsis = (Math.PI / 2 - eccentricity) / meanMotion;
@@ -68,7 +64,7 @@ static class Program
             Shifted(4, kerbinMu, semiMajor, eccentricity, 100)
         }, 2);
         RadiusCrossingEvent earliest = CoastingEventScheduler.FindFirst(staggered, new RadiusCrossingSearch(epoch,
-            epoch + outwardAfterPeriapsis + 50, semiMajor, RadiusCrossingDirection.Outward, 113, 1e-7));
+            epoch + outwardAfterPeriapsis + 50, semiMajor, RadiusCrossingDirection.Outward, 1e-7));
         Check(earliest != null && earliest.BodyId == 4 &&
             Math.Abs(earliest.TimeSeconds - (epoch + outwardAfterPeriapsis - 100)) <= 2e-7,
             "scheduler did not choose the earliest staggered crossing");
@@ -76,24 +72,25 @@ static class Program
             Periapsis(5, kerbinMu, semiMajor, eccentricity), Periapsis(2, kerbinMu, semiMajor, eccentricity)
         }, 1);
         RadiusCrossingEvent tie = CoastingEventScheduler.FindFirst(tied, new RadiusCrossingSearch(epoch,
-            epoch + outwardAfterPeriapsis + 50, semiMajor, RadiusCrossingDirection.Outward, 113, 1e-7));
+            epoch + outwardAfterPeriapsis + 50, semiMajor, RadiusCrossingDirection.Outward, 1e-7));
         Check(tie != null && tie.BodyId == 2, "equal-time crossing did not use stable body-ID tie break");
         double ellipsePeriod = 2 * Math.PI / meanMotion;
-        var missed = new CoastingEngine(epoch, kerbinMu,
+        var longHorizon = new CoastingEngine(epoch, kerbinMu,
             new[] { Periapsis(7, kerbinMu, semiMajor, eccentricity) }, 1);
-        Check(CoastingEventScheduler.FindFirst(missed, new RadiusCrossingSearch(epoch, epoch + ellipsePeriod,
-            semiMajor, RadiusCrossingDirection.Outward, ellipsePeriod)) == null,
-            "coarse scan unexpectedly claimed a crossing whose outward/inward pair was contained inside one interval");
+        RadiusCrossingEvent manyCrossings = CoastingEventScheduler.FindFirst(longHorizon, new RadiusCrossingSearch(epoch,
+            epoch + 3.3 * ellipsePeriod, semiMajor, RadiusCrossingDirection.Outward, 1e-7));
+        Check(manyCrossings != null && Math.Abs(manyCrossings.TimeSeconds - (epoch + outwardAfterPeriapsis)) <= 2e-7,
+            "long horizon with repeated crossings did not select the first event");
         double count64, count512;
-        Run(64, 7, 113, 0, out count64); Run(512, 64, 113, 0, out count512);
+        Run(64, 7, 0, out count64); Run(512, 64, 0, out count512);
         Check(one.Evaluations > 2 && count64 >= 0 && count512 >= 0, "event search or benchmark did not execute");
         var circular = new CoastingEngine(0, 3.5316e12, new[] { Periapsis(0, 3.5316e12, 700000, 0) }, 1);
         Check(CoastingEventScheduler.FindFirst(circular, new RadiusCrossingSearch(0, 1000, 710000,
-            RadiusCrossingDirection.Outward, 10)) == null, "non-crossing circular orbit produced an event");
+            RadiusCrossingDirection.Outward)) == null, "non-crossing circular orbit produced an event");
         bool rejected = false;
-        try { new RadiusCrossingSearch(0, 5000, 700000, RadiusCrossingDirection.Outward, 1); }
+        try { new RadiusCrossingSearch(0, 0, 700000, RadiusCrossingDirection.Outward); }
         catch (ArgumentException) { rejected = true; }
-        Check(rejected, "unbounded scan accepted");
+        Check(rejected, "non-advancing search accepted");
         rejected = false;
         try { new RadiusCrossingSearch(0, 10, 700000, (RadiusCrossingDirection)99, 1); }
         catch (ArgumentException) { rejected = true; }
