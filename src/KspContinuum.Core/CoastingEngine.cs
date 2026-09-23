@@ -54,6 +54,7 @@ namespace KspContinuum
     {
         public const int MaximumPublicationsPerAdvance = 4096;
         readonly CoastingBody[] origin;
+        readonly Dictionary<int, int> bodyIndex;
         readonly double epoch, mu;
         readonly int workBatchSize;
         readonly CoastingEvaluationSettings settings;
@@ -72,16 +73,30 @@ namespace KspContinuum
             }
             if (copy.Count == 0 || copy.Count > SimulationBatch.MaxBodies) throw new ArgumentException("One through 4096 bodies are required.");
             epoch = epochSeconds; mu = gravitationalParameter; origin = copy.ToArray(); this.workBatchSize = workBatchSize;
+            bodyIndex = new Dictionary<int, int>();
+            for (int i = 0; i < origin.Length; i++) bodyIndex.Add(origin[i].Id, i);
             this.settings = settings ?? new CoastingEvaluationSettings();
             current = new CoastingSnapshot(epoch, origin);
         }
 
         public CoastingSnapshot Current { get { return current; } }
+        internal double SeedEpochSeconds { get { return epoch; } }
+        internal double GravitationalParameter { get { return mu; } }
+        internal int SeedBodyCount { get { return origin.Length; } }
+        internal CoastingBody SeedBody(int index) { return origin[index]; }
 
         public CoastingSnapshot SampleAt(double timeSeconds)
         {
             AssemblyModel.Finite(timeSeconds);
             return Evaluate(timeSeconds);
+        }
+
+        public CoastingBody SampleBodyAt(int bodyId, double timeSeconds)
+        {
+            AssemblyModel.Finite(timeSeconds);
+            int index;
+            if (!bodyIndex.TryGetValue(bodyId, out index)) throw new ArgumentException("Body ID is not present.", "bodyId");
+            return UniversalKepler.Propagate(origin[index], timeSeconds - epoch, mu, settings);
         }
 
         public CoastingAdvanceResult AdvanceTo(double targetTimeSeconds, double publicationIntervalSeconds = 0)
