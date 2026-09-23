@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Globalization;
 using System.Reflection;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using HarmonyLib;
@@ -14,6 +15,7 @@ namespace KspContinuum
     {
         const string Flag = "--continuum-coast-canary";
         const string QuitFlag = "--continuum-coast-quit-after-qualification";
+        const string CadencePrefix = "--continuum-coast-publication-seconds=";
         const string Owner = "continuum.independent-coast-adapter";
         const int MaximumCalls = 256;
         const double ForecastSeconds = 600;
@@ -33,7 +35,8 @@ namespace KspContinuum
 
         sealed class DriverCall
         {
-            public bool Candidate, Consumed;
+            public bool Candidate, Published, Consumed;
+            public long Started, SampleTicks, SeedTicks;
             public double UniversalTime;
             public CoastingSnapshot Sample;
         }
@@ -42,6 +45,7 @@ namespace KspContinuum
         MethodInfo driverTarget, orbitTarget;
         CoastingAdapterReport report;
         CoastingEngine engine;
+        CoastPresentationCadence cadence;
         Task<CoastingAdvanceResult> forecast;
         Orbit stockReference;
         Vessel vessel;
@@ -51,6 +55,8 @@ namespace KspContinuum
         int stableUnpackedFrames;
         bool warpRequested;
         bool requested, active, failed, stopRequested, finished, exported, quitAfter;
+        long callbackTicks, maximumCallbackTicks, sampleTicks, maximumSampleTicks,
+            seedTicks, maximumSeedTicks, residualTicks, maximumResidualTicks;
 
         public void Start()
         {
@@ -60,6 +66,7 @@ namespace KspContinuum
             report = new CoastingAdapterReport { status = "waiting-for-packed-orbit" };
             try
             {
+                cadence = new CoastPresentationCadence(ParseCadence(arguments));
                 if (Versioning.version_major != 1 || Versioning.version_minor != 12 || Versioning.Revision != 5)
                     throw new InvalidOperationException("KSP 1.12.5 is required.");
                 driverTarget = AccessTools.DeclaredMethod(typeof(OrbitDriver), "UpdateOrbit", new[] { typeof(bool) });
@@ -187,17 +194,23 @@ namespace KspContinuum
                     __instance.orbit.referenceBody != owner.referenceBody)
                 { owner.report.stockFallbacks++; owner.Stop("driver-state-changed"); return true; }
                 double ut = Planetarium.GetUniversalTime();
+                __state.Candidate = true; __state.Started = Stopwatch.GetTimestamp(); __state.UniversalTime = ut;
+                if (!owner.cadence.ShouldPublish(ut)) return true;
+                long sampleStarted = Stopwatch.GetTimestamp();
                 CoastingSnapshot sample = owner.engine.SampleAt(ut);
+                __state.SampleTicks = Stopwatch.GetTimestamp() - sampleStarted;
                 CoastingBody body = sample.Bodies[0];
+                long seedStarted = Stopwatch.GetTimestamp();
                 __instance.orbit.UpdateFromStateVectors(V(body.Position), V(body.Velocity), owner.referenceBody, ut);
-                __state.Candidate = true; __state.UniversalTime = ut; __state.Sample = sample;
+                __state.SeedTicks = Stopwatch.GetTimestamp() - seedStarted;
+                __state.Published = true; __state.Sample = sample;
                 token = new SuppressionToken { Orbit = __instance.orbit,
                     UniversalTimeBits = BitConverter.DoubleToInt64Bits(ut), Call = __state };
                 return true;
             }
             catch (Exception error)
             {
-                token = null; owner.report.errors++; owner.report.stockFallbacks++;
+                __state.Candidate = false; token = null; owner.report.errors++; owner.report.stockFallbacks++;
                 owner.Stop("candidate-failed:" + error.GetType().Name); return true;
             }
         }
@@ -214,31 +227,43 @@ namespace KspContinuum
         {
             IndependentCoastAdapter owner = instance;
             if (owner == null || __state == null || !__state.Candidate) return;
-            if (!__state.Consumed) { owner.Fail("one-shot-not-consumed"); return; }
+            if (__state.Published && !__state.Consumed) { owner.Fail("one-shot-not-consumed"); return; }
             try
             {
                 if (__instance != owner.vessel.orbitDriver || __instance.orbit.referenceBody != owner.referenceBody)
                 { owner.Fail("driver-readback-changed"); return; }
-                CoastingBody expected = __state.Sample.Bodies[0];
                 Vector3d position = owner.stockReference.getRelativePositionAtUT(__state.UniversalTime);
                 Vector3d velocity = owner.stockReference.getOrbitalVelocityAtUT(__state.UniversalTime);
+                Vec expectedPosition = V(position), expectedVelocity = V(velocity);
+                if (__state.Published)
+                {
+                    CoastingBody expected = __state.Sample.Bodies[0];
+                    expectedPosition = expected.Position; expectedVelocity = expected.Velocity;
+                }
                 owner.report.maximumPositionErrorMeters = Math.Max(owner.report.maximumPositionErrorMeters,
-                    Magnitude(V(position) + expected.Position * -1));
+                    Magnitude(V(position) + expectedPosition * -1));
                 owner.report.maximumVelocityErrorMetersPerSecond = Math.Max(owner.report.maximumVelocityErrorMetersPerSecond,
-                    Magnitude(V(velocity) + expected.Velocity * -1));
+                    Magnitude(V(velocity) + expectedVelocity * -1));
                 Vector3d injectedPosition = __instance.orbit.getRelativePositionAtUT(__state.UniversalTime);
                 Vector3d injectedVelocity = __instance.orbit.getOrbitalVelocityAtUT(__state.UniversalTime);
                 owner.report.maximumInjectedPositionErrorMeters = Math.Max(owner.report.maximumInjectedPositionErrorMeters,
-                    Magnitude(V(injectedPosition) + expected.Position * -1));
+                    Magnitude(V(injectedPosition) + expectedPosition * -1));
                 owner.report.maximumInjectedVelocityErrorMetersPerSecond = Math.Max(owner.report.maximumInjectedVelocityErrorMetersPerSecond,
-                    Magnitude(V(injectedVelocity) + expected.Velocity * -1));
+                    Magnitude(V(injectedVelocity) + expectedVelocity * -1));
                 Vector3d expectedDriverPosition = __instance.orbit.pos; expectedDriverPosition.Swizzle();
                 Vector3d expectedDriverVelocity = __instance.orbit.vel; expectedDriverVelocity.Swizzle();
                 owner.report.maximumDriverPositionErrorMeters = Math.Max(owner.report.maximumDriverPositionErrorMeters,
                     Magnitude(V(__instance.pos) + V(expectedDriverPosition) * -1));
                 owner.report.maximumDriverVelocityErrorMetersPerSecond = Math.Max(owner.report.maximumDriverVelocityErrorMetersPerSecond,
                     Magnitude(V(__instance.vel) + V(expectedDriverVelocity) * -1));
-                owner.report.candidateDriverCalls++; owner.report.suppressedStockPropagations++;
+                long callback = Stopwatch.GetTimestamp() - __state.Started;
+                long residual = Math.Max(0, callback - __state.SampleTicks - __state.SeedTicks);
+                owner.callbackTicks += callback; owner.maximumCallbackTicks = Math.Max(owner.maximumCallbackTicks, callback);
+                owner.sampleTicks += __state.SampleTicks; owner.maximumSampleTicks = Math.Max(owner.maximumSampleTicks, __state.SampleTicks);
+                owner.seedTicks += __state.SeedTicks; owner.maximumSeedTicks = Math.Max(owner.maximumSeedTicks, __state.SeedTicks);
+                owner.residualTicks += residual; owner.maximumResidualTicks = Math.Max(owner.maximumResidualTicks, residual);
+                owner.report.candidateDriverCalls++;
+                if (__state.Published) owner.report.suppressedStockPropagations++;
                 if (owner.report.candidateDriverCalls >= MaximumCalls)
                 {
                     bool accurate = owner.report.maximumPositionErrorMeters <= PositionToleranceMeters &&
@@ -246,7 +271,9 @@ namespace KspContinuum
                         owner.report.maximumInjectedPositionErrorMeters <= 1e-6 &&
                         owner.report.maximumInjectedVelocityErrorMetersPerSecond <= 1e-6 &&
                         owner.report.maximumDriverPositionErrorMeters <= 1e-6 &&
-                        owner.report.maximumDriverVelocityErrorMetersPerSecond <= 1e-6;
+                        owner.report.maximumDriverVelocityErrorMetersPerSecond <= 1e-6 &&
+                        owner.report.suppressedStockPropagations >= 2 &&
+                        owner.report.suppressedStockPropagations < owner.report.candidateDriverCalls;
                     owner.Stop(accurate ? "bounded-call-limit-reached" : "comparison-outside-tolerance");
                 }
             }
@@ -256,7 +283,7 @@ namespace KspContinuum
         static Exception DriverFinalizer(Exception __exception, DriverCall __state)
         {
             IndependentCoastAdapter owner = instance;
-            if (__state != null && __state.Candidate && !__state.Consumed && owner != null)
+            if (__state != null && __state.Published && !__state.Consumed && owner != null)
                 owner.Fail("driver-exited-with-unconsumed-token");
             token = null;
             return __exception;
@@ -376,8 +403,9 @@ namespace KspContinuum
             {
                 string directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData");
                 Directory.CreateDirectory(directory);
-                File.WriteAllText(Path.Combine(directory, "coasting-adapter-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") +
-                    "-" + Guid.NewGuid().ToString("N") + ".json"), ReportJson.Encode(report));
+                string identity = DateTime.UtcNow.ToString("yyyyMMddTHHmmssfff") + "-" + Guid.NewGuid().ToString("N");
+                File.WriteAllText(Path.Combine(directory, "coasting-adapter-" + identity + ".json"), ReportJson.Encode(report));
+                File.WriteAllText(Path.Combine(directory, "coasting-cadence-" + identity + ".txt"), CadenceReport());
             }
             catch (Exception error) { UnityEngine.Debug.LogException(error); }
         }
@@ -392,6 +420,33 @@ namespace KspContinuum
             if (double.IsNegativeInfinity(value)) return "negative-infinity";
             if (double.IsNaN(value)) return "nan";
             return value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        static double ParseCadence(string[] arguments)
+        {
+            foreach (string argument in arguments)
+                if (argument.StartsWith(CadencePrefix, StringComparison.Ordinal))
+                {
+                    double value;
+                    if (!double.TryParse(argument.Substring(CadencePrefix.Length), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out value)) throw new ArgumentException("Invalid coast publication cadence.");
+                    return value;
+                }
+            return 2;
+        }
+
+        string CadenceReport()
+        {
+            string newline = Environment.NewLine;
+            return "publicationIntervalSeconds=" + cadence.IntervalSeconds.ToString("R", CultureInfo.InvariantCulture) + newline +
+                "driverCallbacks=" + report.candidateDriverCalls + newline +
+                "publishedSamples=" + report.suppressedStockPropagations + newline +
+                "stopwatchFrequency=" + Stopwatch.Frequency + newline +
+                "callbackTicksTotal=" + callbackTicks + newline + "callbackTicksMaximum=" + maximumCallbackTicks + newline +
+                "sampleTicksTotal=" + sampleTicks + newline + "sampleTicksMaximum=" + maximumSampleTicks + newline +
+                "seedTicksTotal=" + seedTicks + newline + "seedTicksMaximum=" + maximumSeedTicks + newline +
+                "residualTicksTotal=" + residualTicks + newline + "residualTicksMaximum=" + maximumResidualTicks + newline +
+                "frontierUnchangedByPresentation=" + report.frontierUnchangedByPresentation + newline;
         }
 
         public void OnDestroy()

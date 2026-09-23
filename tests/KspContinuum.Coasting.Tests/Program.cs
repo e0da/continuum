@@ -31,6 +31,17 @@ static class Program
     }
     static int Main()
     {
+        var cadence = new CoastPresentationCadence(2);
+        Check(cadence.ShouldPublish(100), "cadence must publish its first observation");
+        Check(!cadence.ShouldPublish(100.5) && !cadence.ShouldPublish(101.999), "callback cadence leaked into publication cadence");
+        Check(cadence.ShouldPublish(102), "cadence missed its boundary");
+        Check(!cadence.ShouldPublish(102.1) && cadence.ShouldPublish(106.5), "cadence did not skip to a future boundary");
+        bool backwardsRejected = false;
+        try { cadence.ShouldPublish(106.4); } catch (InvalidOperationException) { backwardsRejected = true; }
+        Check(backwardsRejected, "backwards presentation time accepted");
+        bool cadenceRejected = false;
+        try { new CoastPresentationCadence(0); } catch (ArgumentOutOfRangeException) { cadenceRejected = true; }
+        Check(cadenceRejected, "invalid publication cadence accepted");
         const double mu = 3.986004418e14, radius = 7e6, epoch = 123456789;
         double period = 2 * Math.PI * Math.Sqrt(radius * radius * radius / mu), target = epoch + period;
         List<CoastingBody> fixture = Fixture(mu, radius);
