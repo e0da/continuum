@@ -56,6 +56,9 @@ fn run() -> Result {
         Some("persistent-execution-bench") if arguments.len() == 2 => {
             persistent_execution_bench(&root, &arguments[1])
         }
+        Some("native-cpu-throughput-bench") if arguments.len() == 2 => {
+            native_cpu_throughput_bench(&root, &arguments[1])
+        }
         Some("all") => {
             portable(&root)?;
             field(&root)?;
@@ -67,7 +70,7 @@ fn run() -> Result {
         Some("verify-checkpoint-report") if arguments.len() == 2 => {
             verify_checkpoint_report(&root, Path::new(&arguments[1]))
         }
-        _ => Err("usage: cargo run --manifest-path tools/xtask/Cargo.toml -- {portable|field|structural|all|execution-bench NEW_REPORT.json|persistent-execution-bench NEW_REPORT.json|verify-structural-report BINARY|verify-checkpoint-report BINARY}".into()),
+        _ => Err("usage: cargo run --manifest-path tools/xtask/Cargo.toml -- {portable|field|structural|all|execution-bench NEW_REPORT.json|persistent-execution-bench NEW_REPORT.json|native-cpu-throughput-bench NEW_REPORT.json|verify-structural-report BINARY|verify-checkpoint-report BINARY}".into()),
     }
 }
 
@@ -105,6 +108,19 @@ fn persistent_execution_bench(root: &Path, output: &str) -> Result {
             output,
         ],
     )
+}
+
+fn native_cpu_throughput_bench(root: &Path, output: &str) -> Result {
+    if let Some(parent) = Path::new(output).parent() {
+        fs::create_dir_all(root.join(parent))
+            .map_err(|error| format!("cannot create benchmark output directory: {error}"))?;
+    }
+    let arguments = ["run", "--release", "--manifest-path", "tools/numerics/Cargo.toml", "--bin",
+        "native-cpu-throughput-bench", "--", "--output", output];
+    eprintln!("+ RUSTFLAGS=-C target-cpu=native cargo {}", arguments.join(" "));
+    let status = Command::new("cargo").args(arguments).env("RUSTFLAGS", "-C target-cpu=native")
+        .current_dir(root).status().map_err(|e| format!("failed to start cargo: {e}"))?;
+    if status.success() { Ok(()) } else { Err(format!("cargo exited with {status}")) }
 }
 
 fn field(root: &Path) -> Result {

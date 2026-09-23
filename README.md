@@ -79,6 +79,7 @@ The experiments are independent of the running game:
 | [Orbital/event fixture](docs/orbital-fixture.md) | An external local Gimbal coast implementation against independent orbital states, plus bounded encounter-event adversaries |
 | [Data-layout comparison](docs/layout-benchmark.md) | Object, SoA, and AoSoA captures under the same free-body and neighbor-reading kernels, with the shared six-phase performance observation contract |
 | [Rust execution-view benchmark](docs/execution-view-benchmark.md) | Canonical-to-SoA packing and scalar, CPU-parallel, and Metal GPU integration crossover |
+| [Native CPU throughput](docs/native-cpu-throughput.md) | Native AoS, optimized SoA, blocked, and persistent-multicore crossover with long timed windows |
 | [KSP-to-Rust native boundary](docs/native-boundary-benchmark.md) | Architecture-compatible x86_64 P/Invoke cost, precision conversion, synchronous publication, and one/few-step latency |
 | [Persistent execution views](docs/persistent-execution-views.md) | Generational identity, deterministic topology rebuilds, and full-pack versus dirty-row refresh crossover |
 | [Compiled execution views](docs/execution-views.md) | Stable entity identity, dense per-system SoA batches, deterministic backend routing, and transactional publication |

@@ -1,3 +1,4 @@
+pub mod cpu_throughput;
 pub mod curve;
 pub mod execution_view;
 pub mod field;

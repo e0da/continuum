@@ -116,3 +116,16 @@ The managed-contract tests link the actual adapter against a small Unity API tes
 Add `--continuum-scale-save SAVE --continuum-scale-checkpoint CHECKPOINT` to load one named checkpoint automatically. The persistent main-menu loader accepts safe leaf names only, hashes the source before loading, verifies the selected game and active vessel after Flight becomes ready, and requires the source hash to remain unchanged when the profiler completes. These flags do not enable the survey mission or aerodynamic capture.
 
 The harness writes `markers.json` and a fail-closed `status.txt` under `PluginData/scale-profile-*`. Without the named-checkpoint flags it does not load a save. It does not construct a craft, control the vessel, replace physics, or establish a speedup. Separate controlled saves and repeated runs own the part-count series and instrumentation-off perturbation measurement.
+
+#### Initial station observation
+
+Two headless KSP 1.12.5 runs loaded the preserved station checkpoint with package SHA-256 `d2d437abdcb7a688afc687eb0b39be99f5fad9aea94d576d443830e04dd98191` from source commit `54bf455`. The source checkpoint hash was verified unchanged after both exits. Each observed graph contained 196 logical parts, 110 rigidbodies, 144 joints, 328 colliders and one loaded vessel. Both harnesses completed 300 rendered frames, exited with code 0, and reported intact PlayerLoop installation and cleanup with no dropped samples or sequence errors.
+
+| Run | Fixed-step samples | Physics p50 / p95 (ms) | Script FixedUpdate p50 / p95 (ms) |
+| --- | ---: | ---: | ---: |
+| 1 | 184 | 1.1809 / 1.44207 | 3.0351 / 3.748355 |
+| 2 | 207 | 1.1855 / 1.38052 | 3.0276 / 3.6922 |
+
+These are child scopes within fixed-step work. A rendered frame can contain zero or multiple fixed steps, so the `FixedUpdate` parent distribution is not directly comparable to either child distribution, and percentile values must not be added. The observations are headless, include the installed mod and instrumentation workload, and do not attribute script time to aerodynamics or any individual system. The whole-game logs were not clean: they retained the pre-existing headless `MessageSystemAppFrame.Reposition` startup null-reference error seen in earlier captures. The completed loop receipts do not qualify unrelated startup behavior.
+
+For scale only, the separate [native CPU layout benchmark](native-cpu-throughput.md) executes millions of independent synthetic body updates per second on native arm64. It excludes Unity, KSP callbacks, joints, contacts, capture and publication. Its compute throughput therefore identifies available off-game capacity, not removable time in this station trace. Repeated station runs, an instrumentation-off perturbation measurement and a controlled stock/candidate substitution remain required before claiming a live speedup.
