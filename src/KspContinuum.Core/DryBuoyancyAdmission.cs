@@ -6,13 +6,13 @@ namespace KspContinuum
 
     public struct DryBuoyancyVesselState
     {
-        public bool flightReady, active, loaded, packed, orbiting, bodyPresent;
+        public bool flightReady, active, loaded, packed, orbiting, bodyPresent, bodyHasOcean;
         public double altitudeMeters, vesselBoundMeters, radialSpeedMetersPerSecond, fixedDeltaSeconds;
     }
 
     public struct DryBuoyancyPartState
     {
-        public bool bodyInitialized, bodyMatchesVessel, splashed;
+        public bool bodyInitialized, bodyMatchesVessel, splashed, settledDry;
         public double depthMeters;
     }
 
@@ -22,9 +22,11 @@ namespace KspContinuum
 
         public static DryBuoyancyDisposition Decide(DryBuoyancyVesselState vessel, DryBuoyancyPartState part)
         {
-            if (!vessel.flightReady || !vessel.active || !vessel.loaded || vessel.packed || !vessel.orbiting || !vessel.bodyPresent)
+            if (!vessel.flightReady || !vessel.active || !vessel.loaded || vessel.packed || !vessel.orbiting ||
+                !vessel.bodyPresent || !vessel.bodyHasOcean)
                 return DryBuoyancyDisposition.RunStock;
-            if (!part.bodyInitialized || !part.bodyMatchesVessel || part.splashed || !Finite(part.depthMeters) || part.depthMeters > 0)
+            if (!part.bodyInitialized || !part.bodyMatchesVessel || part.splashed || !part.settledDry ||
+                !Finite(part.depthMeters) || part.depthMeters > 0)
                 return DryBuoyancyDisposition.RunStock;
             if (!Finite(vessel.altitudeMeters) || !Finite(vessel.vesselBoundMeters) || vessel.vesselBoundMeters < 0 ||
                 !Finite(vessel.radialSpeedMetersPerSecond) || !Finite(vessel.fixedDeltaSeconds) || vessel.fixedDeltaSeconds <= 0)

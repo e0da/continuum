@@ -12,6 +12,9 @@ namespace KspContinuum
         static DryBuoyancyRuntime activeOwner;
         readonly Harmony harmony = new Harmony(Owner);
         readonly MethodInfo target = AccessTools.DeclaredMethod(typeof(PartBuoyancy), "FixedUpdate");
+        Vessel cachedVessel;
+        float cachedFixedTime = float.NaN;
+        DryBuoyancyVesselState cachedVesselState;
         bool installed, disposed;
 
         public DryBuoyancyReport Report { get; private set; }
@@ -21,6 +24,8 @@ namespace KspContinuum
         public void Start()
         {
             if (disposed || installed || activeOwner != null) throw new InvalidOperationException("Dry buoyancy admission supports one owner.");
+            if (Versioning.version_major != 1 || Versioning.version_minor != 12 || Versioning.Revision != 5)
+            { Report.status = "unavailable"; Report.detail = "KSP 1.12.5 is required."; return; }
             if (target == null) { Report.status = "unavailable"; Report.detail = "PartBuoyancy.FixedUpdate not found."; return; }
             Patches existing = Harmony.GetPatchInfo(target);
             string[] foreign = existing == null ? new string[0] : existing.Owners.Where(owner => owner != Owner).Distinct().OrderBy(owner => owner).ToArray();
@@ -49,23 +54,14 @@ namespace KspContinuum
             {
                 Vessel vessel = ___part == null ? null : ___part.vessel;
                 CelestialBody mainBody = vessel == null ? null : vessel.mainBody;
-                Vector3 size = vessel == null ? Vector3.zero : vessel.vesselSize;
-                var vesselState = new DryBuoyancyVesselState {
-                    flightReady = HighLogic.LoadedSceneIsFlight && FlightGlobals.ready,
-                    active = vessel != null && ReferenceEquals(vessel, FlightGlobals.ActiveVessel),
-                    loaded = vessel != null && vessel.loaded,
-                    packed = vessel == null || vessel.packed,
-                    orbiting = vessel != null && vessel.situation == Vessel.Situations.ORBITING,
-                    bodyPresent = mainBody != null,
-                    altitudeMeters = vessel == null ? double.NaN : vessel.altitude,
-                    vesselBoundMeters = size.magnitude,
-                    radialSpeedMetersPerSecond = vessel == null ? double.NaN : vessel.verticalSpeed,
-                    fixedDeltaSeconds = Time.fixedDeltaTime
-                };
+                DryBuoyancyVesselState vesselState = owner.VesselState(vessel, mainBody);
                 var partState = new DryBuoyancyPartState {
                     bodyInitialized = __instance.body != null,
                     bodyMatchesVessel = ReferenceEquals(__instance.body, mainBody),
                     splashed = __instance.splashed,
+                    settledDry = !__instance.IsInvoking() && !__instance.wasSplashed && __instance.splashedCounter == 0 &&
+                        !___part.WaterContact && __instance.submergedPortion == 0 && ___part.submergedPortion == 0 &&
+                        __instance.drag == 0 && __instance.lastBuoyantForce == Vector3.zero,
                     depthMeters = __instance.depth
                 };
                 if (DryBuoyancyAdmission.Decide(vesselState, partState) == DryBuoyancyDisposition.SkipStock)
@@ -79,12 +75,19 @@ namespace KspContinuum
                     ___part.WaterContact = false;
                     ___part.submergedPortion = __instance.submergedPortion = 0;
                     __instance.drag = 0;
+                    __instance.splashedCounter = 0;
                     __instance.lastBuoyantForce = Vector3.zero;
                     __instance.lastForcePosition = __instance.centerOfBuoyancy;
                     ___part.submergedDragScalar = __instance.dragScalar;
                     ___part.submergedLiftScalar = __instance.liftScalar;
                     __instance.wasSplashed = false;
-                    owner.Report.dryPublications++; owner.Report.bypassed++; return false;
+                    owner.Report.dryPublications++;
+                    if (!__instance.dead && ReferenceEquals(__instance.body, mainBody) && !___part.WaterContact &&
+                        __instance.submergedPortion == 0 && ___part.submergedPortion == 0 && __instance.drag == 0 &&
+                        __instance.splashedCounter == 0 && __instance.lastBuoyantForce == Vector3.zero && !__instance.wasSplashed)
+                        owner.Report.verifiedPublications++;
+                    else { owner.Report.errors++; return true; }
+                    owner.Report.bypassed++; return false;
                 }
                 owner.Report.fallbacks++; return true;
             }
@@ -93,6 +96,28 @@ namespace KspContinuum
                 owner.Report.errors++; owner.Report.detail = error.GetType().Name + ": " + error.Message;
                 return true;
             }
+        }
+
+        DryBuoyancyVesselState VesselState(Vessel vessel, CelestialBody mainBody)
+        {
+            float fixedTime = Time.fixedTime;
+            if (ReferenceEquals(cachedVessel, vessel) && cachedFixedTime == fixedTime) return cachedVesselState;
+            cachedVessel = vessel; cachedFixedTime = fixedTime;
+            Vector3 size = vessel == null ? Vector3.zero : vessel.vesselSize;
+            cachedVesselState = new DryBuoyancyVesselState {
+                flightReady = HighLogic.LoadedSceneIsFlight && FlightGlobals.ready,
+                active = vessel != null && ReferenceEquals(vessel, FlightGlobals.ActiveVessel),
+                loaded = vessel != null && vessel.loaded,
+                packed = vessel == null || vessel.packed,
+                orbiting = vessel != null && vessel.situation == Vessel.Situations.ORBITING,
+                bodyPresent = mainBody != null,
+                bodyHasOcean = mainBody != null && mainBody.ocean,
+                altitudeMeters = vessel == null ? double.NaN : vessel.altitude,
+                vesselBoundMeters = size.magnitude,
+                radialSpeedMetersPerSecond = vessel == null ? double.NaN : vessel.verticalSpeed,
+                fixedDeltaSeconds = TimeWarp.fixedDeltaTime
+            };
+            return cachedVesselState;
         }
 
         void Remove()
@@ -110,7 +135,8 @@ namespace KspContinuum
         public void Dispose()
         {
             if (disposed) return; disposed = true; Remove();
-            if (Report.status == "installed") Report.status = Report.cleanupStatus == "removed-owned-prefix" && Report.errors == 0 && Report.bypassed > 0
+            if (Report.status == "installed") Report.status = Report.cleanupStatus == "removed-owned-prefix" && Report.errors == 0 &&
+                Report.bypassed > 0 && Report.dryPublications == Report.bypassed && Report.verifiedPublications == Report.bypassed
                 ? "complete" : "invalid";
         }
     }

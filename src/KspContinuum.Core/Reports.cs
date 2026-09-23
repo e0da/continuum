@@ -120,7 +120,7 @@ namespace KspContinuum
         public string limitation = "Opt-in stock-callback admission for the active loaded vessel in a high orbital dry regime. It republishes dry contact/force state but leaves stock diagnostic geometry and depth fields at their last dry values. Stock remains authoritative for initialization, water proximity and every ambiguous state.";
         public string installationStatus = "not-installed", cleanupStatus = "not-attempted", detail;
         public string[] foreignOwners = new string[0];
-        public long calls, bypassed, dryPublications, fallbacks, errors;
+        public long calls, bypassed, dryPublications, verifiedPublications, fallbacks, errors;
     }
 
     [Serializable] public sealed class PhysicsSubstitutionCanaryReport

@@ -22,22 +22,22 @@ static class Program
     static void Main()
     {
         var dryVessel = new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true,
-            bodyPresent = true, altitudeMeters = 100000, vesselBoundMeters = 100, radialSpeedMetersPerSecond = 0, fixedDeltaSeconds = .02 };
-        var dryPart = new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true };
+            bodyPresent = true, bodyHasOcean = true, altitudeMeters = 100000, vesselBoundMeters = 100, radialSpeedMetersPerSecond = 0, fixedDeltaSeconds = .02 };
+        var dryPart = new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, settledDry = true };
         if (DryBuoyancyAdmission.Decide(dryVessel, dryPart) != DryBuoyancyDisposition.SkipStock) throw new Exception("High orbit rejected");
         count++;
         var unsafeVessels = new[] {
             new DryBuoyancyVesselState(),
-            new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true,
+            new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true, bodyHasOcean = true,
                 altitudeMeters = 1000, vesselBoundMeters = 100, fixedDeltaSeconds = .02 },
-            new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true,
+            new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true, bodyHasOcean = true,
                 altitudeMeters = 100000, vesselBoundMeters = double.NaN, fixedDeltaSeconds = .02 }
         };
         foreach (var unsafeVessel in unsafeVessels) { if (DryBuoyancyAdmission.Decide(unsafeVessel, dryPart) != DryBuoyancyDisposition.RunStock) throw new Exception("Unsafe vessel admitted"); count++; }
         foreach (var unsafePart in new[] {
             new DryBuoyancyPartState(),
-            new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, splashed = true },
-            new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, depthMeters = .01 }
+            new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, settledDry = true, splashed = true },
+            new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, settledDry = true, depthMeters = .01 }
         }) { if (DryBuoyancyAdmission.Decide(dryVessel, unsafePart) != DryBuoyancyDisposition.RunStock) throw new Exception("Unsafe part admitted"); count++; }
         var swept = dryVessel; swept.altitudeMeters = 10001; swept.radialSpeedMetersPerSecond = -300000;
         if (DryBuoyancyAdmission.Decide(swept, dryPart) != DryBuoyancyDisposition.RunStock) throw new Exception("Swept approach admitted");
