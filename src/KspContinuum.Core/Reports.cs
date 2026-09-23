@@ -143,6 +143,12 @@ namespace KspContinuum
         public int admittedWarpRateIndex;
         public int eventEvaluations, warpRateIndexBeforeStopRequest, warpRateIndexAfterStopRequest;
         public long candidateDriverCalls, suppressedStockPropagations, stockFallbacks, errors;
+        public long synchronizationStopwatchFrequency, stateCaptureTicks, forecastAdmissionTicks,
+            engineSamples, callbackTicks, maximumCallbackTicks,
+            evaluationTicks, maximumEvaluationTicks,
+            publicationTicks, maximumPublicationTicks,
+            validationTicks, maximumValidationTicks,
+            driverRemainderTicks, maximumDriverRemainderTicks;
         public string admittedSphereOfInfluence, admittedPatchEndUniversalTime, admittedPatchEndTransition;
         public string eventKind, eventDirection;
         public bool forecastCompletedBeforePresentation, frontierUnchangedByPresentation,
