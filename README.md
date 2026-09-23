@@ -81,6 +81,7 @@ The experiments are independent of the running game:
 | [Rust execution-view benchmark](docs/execution-view-benchmark.md) | Canonical-to-SoA packing and scalar, CPU-parallel, and Metal GPU integration crossover |
 | [Native CPU throughput](docs/native-cpu-throughput.md) | Native AoS, optimized SoA, blocked, and persistent-multicore crossover with long timed windows |
 | [KSP-to-Rust native boundary](docs/native-boundary-benchmark.md) | Architecture-compatible x86_64 P/Invoke cost, precision conversion, synchronous publication, and one/few-step latency |
+| [Metal shader swap](docs/metal-shader-swap.md) | Matching-Unity shader substitution experiment in an isolated KSP copy; rendering and frame-time gains remain unproven |
 | [Persistent execution views](docs/persistent-execution-views.md) | Generational identity, deterministic topology rebuilds, and full-pack versus dirty-row refresh crossover |
 | [Compiled execution views](docs/execution-views.md) | Stable entity identity, dense per-system SoA batches, deterministic backend routing, and transactional publication |
 | [Aerodynamic strategies](docs/aerodynamics.md) | Deterministic drag-cube projection with scalar and order-preserving parallel paths; a metamorphic baseline pending comparison with captured stock labels |
