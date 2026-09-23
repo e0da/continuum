@@ -67,13 +67,20 @@ namespace KspContinuum
             {
                 long started = Stopwatch.GetTimestamp();
                 int requiredShadow = RequiredWarmupMatches + RequiredMeasuredMatches;
+                bool shadow = owner.report.matchedCompleteOutputs < requiredShadow;
                 bool measured = owner.report.matchedCompleteOutputs >= RequiredWarmupMatches &&
                     owner.report.matchedCompleteOutputs < requiredShadow;
-                if (!owner.TargetOwnedForStep(measured))
+                if (shadow && !owner.TargetOwnedForStep(measured))
                 { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
+                if (!shadow && owner.report.suppressedOriginalCalls == 0)
+                {
+                    owner.report.authorityAdmissionAttested = TargetStillOwned(owner.target);
+                    if (!owner.report.authorityAdmissionAttested)
+                    { owner.Stop("authority-admission-patch-graph-changed"); owner.report.stockFallbacks++; return true; }
+                }
                 __state.Candidate = Calculate(__instance, vector, machNumber);
                 CubeData(__instance) = __state.Candidate;
-                if (owner.report.matchedCompleteOutputs < requiredShadow)
+                if (shadow)
                 {
                     __state.Shadow = true;
                     __state.Measured = measured;
@@ -109,6 +116,7 @@ namespace KspContinuum
 
         static DragCubeList.CubeData Calculate(DragCubeList cubes, Vector3 input, float mach)
         {
+            if (cubes.None) return Snapshot(cubes);
             Vector3 direction = -input;
             if (cubes.RotateDragVector) direction = cubes.DragVectorRotation * direction;
             double magnitudeSquared = direction.sqrMagnitude;
@@ -228,6 +236,12 @@ namespace KspContinuum
         public void Update() { if (requested && !active && !exported) Finish(); }
         void Finish()
         {
+            if (report != null && report.status == "complete" && target != null)
+            {
+                report.authorityExitAttested = TargetStillOwned(target);
+                if (!report.authorityExitAttested)
+                { report.status = "abstained"; report.reason = "authority-exit-patch-graph-changed"; }
+            }
             Cleanup(); Export();
             if (quitAfterQualification)
                 Application.Quit(report != null && report.status == "complete" &&

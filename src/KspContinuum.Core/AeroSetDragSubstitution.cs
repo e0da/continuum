@@ -9,7 +9,7 @@ namespace KspContinuum
         public string status = "created";
         public string reason;
         public string cleanupStatus = "not-attempted";
-        public string strategy = "complete-stock-set-drag-reduction/v1";
+        public string strategy = "direct-six-face/admission-exit-attested/v1";
         public int requiredWarmupMatches;
         public int requiredMeasuredMatches;
         public int maximumSubstitutions;
@@ -26,6 +26,8 @@ namespace KspContinuum
         public long patchGraphStopwatchTicks;
         public int measuredPatchGraphInspections;
         public long measuredPatchGraphStopwatchTicks;
+        public bool authorityAdmissionAttested;
+        public bool authorityExitAttested;
         public double maximumRelativeError;
         public bool stockUpdateAerodynamicsRemainedAuthoritative = true;
         public bool stockForceApplicationRemainedAuthoritative = true;

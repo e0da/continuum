@@ -37,7 +37,8 @@ static class Program
             shadowWarmupComparisons = 32, shadowMeasuredComparisons = 256, suppressedOriginalCalls = 256,
             maximumRelativeError = 1e-6, stopwatchFrequency = 10000000, patchGraphInspections = 4,
             patchGraphStopwatchTicks = 120, measuredPatchGraphInspections = 3,
-            measuredPatchGraphStopwatchTicks = 90 };
+            measuredPatchGraphStopwatchTicks = 90, authorityAdmissionAttested = true,
+            authorityExitAttested = true };
         Check(setDrag.RecordCleanup(true, true) && setDrag.cleanupStatus == "removed-owned-patches" &&
             setDrag.status == "complete");
         string encoded = ReportJson.Encode(setDrag);
@@ -46,6 +47,8 @@ static class Program
             encoded.Contains("\"shadowMeasuredComparisons\":256") &&
             encoded.Contains("\"patchGraphStopwatchTicks\":120") &&
             encoded.Contains("\"measuredPatchGraphStopwatchTicks\":90") &&
+            encoded.Contains("\"authorityAdmissionAttested\":true") &&
+            encoded.Contains("\"authorityExitAttested\":true") &&
             encoded.Contains("\"cleanupStatus\":\"removed-owned-patches\"") &&
             encoded.Contains("\"stockForceApplicationRemainedAuthoritative\":true"));
         var cleanupFailure = new AeroSetDragSubstitutionReport { status = "complete",
