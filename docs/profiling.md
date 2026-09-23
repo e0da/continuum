@@ -201,6 +201,21 @@ topology replacement is outside this experiment. Stock callbacks are restored be
 The sweep can auto-run from the qualification CLI or be started and polled through the loopback control plane without
 quitting KSP.
 
+The corrected experiment host completed two externally started sweeps against the headless 196-part station. The
+client observed all six states in each sweep, both runs exited 0, and each result is the active fixed-step parent mean
+in milliseconds:
+
+| Sweep | Stock 1 | Full publication 1 | Resident 1 | Stock 2 | Resident 2 | Full publication 2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `022211884-aca1bc88a09d4d938514c662d362d9b5` | 4.18850 | 4.01463 | 4.12285 | 4.40089 | 4.24304 | 4.36755 |
+| `022254725-bdf40959c8f14a7ba2b74d75daf393bb` | 4.46643 | 4.34313 | 4.27167 | 4.39509 | 4.24516 | 4.38166 |
+
+The four resident windows were 1.57% to 4.36% lower than their neighboring stock window. This fixed-order exploratory
+sample supports continuing the resident-domain design; it does not establish a universal speedup, an FPS change, or
+the contribution of buoyancy independently from order and thermal drift. The host used source `2e5f177`, package
+SHA-256 `754da21acb639382a0fef60de1ead729c202f9f0a15e5edf484e211dd83e5c83`, and plugin SHA-256
+`6fbfc1cfe0d85104bfa890ac821fcbeee3000132cc46b1cccab69f569c1a60ed`.
+
 For a repeatable control-plane host, launch with `--continuum-experiment-host`,
 `--continuum-scale-save SAVE`, `--continuum-scale-checkpoint CHECKPOINT`, and
 `--continuum-control-port=47771`. The persistent loader selects the immutable checkpoint, but the scaling component
