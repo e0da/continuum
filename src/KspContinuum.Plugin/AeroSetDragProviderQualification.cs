@@ -110,30 +110,48 @@ namespace KspContinuum
             Vector3 direction = -input;
             if (cubes.RotateDragVector) direction = cubes.DragVectorRotation * direction;
             PhysicsGlobals.SurfaceCurvesList curves = cubes.SurfaceCurves;
-            float[] weightedDrag = cubes.WeightedDrag;
-            var areas = TrustedFaces(cubes.AreaOccluded); var drags = TrustedFaces(weightedDrag); var depths = TrustedFaces(cubes.WeightedDepth);
-            var dragCd = AeroFaceValues.Trusted(Cd(cubes, weightedDrag[0]), Cd(cubes, weightedDrag[1]),
-                Cd(cubes, weightedDrag[2]), Cd(cubes, weightedDrag[3]), Cd(cubes, weightedDrag[4]), Cd(cubes, weightedDrag[5]));
-            var liftCurve = cubes.BodyLiftCurve.liftCurve;
-            var bodyLift = AeroFaceValues.Trusted(Lift(liftCurve, direction.x), Lift(liftCurve, -direction.x),
-                Lift(liftCurve, direction.y), Lift(liftCurve, -direction.y), Lift(liftCurve, direction.z), Lift(liftCurve, -direction.z));
-            AeroCompleteSetDragResult result = AeroCompleteSetDrag.Evaluate(new Vec(direction.x, direction.y, direction.z),
-                areas, drags, depths, dragCd, bodyLift, curves.dragCurveTail.Evaluate(mach),
-                curves.dragCurveSurface.Evaluate(mach), curves.dragCurveMultiplier.Evaluate(mach),
-                curves.dragCurveTip.Evaluate(mach), cubes.DragCurveCdPower.Evaluate(mach));
+            float[] areas = cubes.AreaOccluded, drags = cubes.WeightedDrag, depths = cubes.WeightedDepth;
+            double tail = curves.dragCurveTail.Evaluate(mach), surface = curves.dragCurveSurface.Evaluate(mach);
+            double multiplier = curves.dragCurveMultiplier.Evaluate(mach), tip = curves.dragCurveTip.Evaluate(mach);
+            double power = cubes.DragCurveCdPower.Evaluate(mach);
+            double area = 0, areaDrag = 0, section = 0, exposure = 0, dotSum = 0;
+            double depth = 0, taper = 0, liftX = 0, liftY = 0, liftZ = 0;
+            for (int face = 0; face < 6; face++)
+            {
+                int axis = face >> 1;
+                double sign = (face & 1) == 0 ? 1 : -1;
+                double dot = (axis == 0 ? direction.x : axis == 1 ? direction.y : direction.z) * sign;
+                double faceArea = areas[face], drag = drags[face];
+                double directionalArea = faceArea * (dot <= 0
+                    ? surface + (tail - surface) * Math.Max(0, Math.Min(1, -dot))
+                    : surface + (tip - surface) * Math.Max(0, Math.Min(1, dot))) * multiplier;
+                area += directionalArea;
+                double dragCd = drag < 1 ? Math.Pow(cubes.DragCurveCd.Evaluate((float)drag), power) : drag;
+                areaDrag += directionalArea * dragCd;
+                section += faceArea * Math.Max(0, Math.Min(1, dot));
+                double inverseDrag = drag > .01 && drag < 1 ? 1 / drag : 1;
+                exposure += directionalArea / multiplier * inverseDrag;
+                if (dot <= 0) continue;
+                dotSum += dot;
+                double weightedLift = -dot * faceArea * drag * cubes.BodyLiftCurve.liftCurve.Evaluate((float)dot) * sign;
+                if (!double.IsNaN(weightedLift))
+                {
+                    if (axis == 0) liftX += weightedLift;
+                    else if (axis == 1) liftY += weightedLift;
+                    else liftZ += weightedLift;
+                }
+                depth += dot * depths[face]; taper += dot * inverseDrag;
+            }
+            if (dotSum > 0) { depth /= dotSum; taper /= dotSum; }
+            double coefficient = area > 0 ? areaDrag / area : 0;
+            if (area <= 0) areaDrag = 0;
             return new DragCubeList.CubeData {
-                dragVector = Vector(result.DragVector), liftForce = Vector(result.LiftForce),
-                area = (float)result.AreaSquareMeters, areaDrag = (float)result.AreaDragSquareMeters,
-                depth = (float)result.DepthMeters, crossSectionalArea = (float)result.CrossSectionalAreaSquareMeters,
-                exposedArea = (float)result.ExposedAreaSquareMeters, dragCoeff = (float)result.DragCoefficient,
-                taperDot = (float)result.TaperDot
+                dragVector = direction, liftForce = new Vector3((float)liftX, (float)liftY, (float)liftZ),
+                area = (float)area, areaDrag = (float)areaDrag, depth = (float)depth,
+                crossSectionalArea = (float)section, exposedArea = (float)exposure,
+                dragCoeff = (float)coefficient, taperDot = (float)taper
             };
         }
-
-        static AeroFaceValues TrustedFaces(float[] values) => AeroFaceValues.Trusted(values[0], values[1], values[2], values[3], values[4], values[5]);
-        static double Cd(DragCubeList cubes, float drag) => drag < 1 ? cubes.DragCurveCd.Evaluate(drag) : 0;
-        static double Lift(FloatCurve curve, float dot) => dot > 0 ? curve.Evaluate(dot) : 0;
-        static Vector3 Vector(Vec value) => new Vector3((float)value.X, (float)value.Y, (float)value.Z);
         static DragCubeList.CubeData Snapshot(DragCubeList cubes) => new DragCubeList.CubeData {
             dragVector = cubes.DragVector, liftForce = cubes.LiftForce, area = cubes.Area,
             areaDrag = cubes.AreaDrag, depth = cubes.Depth, crossSectionalArea = cubes.CrossSectionalArea,
