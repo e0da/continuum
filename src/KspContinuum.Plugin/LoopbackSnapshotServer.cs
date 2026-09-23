@@ -22,10 +22,15 @@ namespace KspContinuum
         readonly Queue<Pending> queue = new Queue<Pending>();
         readonly TcpListener listener;
         readonly Thread worker;
+        readonly AutoResetEvent outboundReady = new AutoResetEvent(false);
         TcpClient activeClient;
+        bool pushEnabled;
+        string latestPush;
+        bool latestPushTerminal;
         bool stopped;
 
         public int Port { get { return ((IPEndPoint)listener.LocalEndpoint).Port; } }
+        public bool PushEnabled { get { lock (sync) return !stopped && pushEnabled; } }
 
         public LoopbackSnapshotServer(int port)
         {
@@ -56,6 +61,28 @@ namespace KspContinuum
             return true;
         }
 
+        public void EnablePush()
+        {
+            lock (sync)
+            {
+                if (!stopped && activeClient != null) pushEnabled = true;
+            }
+        }
+
+        // The game thread replaces one pending observation and never waits for socket I/O.
+        public bool PublishLatest(string observation, bool terminal)
+        {
+            if (observation == null) throw new ArgumentNullException("observation");
+            lock (sync)
+            {
+                if (stopped || !pushEnabled || activeClient == null || latestPushTerminal) return false;
+                latestPush = observation;
+                latestPushTerminal = terminal;
+            }
+            outboundReady.Set();
+            return true;
+        }
+
         void Serve()
         {
             while (true)
@@ -69,6 +96,9 @@ namespace KspContinuum
                 {
                     if (stopped) { client.Close(); return; }
                     activeClient = client;
+                    pushEnabled = false;
+                    latestPush = null;
+                    latestPushTerminal = false;
                 }
                 using (client)
                 {
@@ -78,6 +108,23 @@ namespace KspContinuum
                         NetworkStream stream = client.GetStream();
                         while (true)
                         {
+                            string observation = null;
+                            lock (sync)
+                            {
+                                if (pushEnabled && latestPush != null)
+                                { observation = latestPush; latestPush = null; latestPushTerminal = false; }
+                            }
+                            if (observation != null)
+                            {
+                                WriteLine(stream, observation);
+                                continue;
+                            }
+                            if (client.Available == 0)
+                            {
+                                if (client.Client.Poll(0, SelectMode.SelectRead)) break;
+                                outboundReady.WaitOne(10);
+                                continue;
+                            }
                             string command = ReadCommand(stream);
                             if (command == "\0") break;
                             string response;
@@ -102,16 +149,22 @@ namespace KspContinuum
                                     }
                                 }
                             }
-                            byte[] bytes = Encoding.UTF8.GetBytes(response + "\n");
-                            stream.Write(bytes, 0, bytes.Length);
+                            WriteLine(stream, response);
                             if (command == null) break;
                         }
                     }
                     catch (IOException) { }
                     catch (ObjectDisposedException) { }
                 }
-                lock (sync) if (ReferenceEquals(activeClient, client)) activeClient = null;
+                lock (sync) if (ReferenceEquals(activeClient, client))
+                { activeClient = null; pushEnabled = false; latestPush = null; latestPushTerminal = false; }
             }
+        }
+
+        static void WriteLine(Stream stream, string value)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value + "\n");
+            stream.Write(bytes, 0, bytes.Length);
         }
 
         static string ReadCommand(Stream stream)
@@ -145,6 +198,7 @@ namespace KspContinuum
                 }
             }
             listener.Stop();
+            outboundReady.Set();
             lock (sync) if (activeClient != null) activeClient.Close();
         }
     }

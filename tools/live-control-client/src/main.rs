@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -26,6 +27,7 @@ struct Reply {
     status: String,
     reason: Option<String>,
     request_id: Option<String>,
+    capabilities: Option<Vec<String>>,
     identity: Option<Identity>,
     snapshot: Option<serde_json::Value>,
     observer_nanoseconds: Option<u64>,
@@ -111,7 +113,13 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
     let started = Instant::now();
     let mut stream = connect(&options)?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    let hello = exchange(&mut stream, &mut reader, "hello 1.0.0 qualification-hello")?;
+    let mut observations = VecDeque::new();
+    let hello = exchange(
+        &mut stream,
+        &mut reader,
+        &mut observations,
+        "hello 1.0.0 qualification-hello",
+    )?;
     require_ok(&hello, "qualification-hello", false)?;
     let identity = hello.identity.ok_or("hello reply omitted identity")?;
     let mut samples = Vec::with_capacity(options.samples);
@@ -122,7 +130,7 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             identity.session_id, identity.epoch
         );
         let before = Instant::now();
-        let reply = exchange(&mut stream, &mut reader, &command)?;
+        let reply = exchange(&mut stream, &mut reader, &mut observations, &command)?;
         let round_trip = nanos(before.elapsed())?;
         require_ok(&reply, &request_id, true)?;
         let observed = reply
@@ -179,63 +187,113 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
 fn run_quit(options: &Options) -> Result<(), String> {
     let mut stream = connect(options)?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    let hello = exchange(&mut stream, &mut reader, "hello 1.1.0 quit-hello")?;
+    let mut observations = VecDeque::new();
+    let hello = exchange(
+        &mut stream,
+        &mut reader,
+        &mut observations,
+        "hello 1.1.0 quit-hello",
+    )?;
     require_ok(&hello, "quit-hello", false)?;
     let identity = hello.identity.ok_or("hello reply omitted identity")?;
     let command = format!(
         "quit-when-idle 1.1.0 quit-request {} {}",
         identity.session_id, identity.epoch
     );
-    let reply = exchange(&mut stream, &mut reader, &command)?;
+    let reply = exchange(&mut stream, &mut reader, &mut observations, &command)?;
     require_ok(&reply, "quit-request", false)
 }
 
 fn run_sweep(options: &Options) -> Result<(), String> {
     let mut stream = connect(options)?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    let hello = exchange(&mut stream, &mut reader, "hello 1.1.0 sweep-hello")?;
+    let mut observations = VecDeque::new();
+    let hello = exchange(
+        &mut stream,
+        &mut reader,
+        &mut observations,
+        "hello 1.1.0 sweep-hello",
+    )?;
     require_ok(&hello, "sweep-hello", false)?;
+    if !hello.capabilities.as_ref().is_some_and(|capabilities| {
+        capabilities
+            .iter()
+            .any(|capability| capability == "dry-buoyancy-sweep-push")
+    }) {
+        return Err("server does not support pushed dry-buoyancy sweeps".into());
+    }
     let identity = hello.identity.ok_or("hello reply omitted identity")?;
     let start = format!(
         "sweep-start 1.1.0 sweep-start {} {} dry-buoyancy",
         identity.session_id, identity.epoch
     );
-    let reply = exchange(&mut stream, &mut reader, &start)?;
+    let reply = exchange(&mut stream, &mut reader, &mut observations, &start)?;
     require_ok(&reply, "sweep-start", false)?;
     let started = require_sweep_started(&reply)?;
     print_sweep(started);
-    let mut previous = String::new();
+    let subscribe = format!(
+        "sweep-subscribe 1.2.0 sweep-subscribe {} {} dry-buoyancy",
+        identity.session_id, identity.epoch
+    );
+    let reply = exchange(&mut stream, &mut reader, &mut observations, &subscribe)?;
+    require_ok(&reply, "sweep-subscribe", false)?;
+    let subscribed = reply
+        .sweep
+        .as_ref()
+        .ok_or("subscribe reply omitted sweep")?;
+    let mut previous = sweep_key(subscribed);
+    if previous != sweep_key(started) {
+        print_sweep(subscribed);
+    }
+    if terminal_sweep(subscribed)? {
+        return Ok(());
+    }
     loop {
-        std::thread::sleep(Duration::from_millis(250));
-        let command = format!(
-            "sweep-status 1.1.0 sweep-status {} {} dry-buoyancy",
-            identity.session_id, identity.epoch
-        );
-        let reply = exchange(&mut stream, &mut reader, &command)?;
-        require_ok(&reply, "sweep-status", false)?;
-        let sweep = reply.sweep.as_ref().ok_or("status reply omitted sweep")?;
-        let current = format!(
-            "{}:{}:{}",
-            sweep.state,
-            sweep.window_index,
-            sweep.window.as_deref().unwrap_or("")
-        );
+        let reply = match observations.pop_front() {
+            Some(observation) => observation,
+            None => read_reply(&mut reader)?,
+        };
+        if reply.request_id.is_some() || reply.status != "observation" {
+            return Err("expected pushed sweep observation".into());
+        }
+        let observed = reply
+            .identity
+            .as_ref()
+            .ok_or("observation omitted identity")?;
+        if observed.session_id != identity.session_id || observed.epoch != identity.epoch {
+            return Err("sweep observation changed identity".into());
+        }
+        let sweep = reply.sweep.as_ref().ok_or("observation omitted sweep")?;
+        let current = sweep_key(sweep);
         if current != previous {
             print_sweep(sweep);
             previous = current;
         }
-        match sweep.state.as_str() {
-            "complete" => return Ok(()),
-            "invalid" | "error" | "interrupted" | "unavailable" => {
-                return Err(format!(
-                    "sweep ended {}: {}",
-                    sweep.state,
-                    sweep.reason.as_deref().unwrap_or("unspecified")
-                ));
-            }
-            "waiting-for-orbit" | "running" | "idle" => {}
-            other => return Err(format!("unknown sweep state {other}")),
+        if terminal_sweep(sweep)? {
+            return Ok(());
         }
+    }
+}
+
+fn sweep_key(sweep: &SweepStatus) -> String {
+    format!(
+        "{}:{}:{}",
+        sweep.state,
+        sweep.window_index,
+        sweep.window.as_deref().unwrap_or("")
+    )
+}
+
+fn terminal_sweep(sweep: &SweepStatus) -> Result<bool, String> {
+    match sweep.state.as_str() {
+        "complete" => Ok(true),
+        "invalid" | "error" | "interrupted" | "unavailable" => Err(format!(
+            "sweep ended {}: {}",
+            sweep.state,
+            sweep.reason.as_deref().unwrap_or("unspecified")
+        )),
+        "waiting-for-orbit" | "running" | "idle" => Ok(false),
+        other => Err(format!("unknown sweep state {other}")),
     }
 }
 
@@ -298,11 +356,33 @@ fn connect(options: &Options) -> Result<TcpStream, String> {
 fn exchange(
     stream: &mut TcpStream,
     reader: &mut BufReader<TcpStream>,
+    observations: &mut VecDeque<Reply>,
     command: &str,
 ) -> Result<Reply, String> {
     stream
         .write_all(format!("{command}\n").as_bytes())
         .map_err(|e| format!("write failed: {e}"))?;
+    let request_id = command
+        .split(' ')
+        .nth(2)
+        .ok_or("command omitted request ID")?;
+    loop {
+        let reply = read_reply(reader)?;
+        if reply.status == "observation" && reply.request_id.is_none() {
+            if observations.len() == 8 {
+                return Err("too many observations arrived before command reply".into());
+            }
+            observations.push_back(reply);
+            continue;
+        }
+        if reply.request_id.as_deref() != Some(request_id) {
+            return Err("reply requestId did not match request".into());
+        }
+        return Ok(reply);
+    }
+}
+
+fn read_reply(reader: &mut BufReader<TcpStream>) -> Result<Reply, String> {
     let mut line = String::new();
     let count = reader
         .read_line(&mut line)
@@ -436,6 +516,7 @@ mod tests {
             status: "ok".into(),
             reason: None,
             request_id: Some("sweep-start".into()),
+            capabilities: None,
             identity: None,
             snapshot: None,
             observer_nanoseconds: None,
@@ -497,6 +578,7 @@ mod tests {
                 let reply = if expected.starts_with("hello") {
                     r#"{"status":"ok","requestId":"qualification-hello","identity":{"sessionId":"session","epoch":7,"renderFrame":10,"observedFixedCallbacks":4}}"#
                 } else {
+                    writeln!(socket, r#"{{"status":"observation","sweep":{{"state":"complete","windowIndex":5}}}}"#).unwrap();
                     r#"{"status":"ok","requestId":"qualification-0","identity":{"sessionId":"session","epoch":7,"renderFrame":11,"observedFixedCallbacks":5},"snapshot":{"parts":3},"observerNanoseconds":123}"#
                 };
                 writeln!(socket, "{reply}").unwrap();
@@ -504,16 +586,113 @@ mod tests {
         });
         let mut stream = TcpStream::connect(address).unwrap();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let hello = exchange(&mut stream, &mut reader, "hello 1.0.0 qualification-hello").unwrap();
+        let mut observations = VecDeque::new();
+        let hello = exchange(
+            &mut stream,
+            &mut reader,
+            &mut observations,
+            "hello 1.0.0 qualification-hello",
+        )
+        .unwrap();
         require_ok(&hello, "qualification-hello", false).unwrap();
         let reply = exchange(
             &mut stream,
             &mut reader,
+            &mut observations,
             "snapshot 1.0.0 qualification-0 session 7 0",
         )
         .unwrap();
         require_ok(&reply, "qualification-0", true).unwrap();
         assert_eq!(reply.observer_nanoseconds, Some(123));
+        assert_eq!(
+            observations.pop_front().unwrap().sweep.unwrap().state,
+            "complete"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn sweep_uses_pushed_terminal_status_without_polling() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            for expected in [
+                "hello 1.1.0 sweep-hello",
+                "sweep-start 1.1.0 sweep-start",
+                "sweep-subscribe 1.2.0 sweep-subscribe",
+            ] {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                assert!(line.starts_with(expected), "unexpected command {line}");
+                let reply = if expected.starts_with("hello") {
+                    r#"{"status":"ok","requestId":"sweep-hello","capabilities":["dry-buoyancy-sweep-push"],"identity":{"sessionId":"00000000-0000-0000-0000-000000000001","epoch":1,"renderFrame":10,"observedFixedCallbacks":4}}"#
+                } else if expected.starts_with("sweep-start") {
+                    r#"{"status":"ok","requestId":"sweep-start","identity":{"sessionId":"00000000-0000-0000-0000-000000000001","epoch":1,"renderFrame":11,"observedFixedCallbacks":5},"sweep":{"state":"running","window":"stock-01","windowIndex":0}}"#
+                } else {
+                    r#"{"status":"ok","requestId":"sweep-subscribe","identity":{"sessionId":"00000000-0000-0000-0000-000000000001","epoch":1,"renderFrame":11,"observedFixedCallbacks":5},"sweep":{"state":"running","window":"stock-01","windowIndex":0}}"#
+                };
+                writeln!(socket, "{reply}").unwrap();
+            }
+            writeln!(socket, r#"{{"status":"observation","identity":{{"sessionId":"00000000-0000-0000-0000-000000000001","epoch":1,"renderFrame":20,"observedFixedCallbacks":12}},"sweep":{{"state":"complete","directory":"/runtime/report","window":"full-publication-02","windowIndex":5}}}}"#).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            let mut unexpected = String::new();
+            let read = reader.read_line(&mut unexpected);
+            assert!(
+                matches!(read, Err(_) | Ok(0)),
+                "client polled after subscribing: {unexpected}"
+            );
+        });
+        let options = Options {
+            address: address.to_string(),
+            samples: 1,
+            output: None,
+            ready: None,
+            timeout: Duration::from_secs(2),
+            sweep: true,
+            quit: false,
+        };
+        run_sweep(&options).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn old_server_is_rejected_before_sweep_start() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            let mut hello = String::new();
+            reader.read_line(&mut hello).unwrap();
+            assert_eq!(hello.trim_end(), "hello 1.1.0 sweep-hello");
+            writeln!(socket, r#"{{"status":"ok","requestId":"sweep-hello","capabilities":["dry-buoyancy-sweep"],"identity":{{"sessionId":"00000000-0000-0000-0000-000000000001","epoch":1,"renderFrame":10,"observedFixedCallbacks":4}}}}"#).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            let mut unexpected = String::new();
+            assert!(
+                matches!(reader.read_line(&mut unexpected), Err(_) | Ok(0)),
+                "old server received side-effecting command: {unexpected}"
+            );
+        });
+        let options = Options {
+            address: address.to_string(),
+            samples: 1,
+            output: None,
+            ready: None,
+            timeout: Duration::from_secs(2),
+            sweep: true,
+            quit: false,
+        };
+        assert!(
+            run_sweep(&options)
+                .unwrap_err()
+                .contains("does not support pushed")
+        );
         server.join().unwrap();
     }
 }

@@ -2,7 +2,7 @@ using System;
 
 namespace KspContinuum
 {
-    public enum LiveControlOperation { Invalid, Hello, ActiveVesselSnapshot, StartSweep, SweepStatus, QuitWhenIdle }
+    public enum LiveControlOperation { Invalid, Hello, ActiveVesselSnapshot, StartSweep, SweepStatus, SubscribeSweep, QuitWhenIdle }
 
     public sealed class LiveControlRequest
     {
@@ -27,7 +27,8 @@ namespace KspContinuum
                 return new LiveControlRequest(LiveControlOperation.Invalid, null, null, null, null, 0, 0, "invalid-request");
             string[] words = line.Split(' ');
             string id = words.Length > 2 && Token(words[2], 64) ? words[2] : null;
-            bool supported = words.Length > 1 && (words[1] == "1.0.0" || words[1] == "1.1.0");
+            bool supported = words.Length > 1 &&
+                (words[1] == "1.0.0" || words[1] == "1.1.0" || words[1] == "1.2.0");
             if (words.Length < 3 || !supported || id == null)
                 return new LiveControlRequest(LiveControlOperation.Invalid, id, null,
                     words.Length > 1 ? words[1] : null, null, 0, 0,
@@ -56,6 +57,16 @@ namespace KspContinuum
                     return new LiveControlRequest(words[0] == "sweep-start" ? LiveControlOperation.StartSweep :
                         LiveControlOperation.SweepStatus, id, session.ToString("D"), words[1], words[5], epoch, 0, null);
             }
+            if (words[0] == "sweep-subscribe" && words.Length == 6 && words[1] == "1.2.0" &&
+                words[5] == "dry-buoyancy")
+            {
+                Guid session; long epoch;
+                if (Guid.TryParseExact(words[3], "D", out session) && session != Guid.Empty &&
+                    long.TryParse(words[4], System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture, out epoch) && epoch >= 1)
+                    return new LiveControlRequest(LiveControlOperation.SubscribeSweep, id,
+                        session.ToString("D"), words[1], words[5], epoch, 0, null);
+            }
             if (words[0] == "quit-when-idle" && words.Length == 5 && words[1] == "1.1.0")
             {
                 Guid session; long epoch;
@@ -67,7 +78,8 @@ namespace KspContinuum
             }
             return new LiveControlRequest(LiveControlOperation.Invalid, id, null, words[1], null, 0, 0,
                 words[0] == "snapshot" || words[0] == "hello" || words[0] == "sweep-start" ||
-                words[0] == "sweep-status" || words[0] == "quit-when-idle" ? "invalid-request" : "unknown-operation");
+                words[0] == "sweep-status" || words[0] == "sweep-subscribe" ||
+                words[0] == "quit-when-idle" ? "invalid-request" : "unknown-operation");
         }
 
         static bool Token(string value, int maximum)
@@ -98,10 +110,11 @@ namespace KspContinuum
     [Serializable] public sealed class LiveControlReply
     {
         public string schema = "continuum-live-control/v1";
-        public string protocolVersion = "1.0.0", supportedProtocolMin = "1.0.0", supportedProtocolMax = "1.1.0";
+        public string protocolVersion = "1.0.0", supportedProtocolMin = "1.0.0", supportedProtocolMax = "1.2.0";
         public string requestId;
         public string status, reason;
-        public string[] capabilities = { "hello", "active-vessel-snapshot", "dry-buoyancy-sweep", "quit-when-idle" };
+        public string[] capabilities = { "hello", "active-vessel-snapshot", "dry-buoyancy-sweep",
+            "dry-buoyancy-sweep-push", "quit-when-idle" };
         public LiveControlIdentity identity;
         public LiveVesselSnapshot snapshot;
         public LiveSweepStatus sweep;
@@ -159,20 +172,20 @@ namespace KspContinuum
             var identity = new LiveControlIdentity { sessionId = sessionId, scene = scene, vesselId = vesselId,
                 epoch = epoch, renderFrame = renderFrame, observedFixedCallbacks = observedFixedCallbacks };
             var reply = new LiveControlReply { identity = identity, requestId = request.requestId,
-                protocolVersion = request.protocolVersion == "1.1.0" ? "1.1.0" : "1.0.0" };
+                protocolVersion = request.protocolVersion == "1.2.0" ? "1.2.0" :
+                    request.protocolVersion == "1.1.0" ? "1.1.0" : "1.0.0" };
             if (request.operation == LiveControlOperation.Invalid)
             { reply.status = "rejected"; reply.reason = request.error; return reply; }
             if (request.operation == LiveControlOperation.Hello) { reply.status = "ok"; return reply; }
-            if (request.operation == LiveControlOperation.StartSweep || request.operation == LiveControlOperation.SweepStatus)
+            if (request.operation == LiveControlOperation.StartSweep || request.operation == LiveControlOperation.SweepStatus ||
+                request.operation == LiveControlOperation.SubscribeSweep)
             {
                 if (request.sessionId != sessionId || request.expectedEpoch != epoch)
                 { reply.status = "rejected"; reply.reason = "stale-identity"; return reply; }
                 Func<LiveSweepStatus> operation = request.operation == LiveControlOperation.StartSweep ? startSweep : sweepStatus;
                 if (operation == null) { reply.status = "unavailable"; reply.reason = "sweep-unavailable"; return reply; }
                 reply.sweep = operation();
-                if (reply.sweep == null || reply.sweep.name != request.sweep || !Bounded(reply.sweep.state, 64) ||
-                    !OptionalBounded(reply.sweep.reason, 256) || !OptionalBounded(reply.sweep.directory, 1024) ||
-                    !OptionalBounded(reply.sweep.window, 64) || reply.sweep.windowIndex < -1 || reply.sweep.windowIndex > 5)
+                if (!ValidSweep(reply.sweep, request.sweep))
                 { reply.sweep = null; reply.status = "rejected"; reply.reason = "invalid-sweep-status"; return reply; }
                 reply.status = "ok"; return reply;
             }
@@ -203,6 +216,27 @@ namespace KspContinuum
             reply.status = "ok";
             reply.snapshot = snapshot;
             return reply;
+        }
+
+        public LiveControlReply CreateSweepObservation(LiveSweepStatus sweep, long renderFrame,
+            long observedFixedCallbacks)
+        {
+            if (epoch == 0 || renderFrame < 0 || observedFixedCallbacks < 0)
+                throw new InvalidOperationException("Observe the current game state before publishing an observation.");
+            if (!ValidSweep(sweep, "dry-buoyancy"))
+                throw new ArgumentException("Invalid sweep status.", "sweep");
+            return new LiveControlReply {
+                protocolVersion = "1.2.0", status = "observation", sweep = sweep,
+                identity = new LiveControlIdentity { sessionId = sessionId, scene = scene, vesselId = vesselId,
+                    epoch = epoch, renderFrame = renderFrame, observedFixedCallbacks = observedFixedCallbacks }
+            };
+        }
+
+        static bool ValidSweep(LiveSweepStatus sweep, string name)
+        {
+            return sweep != null && sweep.name == name && Bounded(sweep.state, 64) &&
+                OptionalBounded(sweep.reason, 256) && OptionalBounded(sweep.directory, 1024) &&
+                OptionalBounded(sweep.window, 64) && sweep.windowIndex >= -1 && sweep.windowIndex <= 5;
         }
 
         static bool Finite(double value) { return !double.IsNaN(value) && !double.IsInfinity(value); }
