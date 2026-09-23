@@ -1,6 +1,6 @@
 # Independent coasting adapter
 
-`--continuum-coast-canary` enables a bounded KSP 1.12.5 integration canary. It admits the active vessel only after KSP has packed it onto rails in a stable elliptic orbit. The orbit must remain above the reference body's atmosphere, retain the same reference body, and have at least 600 seconds before its current patch ends.
+`--continuum-coast-canary` enables a bounded KSP 1.12.5 integration canary. It first observes the same active vessel unpacked at rate zero for three updates, requests on-rails warp, then admits it only after KSP has packed it in a stable elliptic orbit at a positive warp rate. The orbit must remain above the reference body's atmosphere, remain inside its sphere of influence, and have no next patch inside the 600-second forecast.
 
 The adapter captures one actual KSP orbit state at the current universal time. A `CoastingEngine` advances its own frontier 600 seconds on a background worker before substitution begins. KSP does not wait for that future time: each packed-orbit presentation callback samples the immutable Continuum trajectory at the current KSP universal time. Sampling a presentation time does not advance or reintegrate the engine frontier.
 

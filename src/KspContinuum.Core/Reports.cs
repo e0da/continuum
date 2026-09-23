@@ -137,6 +137,7 @@ namespace KspContinuum
             maximumPositionErrorMeters, maximumVelocityErrorMetersPerSecond,
             maximumInjectedPositionErrorMeters, maximumInjectedVelocityErrorMetersPerSecond,
             maximumDriverPositionErrorMeters, maximumDriverVelocityErrorMetersPerSecond;
+        public int admittedWarpRateIndex;
         public long candidateDriverCalls, suppressedStockPropagations, stockFallbacks, errors;
         public string admittedSphereOfInfluence, admittedPatchEndUniversalTime, admittedPatchEndTransition;
         public bool forecastCompletedBeforePresentation, frontierUnchangedByPresentation,

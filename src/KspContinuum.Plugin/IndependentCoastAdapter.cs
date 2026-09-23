@@ -45,7 +45,11 @@ namespace KspContinuum
         Task<CoastingAdvanceResult> forecast;
         Orbit stockReference;
         Vessel vessel;
+        Vessel warpCandidate;
         CelestialBody referenceBody;
+        CelestialBody warpCandidateBody;
+        int stableUnpackedFrames;
+        bool warpRequested;
         bool requested, active, failed, stopRequested, finished, exported, quitAfter;
 
         public void Start()
@@ -94,12 +98,25 @@ namespace KspContinuum
         {
             Vessel current = FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
             if (current == null || current.orbit == null || current.mainBody == null ||
-                current.situation != Vessel.Situations.ORBITING) return;
-            if (!current.packed)
+                current.situation != Vessel.Situations.ORBITING)
             {
-                if (TimeWarp.CurrentRateIndex == 0) TimeWarp.SetRate(1, true);
+                ResetWarpCandidate();
                 return;
             }
+            if (!warpRequested)
+            {
+                if (!ReadyForWarp(current)) { ResetWarpCandidate(); return; }
+                if (current != warpCandidate || current.mainBody != warpCandidateBody)
+                { warpCandidate = current; warpCandidateBody = current.mainBody; stableUnpackedFrames = 0; }
+                stableUnpackedFrames++;
+                if (stableUnpackedFrames >= 3)
+                { TimeWarp.SetRate(1, true); warpRequested = true; }
+                return;
+            }
+            if (current != warpCandidate || current.mainBody != warpCandidateBody)
+            { ResetWarpCandidate(); return; }
+            if (TimeWarp.CurrentRateIndex <= 0 || TimeWarp.WarpMode != TimeWarp.Modes.HIGH ||
+                !TimeWarp.CurrentRateIsTargetRate) return;
             if (!Eligible(current)) return;
             double ut = Planetarium.GetUniversalTime();
             double atmosphere = current.mainBody.atmosphere ? current.mainBody.atmosphereDepth : 0;
@@ -129,7 +146,21 @@ namespace KspContinuum
             stockReference.UpdateFromStateVectors(position, velocity, referenceBody, ut);
             report.seedUniversalTime = ut; report.vesselId = vessel.id.ToString("D");
             report.referenceBody = referenceBody.bodyName; report.status = "forecasting";
+            report.admittedWarpRateIndex = TimeWarp.CurrentRateIndex;
             forecast = Task.Run(() => engine.AdvanceTo(ut + ForecastSeconds, 3600));
+        }
+
+        static bool ReadyForWarp(Vessel candidate)
+        {
+            OrbitDriver driver = candidate == null ? null : candidate.orbitDriver;
+            return candidate != null && candidate == FlightGlobals.ActiveVessel && candidate.loaded && !candidate.packed &&
+                !FlightDriver.Pause && TimeWarp.CurrentRateIndex == 0 && driver != null && DriverReady(driver) &&
+                driver.updateMode == OrbitDriver.UpdateMode.TRACK_Phys;
+        }
+
+        void ResetWarpCandidate()
+        {
+            warpCandidate = null; warpCandidateBody = null; stableUnpackedFrames = 0; warpRequested = false;
         }
 
         void AdmitForecast()
@@ -236,7 +267,8 @@ namespace KspContinuum
         {
             OrbitDriver driver = candidate == null ? null : candidate.orbitDriver;
             return candidate != null && candidate == FlightGlobals.ActiveVessel && candidate.loaded && candidate.packed &&
-                !FlightDriver.Pause && driver != null && DriverReady(driver) &&
+                !FlightDriver.Pause && TimeWarp.CurrentRateIndex > 0 && TimeWarp.WarpMode == TimeWarp.Modes.HIGH &&
+                driver != null && DriverReady(driver) &&
                 driver.updateMode == OrbitDriver.UpdateMode.UPDATE && candidate.orbit != null;
         }
 
