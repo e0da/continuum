@@ -108,7 +108,9 @@ static class Program
         marker.summary = summary;
         var report = new ProbeReport { markers = new[] { marker }, frames = new[] { new ProfileFrame {
             contextFrame = 10, markerFrame = 10, observedFrame = 11, contextAligned = true, wallMilliseconds = 16.7,
-            vesselStatus = "unavailable-no-active-vessel", parts = -1, vesselId = null } }, wallIntervals = distribution };
+            vesselStatus = "unavailable-no-active-vessel", parts = -1, vesselId = null } }, wallIntervals = distribution,
+            callbackAttribution = new CallbackAttributionReport { status = "observed", cleanupStatus = "removed-owned-patches",
+                callbacks = attributed } };
         using (JsonDocument json = JsonDocument.Parse(ReportJson.Encode(report)))
         {
             Check(json.RootElement.GetProperty("schema").GetString() == "ksp-continuum-markers/v2");
@@ -116,6 +118,9 @@ static class Program
             Check(json.RootElement.GetProperty("frames")[0].GetProperty("vesselId").ValueKind == JsonValueKind.Null);
             Check(!json.RootElement.GetProperty("markers")[0].GetProperty("available")[2].GetBoolean());
             Near(json.RootElement.GetProperty("markers")[0].GetProperty("summary").GetProperty("observedMilliseconds").GetProperty("mean").GetDouble(), 2);
+            Check(json.RootElement.GetProperty("callbackAttribution").GetProperty("schema").GetString() ==
+                "ksp-continuum-fixed-callback-attribution/v1");
+            Check(json.RootElement.GetProperty("callbackAttribution").GetProperty("callbacks")[0].GetProperty("declaringType").GetString() == "Slow");
         }
         var interrupted = new ProbeReport { requestedFrames = 3, frames = new[] {
             new ProfileFrame { wallMilliseconds = 10, contextAligned = true },
