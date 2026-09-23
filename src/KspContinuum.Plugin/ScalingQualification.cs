@@ -216,6 +216,14 @@ namespace KspContinuum
                 report.dryBuoyancy.cleanupStatus != "restored-owned-enables" || report.dryBuoyancy.ownedComponents < 1 ||
                 report.dryBuoyancy.fixedSteps < 1 || report.dryBuoyancy.bypassed < 1 || report.dryBuoyancy.errors != 0))
             { reason = "dry-buoyancy-strategy-invalid"; return false; }
+            if (report.sleepingIsland != null && (report.sleepingIsland.status != "complete" ||
+                report.sleepingIsland.cleanupStatus != "restored-joints-and-activity" ||
+                report.sleepingIsland.admittedDynamicBodies < 2 || report.sleepingIsland.admittedJoints < 1 ||
+                report.sleepingIsland.fixedSteps < 1 || report.sleepingIsland.forcedSleeps < 1 ||
+                report.sleepingIsland.validationPasses < 1 || report.sleepingIsland.maximumInternalPositionDriftMeters > .001 ||
+                !report.sleepingIsland.sourceTopologyStable || !report.sleepingIsland.jointsRestored ||
+                !report.sleepingIsland.bodyActivityRestored || report.sleepingIsland.fallbacks != 0 || report.sleepingIsland.errors != 0))
+            { reason = "sleeping-island-strategy-invalid"; return false; }
             return true;
         }
 

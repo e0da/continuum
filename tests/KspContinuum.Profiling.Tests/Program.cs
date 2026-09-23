@@ -161,6 +161,18 @@ static class Program
         candidateProfile.playerLoop.scopes[0].droppedSamples = 1;
         Check(Reject(() => ProfileComparisonSummary.Compare(stockProfile, candidateProfile, structuralExpected)));
         Check(Reject(() => ProfileComparisonSummary.Compare(stockProfile, candidateProfile, null)));
+        var sleeping = new SleepingIslandReport { status = "complete", vesselId = "vessel", admittedParts = 196,
+            admittedBodies = 110, admittedDynamicBodies = 110, admittedJoints = 144, admittedColliders = 328,
+            fixedSteps = 218, forcedSleeps = 23980, validationPasses = 15,
+            maximumInternalPositionDriftMeters = .0001, sourceTopologyStable = true,
+            jointsRestored = true, bodyActivityRestored = true, cleanupStatus = "restored-joints-and-activity" };
+        using (JsonDocument json = JsonDocument.Parse(ReportJson.Encode(new ProbeReport { sleepingIsland = sleeping })))
+        {
+            JsonElement row = json.RootElement.GetProperty("sleepingIsland");
+            Check(row.GetProperty("schema").GetString() == "ksp-continuum-sleeping-island/v1");
+            Check(row.GetProperty("admittedBodies").GetInt32() == 110 && row.GetProperty("fixedSteps").GetInt64() == 218);
+            Check(row.GetProperty("sourceTopologyStable").GetBoolean() && row.GetProperty("jointsRestored").GetBoolean());
+        }
         var forceContext = new ForceObservationContext("11111111-1111-1111-1111-111111111111",
             "22222222-2222-2222-2222-222222222222", "FLIGHT", "frame-1", 10, -42, 1, 1, 1, 0, 100, 1, .02, new Vec());
         var forcePart = new ForcePartObservation(1, 0, -8, -9, new Vec(1, 2, 3), new Vec(), new Vec(4, 5, 6),

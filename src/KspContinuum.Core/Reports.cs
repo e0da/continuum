@@ -111,6 +111,19 @@ namespace KspContinuum
         public PhysicsSubstitutionCanaryReport substitutionCanary;
         public CallbackAttributionReport callbackAttribution;
         public DryBuoyancyReport dryBuoyancy;
+        public SleepingIslandReport sleepingIsland;
+    }
+
+    [Serializable] public sealed class SleepingIslandReport
+    {
+        public string schema = "ksp-continuum-sleeping-island/v1";
+        public string status = "not-started";
+        public string limitation = "Opt-in high-vacuum quiet-vessel experiment. It keeps the captured rigidbody/joint/collider graph intact and forces captured dynamic rigidbodies asleep immediately before native physics. It is not a compound body, contact, thrust, staging, docking, robotics, or gameplay implementation.";
+        public string reason, vesselId, installationStatus = "not-installed", cleanupStatus = "not-attempted";
+        public int admittedParts, admittedBodies, admittedDynamicBodies, admittedJoints, admittedColliders;
+        public long fixedSteps, forcedSleeps, validationPasses, fallbacks, errors;
+        public double maximumInternalPositionDriftMeters;
+        public bool sourceTopologyStable, jointsRestored, bodyActivityRestored;
     }
 
     [Serializable] public sealed class DryBuoyancyReport

@@ -26,6 +26,7 @@ namespace KspContinuum
         PartForceObservation partForces;
         FixedCallbackAttribution callbackAttribution;
         DryBuoyancyRuntime dryBuoyancy;
+        SleepingIslandRuntime sleepingIsland;
         Action<ProbeReport> completion;
         bool started, finished;
         int completed;
@@ -92,12 +93,18 @@ namespace KspContinuum
                     dryBuoyancy = new DryBuoyancyRuntime(requestedDryStrategy); dryBuoyancy.Start(); report.dryBuoyancy = dryBuoyancy.Report;
                     if (dryBuoyancy.Report.status != "installed") throw new InvalidOperationException("Dry buoyancy admission did not install: " + dryBuoyancy.Report.status);
                 }
-                if (forcePlayerLoop || Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null || dryBuoyancy != null)
+                if (Array.IndexOf(arguments, "--continuum-sleeping-island") >= 0)
+                {
+                    sleepingIsland = new SleepingIslandRuntime(); sleepingIsland.Start(); report.sleepingIsland = sleepingIsland.Report;
+                    if (sleepingIsland.Report.status != "installed") throw new InvalidOperationException("Sleeping-island admission did not install: " + sleepingIsland.Report.status);
+                }
+                if (forcePlayerLoop || Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null || dryBuoyancy != null || sleepingIsland != null)
                 {
                     IPlayerLoopBracketObserver observer = writerCensus == null ? null : writerCensus.Census;
                     if (substitutionCanary != null) observer = new CompositePlayerLoopObserver(observer, substitutionCanary);
                     if (callbackAttribution != null) observer = new CompositePlayerLoopObserver(observer, callbackAttribution);
                     if (dryBuoyancy != null) observer = new CompositePlayerLoopObserver(observer, dryBuoyancy);
+                    if (sleepingIsland != null) observer = new CompositePlayerLoopObserver(observer, sleepingIsland);
                     playerLoop = new PlayerLoopTiming(observer); playerLoop.Start(); report.playerLoop = playerLoop.Report;
                     if (substitutionCanary != null) substitutionCanary.Start();
                 }
@@ -251,6 +258,14 @@ namespace KspContinuum
                 if (dryBuoyancy.Report.cleanupStatus == "cleanup-error") errors.Add("DryBuoyancy: cleanup-error");
                 if (dryBuoyancy.Report.status != "complete") errors.Add("DryBuoyancy: " + dryBuoyancy.Report.status);
                 dryBuoyancy = null;
+            }
+            if (sleepingIsland != null)
+            {
+                try { sleepingIsland.Dispose(); }
+                catch (Exception error) { errors.Add("SleepingIsland: " + error.GetType().Name); }
+                if (sleepingIsland.Report.cleanupStatus == "cleanup-error") errors.Add("SleepingIsland: cleanup-error");
+                if (sleepingIsland.Report.status != "complete") errors.Add("SleepingIsland: " + sleepingIsland.Report.status);
+                sleepingIsland = null;
             }
             if (partForces != null)
             {
