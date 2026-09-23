@@ -19,6 +19,8 @@ namespace KspContinuum
         {
             string[] arguments = Environment.GetCommandLineArgs();
             if (Array.IndexOf(arguments, "--continuum-scale-profile") < 0) return;
+            if (Array.IndexOf(arguments, "--continuum-live-setdrag-provider") >= 0 &&
+                Array.IndexOf(arguments, "--continuum-setdrag-quit-after-qualification") >= 0) return;
             try
             {
                 directory = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "KspContinuum", "PluginData",

@@ -153,6 +153,8 @@ that inlines this reduction in a broader `UpdateAerodynamics` replacement can by
 bounded provider makes no compatibility claim for that configuration.
 Add `--continuum-setdrag-quit-after-qualification` for an automated run that exits with code 0 only after a complete
 receipt and verified patch removal; abstention or cleanup failure exits with code 2.
+When combined with the existing scale-checkpoint loader flags, this provider-owned termination mode leaves the orbital
+scale profiler inactive so it cannot overwrite the powered-descent qualification's exit status during teardown.
 
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
