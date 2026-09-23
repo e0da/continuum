@@ -23,7 +23,7 @@ namespace KspContinuum
         MethodInfo target;
         AeroSetDragSubstitutionReport report;
         bool requested, active, exported, quitAfterQualification;
-        int patchGraphFrame = -1;
+        float patchGraphFixedTime = float.NaN;
 
         struct CallState
         {
@@ -66,7 +66,7 @@ namespace KspContinuum
             try
             {
                 long started = Stopwatch.GetTimestamp();
-                if (!owner.TargetOwnedForFrame())
+                if (!owner.TargetOwnedForStep())
                 { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
                 __state.Candidate = Calculate(__instance, vector, machNumber);
                 CubeData(__instance) = __state.Candidate;
@@ -169,13 +169,13 @@ namespace KspContinuum
                 patches.Transpilers.Count == 0 && patches.Finalizers.Count == 0 &&
                 patches.Prefixes[0].owner == Owner && patches.Postfixes[0].owner == Owner;
         }
-        bool TargetOwnedForFrame()
+        bool TargetOwnedForStep()
         {
-            int frame = Time.frameCount;
-            if (frame == patchGraphFrame) return true;
+            float fixedTime = Time.fixedTime;
+            if (fixedTime == patchGraphFixedTime) return true;
             report.patchGraphInspections++;
             if (!TargetStillOwned(target)) return false;
-            patchGraphFrame = frame; return true;
+            patchGraphFixedTime = fixedTime; return true;
         }
         void Stop(string reason)
         {
