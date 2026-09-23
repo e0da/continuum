@@ -201,5 +201,11 @@ topology replacement is outside this experiment. Stock callbacks are restored be
 The sweep can auto-run from the qualification CLI or be started and polled through the loopback control plane without
 quitting KSP.
 
+For a repeatable control-plane host, launch with `--continuum-experiment-host`,
+`--continuum-scale-save=SAVE`, `--continuum-scale-checkpoint=CHECKPOINT`, and
+`--continuum-control-port=47771`. The persistent loader selects the immutable checkpoint, but the scaling component
+remains idle and never quits KSP. Send the sweep start command after Flight is ready; subsequent starts reuse the live
+vessel and create a new result directory.
+
 This boundary probe is not Continuum's permanent object-callback architecture. The follow-up is vessel- or island-level
 domain selection over Continuum-owned state, with KSP reconciliation at explicit boundaries.

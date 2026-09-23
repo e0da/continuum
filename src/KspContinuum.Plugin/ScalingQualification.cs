@@ -64,6 +64,7 @@ namespace KspContinuum
         public void Start()
         {
             string[] arguments = Environment.GetCommandLineArgs();
+            if (Array.IndexOf(arguments, "--continuum-experiment-host") >= 0) { sweepState = "idle"; return; }
             if (Array.IndexOf(arguments, "--continuum-scale-profile") < 0) return;
             if (Array.IndexOf(arguments, "--continuum-live-setdrag-provider") >= 0 &&
                 Array.IndexOf(arguments, "--continuum-setdrag-quit-after-qualification") >= 0) return;
