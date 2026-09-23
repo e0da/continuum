@@ -16,7 +16,7 @@ The blocked layout exposes fixed-width contiguous field lanes to the optimizer, 
 
 ## Observation
 
-One otherwise-idle M4 Max run used native `aarch64` code, 16 Rayon threads, 15 samples per case, and rotating strategy order. Every implementation produced bitwise-identical output. The shortest accepted timed window was 11.05 ms.
+One otherwise-idle M4 Max run used native `aarch64` code, 16 Rayon threads, 15 samples per case, and rotating strategy order. Every implementation produced bitwise-identical output. Calibration targeted at least 10 ms while the hard acceptance floor recorded as `minimumRequestedWindowNs` was 5 ms; the shortest accepted timed window was 9.94 ms.
 
 | Bodies | AoS scalar | SoA scalar | Blocked scalar | Blocked Rayon | Blocked / AoS | Rayon / AoS |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
