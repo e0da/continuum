@@ -11,6 +11,7 @@ namespace KspContinuum
     public sealed class AeroSetDragProviderQualification : MonoBehaviour
     {
         const string Flag = "--continuum-live-setdrag-provider";
+        const string QuitFlag = "--continuum-setdrag-quit-after-qualification";
         const string Owner = "continuum.live-setdrag-provider";
         const int RequiredShadowMatches = 128;
         const int MaximumSubstitutions = 256;
@@ -20,7 +21,7 @@ namespace KspContinuum
         Harmony harmony;
         MethodInfo target;
         AeroSetDragSubstitutionReport report;
-        bool requested, active, exported;
+        bool requested, active, exported, quitAfterQualification;
 
         struct CallState
         {
@@ -33,6 +34,7 @@ namespace KspContinuum
         {
             if (Array.IndexOf(Environment.GetCommandLineArgs(), Flag) < 0) return;
             requested = true;
+            quitAfterQualification = Array.IndexOf(Environment.GetCommandLineArgs(), QuitFlag) >= 0;
             report = new AeroSetDragSubstitutionReport {
                 requiredShadowMatches = RequiredShadowMatches, maximumSubstitutions = MaximumSubstitutions,
                 status = "active"
@@ -50,7 +52,7 @@ namespace KspContinuum
                     prefix: new HarmonyMethod(AccessTools.DeclaredMethod(typeof(AeroSetDragProviderQualification), "Prefix"), Priority.First),
                     postfix: new HarmonyMethod(AccessTools.DeclaredMethod(typeof(AeroSetDragProviderQualification), "Postfix"), Priority.Last));
             }
-            catch (Exception error) { Stop("installation-failed:" + error.GetType().Name); Cleanup(); Export(); }
+            catch (Exception error) { Stop("installation-failed:" + error.GetType().Name); Finish(); }
         }
 
         static bool Prefix(DragCubeList __instance, Vector3 vector, float machNumber, out CallState __state)
@@ -163,11 +165,32 @@ namespace KspContinuum
             if (!active) return; active = false; report.reason = reason;
             report.status = reason == "bounded-substitution-limit-reached" ? "complete" : "abstained";
         }
-        public void Update() { if (requested && !active && !exported) { Cleanup(); Export(); } }
+        public void Update() { if (requested && !active && !exported) Finish(); }
+        void Finish()
+        {
+            Cleanup(); Export();
+            if (quitAfterQualification)
+                Application.Quit(report != null && report.status == "complete" &&
+                    report.cleanupStatus == "removed-owned-patches" ? 0 : 2);
+        }
         void Cleanup()
         {
-            if (harmony != null) { harmony.UnpatchAll(Owner); harmony = null; }
+            bool registered = harmony != null;
+            if (harmony != null) harmony.UnpatchAll(Owner);
+            bool removed = target == null || !HasOwner(target);
+            if (report != null) report.RecordCleanup(registered, removed);
+            harmony = null;
             if (ReferenceEquals(instance, this)) instance = null;
+        }
+        static bool HasOwner(MethodBase method)
+        {
+            Patches patches = Harmony.GetPatchInfo(method);
+            if (patches == null) return false;
+            foreach (Patch patch in patches.Prefixes) if (patch.owner == Owner) return true;
+            foreach (Patch patch in patches.Postfixes) if (patch.owner == Owner) return true;
+            foreach (Patch patch in patches.Transpilers) if (patch.owner == Owner) return true;
+            foreach (Patch patch in patches.Finalizers) if (patch.owner == Owner) return true;
+            return false;
         }
         void Export()
         {

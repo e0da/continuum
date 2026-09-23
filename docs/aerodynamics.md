@@ -146,11 +146,13 @@ area, area drag, depth, cross-sectional area, exposed area, drag coefficient, an
 curve evaluation; the portable kernel receives the resulting samples and performs the allocation-free six-face
 reduction. The opt-in `--continuum-live-setdrag-provider` addon first compares 128 complete candidate outputs with stock,
 then suppresses and replaces exactly 256 original `SetDrag` calls. Its receipt records both counts, maximum relative
-error, and separately timed candidate and stock windows. Any mismatch, nonfinite result, unsupported KSP version, or
+error, separately timed candidate and stock windows, and patch-removal readback. Any mismatch, nonfinite result, unsupported KSP version, or
 competing patch on `SetDrag` stops substitution and leaves subsequent calls to stock. `UpdateAerodynamics`, body-drag
 and body-lift application, ocean handling, and Unity integration remain stock-owned. A mod such as KSP Community Fixes
 that inlines this reduction in a broader `UpdateAerodynamics` replacement can bypass the `SetDrag` seam entirely; the
 bounded provider makes no compatibility claim for that configuration.
+Add `--continuum-setdrag-quit-after-qualification` for an automated run that exits with code 0 only after a complete
+receipt and verified patch removal; abstention or cleanup failure exits with code 2.
 
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.

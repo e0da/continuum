@@ -35,10 +35,18 @@ static class Program
         Check(ReportJson.Encode(report).Contains("\"unityIntegrationRemainedAuthoritative\":true"));
         var setDrag = new AeroSetDragSubstitutionReport { status = "complete", matchedCompleteOutputs = 128,
             suppressedOriginalCalls = 256, maximumRelativeError = 1e-6 };
+        Check(setDrag.RecordCleanup(true, true) && setDrag.cleanupStatus == "removed-owned-patches" &&
+            setDrag.status == "complete");
         string encoded = ReportJson.Encode(setDrag);
         Check(encoded.Contains("\"schema\":\"ksp-continuum-set-drag-substitution/v1\"") &&
             encoded.Contains("\"suppressedOriginalCalls\":256") &&
+            encoded.Contains("\"cleanupStatus\":\"removed-owned-patches\"") &&
             encoded.Contains("\"stockForceApplicationRemainedAuthoritative\":true"));
+        var cleanupFailure = new AeroSetDragSubstitutionReport { status = "complete",
+            reason = "bounded-substitution-limit-reached" };
+        Check(!cleanupFailure.RecordCleanup(true, false) && cleanupFailure.cleanupStatus == "failed" &&
+            cleanupFailure.status == "abstained" && cleanupFailure.reason == "cleanup-failed");
+        Check(cleanupFailure.RecordCleanup(false, false) == false && cleanupFailure.cleanupStatus == "failed");
         Console.WriteLine("PASS " + checks + " aero force substitution assertions");
     }
 }
