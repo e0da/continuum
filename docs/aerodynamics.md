@@ -144,9 +144,11 @@ passing development/held-out capture-v3 qualification gate. Body lift remains ex
 `AeroCompleteSetDrag` extends that bounded reduction to every `DragCubeList.CubeData` output: drag vector, lift force,
 area, area drag, depth, cross-sectional area, exposed area, drag coefficient, and taper. Unity remains responsible for
 curve evaluation; the portable kernel receives the resulting samples and performs the allocation-free six-face
-reduction. The opt-in `--continuum-live-setdrag-provider` addon first compares 128 complete candidate outputs with stock,
-then suppresses and replaces exactly 256 original `SetDrag` calls. Its receipt records both counts, maximum relative
-error, separately timed candidate and stock windows, and patch-removal readback. Any mismatch, nonfinite result, unsupported KSP version, or
+reduction. The opt-in `--continuum-live-setdrag-provider` addon warms 32 complete candidate/stock comparisons,
+then compares and times 256 inputs before suppressing and replacing exactly 256 original `SetDrag` calls. Schema v2
+records `Stopwatch.Frequency` plus
+patch-graph inspection count. Its `maximumRelativeError` field is the maximum absolute error normalized by
+`max(1, abs(stock))`, so values below one use an absolute-error scale. Any mismatch, nonfinite result, unsupported KSP version, or
 competing patch on `SetDrag` stops substitution and leaves subsequent calls to stock. `UpdateAerodynamics`, body-drag
 and body-lift application, ocean handling, and Unity integration remain stock-owned. A mod such as KSP Community Fixes
 that inlines this reduction in a broader `UpdateAerodynamics` replacement can bypass the `SetDrag` seam entirely; the
@@ -170,13 +172,40 @@ exit 0, and the same unchanged checkpoint. Its package SHA-256 was
 `c3178570a688210bb0ab0a014f517a3553277ac77affcfe36d001e2421281ea7`; its installed plugin SHA-256 was
 `d9bb3e67ff125716b9fef853a57b5179b45dbda9d432ba97292cf3125cab65d6`.
 
-This first replacement is slower in its measured section. The final run recorded 63,631 candidate ticks over 384
+The first replacement was slower in its measured section. The final run recorded 63,631 candidate ticks over 384
 calls and 15,790 stock ticks over 128 shadow calls: 165.71 versus 123.36 ticks per call, or about 1.34 times stock.
 The precursor run observed 166.73 versus 123.61 ticks per call, or about 1.35 times stock. Candidate and stock samples
 come from different phases and counts, include first-use and JIT effects, and exclude surrounding publication and
 patch-graph validation. They are diagnostic method-section averages, not a controlled end-to-end ratio, frame-rate
 result, or full-provider measurement. The useful result is real suppression with complete-output parity and an exact
 optimization baseline; no speedup is claimed.
+
+The strategy qualification separately executes admission-boundary and guarded direct reductions for each of 256 warmed
+inputs, alternating their order, then executes stock last so stock remains authoritative during replay. Each direct
+window includes curve capture, six-face reduction, fail-closed validation, and `CubeData` publication. Guarded time adds
+the aligned patch-graph readback actually performed for that input; it excludes small wrapper, stopwatch, and accounting
+costs. Harmony dispatch, postfix comparison, receipt work, one-time authority admission/exit checks, the rest of
+`FlightIntegrator`, and rendering remain excluded. This is a bounded method comparison, not an FPS or complete
+physics-tick measurement. The later 256-call authority window intentionally freezes the provider topology after an
+admission check and checks it again at exit; it cannot detect a patch that appears and disappears inside that window.
+
+The installed run used source `31c91896caaa6f61080679b1d9bf68fee5bf5fa0`, package SHA-256
+`d74931464fe8752a36269003b5416baf5261b24b7220ab3198df0c21294157c7`, and plugin SHA-256
+`aa70ef06576ce28f15daa5fdddf94de88d6ce295ae15e0d42abcbc38cc98c693`. It exited 0 after 288
+complete-output matches, 256 suppressed originals, zero fallbacks, successful admission and exit attestations, and
+verified cleanup. Maximum normalized absolute error was `4.14396e-6`. At a 10 MHz stopwatch frequency, 256 separately
+executed admission-boundary calls used 2,646 ticks (1.0336 microseconds each), stock used 4,812 ticks (1.8797
+microseconds each), and guarded calls used 17,355 ticks (6.7793 microseconds each), including 15,217 aligned graph
+ticks. The admission-boundary calculation and publication was about 45.0% faster than stock at this seam. This does not
+establish a fixed-tick or frame-rate gain; the next useful boundary is a coarse Continuum-owned batch rather than more
+per-part callback tuning.
+
+The installed Harmony 2.2.1 implementation of
+[`GetPatchInfo`](https://github.com/pardeike/Harmony/blob/v2.2.1.0/Harmony/Public/PatchProcessor.cs#L202-L208)
+locks shared state, whose
+[`GetPatchInfo`](https://github.com/pardeike/Harmony/blob/v2.2.1.0/Harmony/Internal/HarmonySharedState.cs#L114-L121)
+deserializes the stored patch bytes before the public API constructs the returned patch arrays. The measured 15,217
+graph ticks explain most of the guarded strategy's cost without justifying private Harmony-state coupling.
 
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
