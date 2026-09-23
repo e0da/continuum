@@ -282,6 +282,8 @@ namespace KspContinuum
                     {
                         TimeWarp.SetRate(0, true);
                         if (!SetWarpMode(TimeWarp.Modes.HIGH)) { code = 2; resetFailed = true; }
+                        if (TimeWarp.CurrentRateIndex != 0 || TimeWarp.CurrentRate != 1 || TimeWarp.WarpMode != TimeWarp.Modes.HIGH)
+                        { code = 2; resetFailed = true; }
                     }
                     else { code = 2; resetFailed = true; }
                 }
