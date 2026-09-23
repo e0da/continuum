@@ -18,6 +18,7 @@ namespace KspContinuum
         float eligibleSince;
         int expectedParts = -1;
         bool physicsWarp, atmosphericStress, warpRequested;
+        Guid? atmosphericVesselId;
         float warpRequestedAt;
         int stableWarpFrames;
         const float RequestedPhysicsWarp = 4;
@@ -67,7 +68,7 @@ namespace KspContinuum
                 "Single settled stock-vessel orbital window.\n") +
                 "PlayerLoop scopes overlap and must not be summed. The active fixed parent owns strategy comparison.\n" +
                 "Experimental strategies are opt-in and do not establish complete stock semantics.\n" +
-                (atmosphericStress ? "Atmospheric stress admits a loaded descending Kerbin vessel and records topology changes instead of rejecting them.\n" : "") +
+                (atmosphericStress ? "Atmospheric stress admits a loaded Kerbin vessel and records topology changes instead of rejecting them; altitude is observed only at admission.\n" : "") +
                 (physicsWarp ? "Requested 4x LOW-mode physics warp before capture; rate is reset before exit.\n" : ""));
         }
 
@@ -132,6 +133,7 @@ namespace KspContinuum
             if (Time.realtimeSinceStartup - eligibleSince < (atmosphericStress ? .5f : 10f)) return;
             if (physicsWarp)
             {
+                if (atmosphericStress) atmosphericVesselId = vessel.id;
                 if (!SetWarpMode(TimeWarp.Modes.LOW))
                 { Finish("physics-warp-mode-rejected", 2); return; }
                 TimeWarp.SetRate(3, true); warpRequested = true; warpRequestedAt = Time.realtimeSinceStartup;
@@ -268,14 +270,17 @@ namespace KspContinuum
                 vessel.altitude >= 0 && vessel.altitude < body.atmosphereDepth;
         }
 
-        static bool AtmosphericStressComplete(ProbeReport report, out string reason)
+        bool AtmosphericStressComplete(ProbeReport report, out string reason)
         {
             reason = "verified-atmospheric-stress-capture";
             if (report == null || report.status != "complete" || report.completedFrames != report.requestedFrames ||
                 report.frames == null || report.frames.Length == 0)
             { reason = "incomplete-capture"; return false; }
+            string vesselId = atmosphericVesselId.HasValue ? atmosphericVesselId.Value.ToString("D") : null;
             foreach (ProfileFrame frame in report.frames)
-                if (frame == null || frame.warpRate != RequestedPhysicsWarp ||
+                if (frame == null || frame.vesselId != vesselId || frame.body != "Kerbin" ||
+                    frame.loaded != true || frame.packed != false || frame.paused != false ||
+                    frame.warpRate != RequestedPhysicsWarp ||
                     !FinitePositive(frame.fixedDeltaSeconds) || !FinitePositive(frame.timeScale) ||
                     !frame.universalTime.HasValue || double.IsNaN(frame.universalTime.Value) ||
                     double.IsInfinity(frame.universalTime.Value))
