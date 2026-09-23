@@ -17,9 +17,16 @@ namespace KspContinuum
         const string QuitFlag = "--continuum-coast-quit-after-qualification";
         const string CadencePrefix = "--continuum-coast-publication-seconds=";
         const string DirectCadenceFlag = "--continuum-coast-direct-presentation";
+        const string EventRadiusPrefix = "--continuum-coast-event-radius-meters=";
+        const string EventDirectionPrefix = "--continuum-coast-event-direction=";
+        const string EventHorizonPrefix = "--continuum-coast-event-horizon-seconds=";
+        const string EventGuardPrefix = "--continuum-coast-event-guard-seconds=";
         const string Owner = "continuum.independent-coast-adapter";
         const int MaximumCalls = 256;
         const double ForecastSeconds = 600;
+        const double DefaultEventHorizonSeconds = 7200;
+        const double DefaultEventGuardSeconds = 5;
+        const double EventTimeToleranceSeconds = 1e-6;
         const double PositionToleranceMeters = 1;
         const double VelocityToleranceMetersPerSecond = .01;
         static IndependentCoastAdapter instance;
@@ -42,13 +49,19 @@ namespace KspContinuum
             public CoastingBody Body;
         }
 
+        sealed class ForecastResult
+        {
+            public CoastingAdvanceResult Advance;
+            public RadiusCrossingEvent Event;
+        }
+
         Harmony harmony;
         MethodInfo driverTarget, orbitTarget;
         CoastingAdapterReport report;
         CoastingEngine engine;
         CoastPresentationCadence cadence;
         Func<double, CoastingBody> sampleBody;
-        Task<CoastingAdvanceResult> forecast;
+        Task<ForecastResult> forecast;
         Orbit stockReference;
         Vessel vessel;
         Vessel warpCandidate;
@@ -56,6 +69,10 @@ namespace KspContinuum
         CelestialBody warpCandidateBody;
         int stableUnpackedFrames;
         bool warpRequested;
+        bool eventConfigured;
+        double eventRadius, eventHorizon, eventGuard;
+        RadiusCrossingDirection eventDirection;
+        RadiusCrossingEvent predictedEvent;
         bool requested, active, failed, stopRequested, finished, exported, quitAfter;
         long callbackTicks, maximumCallbackTicks, sampleTicks, maximumSampleTicks,
             seedTicks, maximumSeedTicks, residualTicks, maximumResidualTicks;
@@ -70,6 +87,7 @@ namespace KspContinuum
             {
                 cadence = Array.IndexOf(arguments, DirectCadenceFlag) >= 0 ?
                     CoastPresentationCadence.Direct() : new CoastPresentationCadence(ParseCadence(arguments));
+                ParseEventConfiguration(arguments);
                 if (Versioning.version_major != 1 || Versioning.version_minor != 12 || Versioning.Revision != 5)
                     throw new InvalidOperationException("KSP 1.12.5 is required.");
                 driverTarget = AccessTools.DeclaredMethod(typeof(OrbitDriver), "UpdateOrbit", new[] { typeof(bool) });
@@ -93,10 +111,18 @@ namespace KspContinuum
             if (!requested || finished) return;
             try
             {
-                if (failed) { Finish(); return; }
+                if (failed) { StopWarpAfterFailure(); Finish(); return; }
                 if (stopRequested) { ReleaseToStock(); Finish(); return; }
                 if (!active && engine == null) TrySeed();
                 if (!active && forecast != null && forecast.IsCompleted) AdmitForecast();
+                if (active && predictedEvent != null)
+                {
+                    double now = Planetarium.GetUniversalTime();
+                    CoastingEventGuardState guard = CoastingEventScheduler.ClassifyGuard(
+                        now, predictedEvent.TimeSeconds, eventGuard);
+                    if (guard == CoastingEventGuardState.ReachedOrPassed) { MissedEvent(now); return; }
+                    if (guard == CoastingEventGuardState.GuardOpen) { StopForEvent(now); return; }
+                }
                 if (active && (!Eligible(vessel) || vessel.mainBody != referenceBody || vessel.orbit.referenceBody != referenceBody))
                     Stop("admission-ended");
                 if (active && !TargetsOwned()) Stop("patch-graph-changed");
@@ -130,7 +156,8 @@ namespace KspContinuum
             double ut = Planetarium.GetUniversalTime();
             double atmosphere = current.mainBody.atmosphere ? current.mainBody.atmosphereDepth : 0;
             bool hasNextPatch = current.orbit.nextPatch != null;
-            bool nextPatchAfterForecast = Finite(current.orbit.EndUT) && current.orbit.EndUT > ut + ForecastSeconds;
+            double requiredHorizon = eventConfigured ? eventHorizon : ForecastSeconds;
+            bool nextPatchAfterForecast = Finite(current.orbit.EndUT) && current.orbit.EndUT > ut + requiredHorizon;
             report.admittedEccentricity = current.orbit.eccentricity;
             report.admittedPeriapsisAltitude = current.orbit.PeA;
             report.admittedApoapsisRadius = current.orbit.ApR;
@@ -157,7 +184,22 @@ namespace KspContinuum
             report.seedUniversalTime = ut; report.vesselId = vessel.id.ToString("D");
             report.referenceBody = referenceBody.bodyName; report.status = "forecasting";
             report.admittedWarpRateIndex = TimeWarp.CurrentRateIndex;
-            forecast = Task.Run(() => engine.AdvanceTo(ut + ForecastSeconds, 3600));
+            if (eventConfigured)
+            {
+                report.eventConfigured = true; report.eventRadiusMeters = eventRadius;
+                report.eventDirection = eventDirection.ToString().ToLowerInvariant();
+                report.eventSearchHorizonSeconds = eventHorizon; report.eventGuardSeconds = eventGuard;
+                forecast = Task.Run(() =>
+                {
+                    RadiusCrossingEvent found = CoastingEventScheduler.FindFirst(engine,
+                        new RadiusCrossingSearch(ut, ut + eventHorizon, eventRadius, eventDirection,
+                            EventTimeToleranceSeconds));
+                    return found == null ? new ForecastResult() : new ForecastResult
+                    { Event = found, Advance = engine.AdvanceTo(found.TimeSeconds) };
+                });
+            }
+            else forecast = Task.Run(() => new ForecastResult
+            { Advance = engine.AdvanceTo(ut + ForecastSeconds, 3600) });
         }
 
         static bool ReadyForWarp(Vessel candidate)
@@ -177,14 +219,70 @@ namespace KspContinuum
         {
             if (forecast.IsFaulted || forecast.IsCanceled)
             { Fail("forecast-failed"); forecast = null; return; }
-            CoastingAdvanceResult result = forecast.Result;
-            report.forecastUniversalTime = result.Final.TimeSeconds;
-            report.forecastCompletedBeforePresentation = Planetarium.GetUniversalTime() < result.Final.TimeSeconds;
+            ForecastResult result = forecast.Result;
+            if (eventConfigured && result.Event == null)
+            { report.eventFound = false; Fail("no-radius-event-within-horizon"); forecast = null; StopWarpAfterFailure(); return; }
+            predictedEvent = result.Event;
+            if (predictedEvent != null)
+            {
+                report.eventFound = true; report.eventKind = predictedEvent.Kind;
+                report.eventUniversalTime = predictedEvent.TimeSeconds;
+                report.eventEvaluations = predictedEvent.Evaluations;
+                report.eventTimeToleranceSeconds = EventTimeToleranceSeconds;
+                report.eventRadiusErrorMeters = Math.Abs(Magnitude(predictedEvent.Body.Position) - eventRadius);
+                report.engineFrontierAtEvent = result.Advance.Final.TimeSeconds == predictedEvent.TimeSeconds;
+                if (!report.engineFrontierAtEvent)
+                { Fail("engine-frontier-missed-event"); forecast = null; StopWarpAfterFailure(); return; }
+            }
+            report.forecastUniversalTime = result.Advance.Final.TimeSeconds;
+            double now = Planetarium.GetUniversalTime();
+            report.forecastCompletedBeforePresentation = now < result.Advance.Final.TimeSeconds;
             if (!report.forecastCompletedBeforePresentation)
-            { Fail("forecast-did-not-lead-presentation"); forecast = null; return; }
+            { Fail("forecast-did-not-lead-presentation"); forecast = null; StopWarpAfterFailure(); return; }
+            if (predictedEvent != null)
+            {
+                CoastingEventGuardState guard = CoastingEventScheduler.ClassifyGuard(now, predictedEvent.TimeSeconds, eventGuard);
+                if (guard == CoastingEventGuardState.ReachedOrPassed)
+                { Fail("event-crossing-overshot-before-admission"); forecast = null; StopWarpAfterFailure(); return; }
+                if (guard == CoastingEventGuardState.GuardOpen)
+                { Fail("event-guard-window-missed"); forecast = null; StopWarpAfterFailure(); return; }
+            }
             report.authorityAdmissionAttested = TargetsOwned();
             if (!report.authorityAdmissionAttested) { Fail("authority-admission-failed"); forecast = null; return; }
             active = true; report.status = "active";
+        }
+
+        void StopForEvent(double ut)
+        {
+            report.warpStopRequested = true; report.warpStopRequestUniversalTime = ut;
+            report.warpRateIndexBeforeStopRequest = TimeWarp.CurrentRateIndex;
+            Stop("event-guard-reached");
+            ReleaseToStock();
+            try
+            {
+                TimeWarp.SetRate(0, true); report.warpRateIndexAfterStopRequest = TimeWarp.CurrentRateIndex;
+                if (report.warpRateIndexAfterStopRequest != 0) Fail("warp-stop-not-observed");
+            }
+            catch (Exception error) { Fail("warp-stop-failed:" + error.GetType().Name); }
+            Finish();
+        }
+
+        void MissedEvent(double ut)
+        {
+            Fail("event-crossing-overshot");
+            ReleaseToStock();
+            StopWarpAfterFailure(ut);
+            Finish();
+        }
+
+        void StopWarpAfterFailure(double? observedUniversalTime = null)
+        {
+            if (!eventConfigured || report.warpStopRequested) return;
+            report.warpStopRequested = true; report.warpStopRequestUniversalTime =
+                observedUniversalTime.HasValue ? observedUniversalTime.Value : Planetarium.GetUniversalTime();
+            report.warpRateIndexBeforeStopRequest = TimeWarp.CurrentRateIndex;
+            try { TimeWarp.SetRate(0, true); report.warpRateIndexAfterStopRequest = TimeWarp.CurrentRateIndex; }
+            catch (Exception error) { report.errors++; report.reason += ":warp-stop-failed:" + error.GetType().Name; }
         }
 
         static bool DriverPrefix(OrbitDriver __instance, bool offset, out DriverCall __state)
@@ -261,16 +359,17 @@ namespace KspContinuum
                 owner.seedTicks += __state.SeedTicks; owner.maximumSeedTicks = Math.Max(owner.maximumSeedTicks, __state.SeedTicks);
                 owner.residualTicks += residual; owner.maximumResidualTicks = Math.Max(owner.maximumResidualTicks, residual);
                 owner.report.candidateDriverCalls++; owner.report.suppressedStockPropagations++;
-                if (owner.report.candidateDriverCalls >= MaximumCalls)
+                bool accurate = owner.report.maximumPositionErrorMeters <= PositionToleranceMeters &&
+                    owner.report.maximumVelocityErrorMetersPerSecond <= VelocityToleranceMetersPerSecond &&
+                    owner.report.maximumInjectedPositionErrorMeters <= 1e-6 &&
+                    owner.report.maximumInjectedVelocityErrorMetersPerSecond <= 1e-6 &&
+                    owner.report.maximumDriverPositionErrorMeters <= 1e-6 &&
+                    owner.report.maximumDriverVelocityErrorMetersPerSecond <= 1e-6 &&
+                    owner.report.suppressedStockPropagations >= 1;
+                if (!accurate) owner.Stop("comparison-outside-tolerance");
+                else if (!owner.eventConfigured && owner.report.candidateDriverCalls >= MaximumCalls)
                 {
-                    bool accurate = owner.report.maximumPositionErrorMeters <= PositionToleranceMeters &&
-                        owner.report.maximumVelocityErrorMetersPerSecond <= VelocityToleranceMetersPerSecond &&
-                        owner.report.maximumInjectedPositionErrorMeters <= 1e-6 &&
-                        owner.report.maximumInjectedVelocityErrorMetersPerSecond <= 1e-6 &&
-                        owner.report.maximumDriverPositionErrorMeters <= 1e-6 &&
-                        owner.report.maximumDriverVelocityErrorMetersPerSecond <= 1e-6 &&
-                        owner.report.suppressedStockPropagations >= 1;
-                    owner.Stop(accurate ? "bounded-call-limit-reached" : "comparison-outside-tolerance");
+                    owner.Stop("bounded-call-limit-reached");
                 }
             }
             catch (Exception error) { owner.Fail("readback-failed:" + error.GetType().Name); }
@@ -298,7 +397,7 @@ namespace KspContinuum
         {
             if (!active) return;
             active = false; stopRequested = true; report.reason = reason;
-            if (reason == "bounded-call-limit-reached") report.status = "complete";
+            if (reason == "bounded-call-limit-reached" || reason == "event-guard-reached") report.status = "complete";
             else if (reason == "comparison-outside-tolerance") report.status = "invalid";
             else if (report.status != "invalid") report.status = "released";
         }
@@ -429,6 +528,43 @@ namespace KspContinuum
                     return value;
                 }
             return 2;
+        }
+
+        void ParseEventConfiguration(string[] arguments)
+        {
+            string radius = FindArgument(arguments, EventRadiusPrefix);
+            if (radius == null)
+            {
+                if (FindArgument(arguments, EventDirectionPrefix) != null ||
+                    FindArgument(arguments, EventHorizonPrefix) != null || FindArgument(arguments, EventGuardPrefix) != null)
+                    throw new ArgumentException("Event radius is required when any event option is present.");
+                return;
+            }
+            eventConfigured = true; eventRadius = ParsePositive(radius, "event radius");
+            string direction = FindArgument(arguments, EventDirectionPrefix);
+            if (direction == null || !Enum.TryParse(direction, true, out eventDirection) ||
+                !Enum.IsDefined(typeof(RadiusCrossingDirection), eventDirection))
+                throw new ArgumentException("Event direction must be inward or outward.");
+            string horizon = FindArgument(arguments, EventHorizonPrefix);
+            string guard = FindArgument(arguments, EventGuardPrefix);
+            eventHorizon = horizon == null ? DefaultEventHorizonSeconds : ParsePositive(horizon, "event horizon");
+            eventGuard = guard == null ? DefaultEventGuardSeconds : ParsePositive(guard, "event guard");
+            if (eventGuard >= eventHorizon) throw new ArgumentException("Event guard must be shorter than the search horizon.");
+        }
+
+        static string FindArgument(string[] arguments, string prefix)
+        {
+            foreach (string argument in arguments)
+                if (argument.StartsWith(prefix, StringComparison.Ordinal)) return argument.Substring(prefix.Length);
+            return null;
+        }
+
+        static double ParsePositive(string text, string name)
+        {
+            double value;
+            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) ||
+                !Finite(value) || value <= 0) throw new ArgumentException("Invalid " + name + ".");
+            return value;
         }
 
         CoastingBody SampleBody(double universalTime) { return engine.SampleAt(universalTime).Bodies[0]; }

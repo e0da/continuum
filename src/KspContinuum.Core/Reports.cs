@@ -127,21 +127,27 @@ namespace KspContinuum
 
     [Serializable] public sealed class CoastingAdapterReport
     {
-        public string schema = "ksp-continuum-coasting-adapter/v1";
+        public string schema = "ksp-continuum-coasting-adapter/v2";
         public string status = "not-started";
         public string limitation = "Opt-in packed active-vessel canary. Continuum evaluates a fixed-reference-body two-body coast while KSP retains global time, vessel lifecycle, SOI transitions, rendering and release to stock physics.";
         public string reason, vesselId, referenceBody, installationStatus = "not-installed",
             cleanupStatus = "not-attempted";
         public double seedUniversalTime, forecastUniversalTime, finalGameUniversalTime,
+            eventRadiusMeters, eventSearchHorizonSeconds, eventUniversalTime, eventTimeToleranceSeconds,
+            eventRadiusErrorMeters,
+            eventGuardSeconds, warpStopRequestUniversalTime,
             admittedEccentricity, admittedPeriapsisAltitude, admittedApoapsisRadius,
             maximumPositionErrorMeters, maximumVelocityErrorMetersPerSecond,
             maximumInjectedPositionErrorMeters, maximumInjectedVelocityErrorMetersPerSecond,
             maximumDriverPositionErrorMeters, maximumDriverVelocityErrorMetersPerSecond;
         public int admittedWarpRateIndex;
+        public int eventEvaluations, warpRateIndexBeforeStopRequest, warpRateIndexAfterStopRequest;
         public long candidateDriverCalls, suppressedStockPropagations, stockFallbacks, errors;
         public string admittedSphereOfInfluence, admittedPatchEndUniversalTime, admittedPatchEndTransition;
+        public string eventKind, eventDirection;
         public bool forecastCompletedBeforePresentation, frontierUnchangedByPresentation,
             authorityAdmissionAttested, authorityExitAttested, releasedToStock;
+        public bool eventConfigured, eventFound, engineFrontierAtEvent, warpStopRequested;
         public bool admittedHasNextPatch;
     }
 
