@@ -2,8 +2,10 @@
 
 Run `dotnet run --project tools/KspContinuum.Pressure -c Release -- --target-step-seconds 0.02 PATH/markers.json`.
 The tool reads existing `--continuum-scale-profile --continuum-playerloop` receipts; it does not launch or change KSP.
-Pass several receipts to compare craft and regimes. It rejects pressure estimates for changing contexts, packed vessels,
-pauses, or mismatched fixed-child sample counts while retaining the measured clock and factors.
+Pass several receipts to compare craft and regimes. It accepts only completed `markers/v2` and verified `playerloop/v2`
+captures with clean hooks, aligned boundary observations and complete scope samples. It rejects pressure estimates for
+changing boundary fields, packed vessels, pauses, or mismatched fixed-child sample counts while retaining the measured
+clock and factors. Stable boundary fields do not prove stability inside each frame.
 
 `achievedWarp` is the change in KSP universal time divided by capture wall time. `warpFulfillment` compares that to the
 requested factor. `simulatedTimeDebtSecondsPerWallSecond` is the shortfall, clamped at zero. Short captures can report

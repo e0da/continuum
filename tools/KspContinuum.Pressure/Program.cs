@@ -26,15 +26,24 @@ foreach (string path in paths)
 {
     using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
     JsonElement root = document.RootElement;
+    Require(root.GetProperty("schema").GetString() == "ksp-continuum-markers/v2" &&
+        root.GetProperty("status").GetString() == "complete", path + ": unsupported or incomplete marker receipt");
     JsonElement frames = root.GetProperty("frames");
-    if (frames.GetArrayLength() < 2) throw new InvalidDataException(path + ": requires two or more context frames");
+    Require(frames.GetArrayLength() >= 2 && frames.GetArrayLength() == root.GetProperty("completedFrames").GetInt32() &&
+        root.GetProperty("contextMisalignedFrames").GetInt32() == 0 &&
+        root.GetProperty("cleanupErrors").GetArrayLength() == 0 &&
+        root.GetProperty("recorderCleanupStatus").GetString() == "restored-owned-enables",
+        path + ": incomplete, misaligned, or unclean capture");
     JsonElement first = frames[0], last = frames[frames.GetArrayLength() - 1];
     string[] stableFields = { "vesselId", "body", "situation", "parts", "rigidbodies", "joints", "colliders",
         "loadedVessels", "packed", "paused", "warpRate", "fixedDeltaSeconds", "timeScale" };
     bool stable = true;
     foreach (JsonElement frame in frames.EnumerateArray())
+    {
+        Require(frame.GetProperty("contextAligned").GetBoolean(), path + ": misaligned context frame");
         foreach (string field in stableFields)
             if (frame.GetProperty(field).ToString() != first.GetProperty(field).ToString()) stable = false;
+    }
     double wallSeconds = Number(last, "boundaryWallSeconds") - Number(first, "boundaryWallSeconds");
     double simulatedSeconds = Number(last, "universalTime") - Number(first, "universalTime");
     double requestedWarp = Number(first, "warpRate");
@@ -42,10 +51,16 @@ foreach (string path in paths)
     if (wallSeconds <= 0 || simulatedSeconds < 0 || requestedWarp <= 0 || fixedStep <= 0)
         throw new InvalidDataException(path + ": clock interval, requested warp and fixed step must be positive");
 
-    JsonElement scopes = root.GetProperty("playerLoop").GetProperty("scopes");
-    (double physics, int physicsSamples) = Mean(scopes, "UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate");
-    (double scripts, int scriptSamples) = Mean(scopes, "UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate");
-    (double update, int updateSamples) = Mean(scopes, "UnityEngine.PlayerLoop.Update+ScriptRunBehaviourUpdate");
+    JsonElement playerLoop = root.GetProperty("playerLoop");
+    Require(playerLoop.GetProperty("schema").GetString() == "ksp-continuum-playerloop/v2" &&
+        playerLoop.GetProperty("status").GetString() == "observed" &&
+        playerLoop.GetProperty("integrityStatus").GetString() == "verified-at-boundaries" &&
+        playerLoop.GetProperty("cleanupStatus").GetString() == "removed-owned-hooks",
+        path + ": unqualified PlayerLoop capture");
+    JsonElement scopes = playerLoop.GetProperty("scopes");
+    (double physics, int physicsSamples) = Mean(scopes, "UnityEngine.PlayerLoop.FixedUpdate+PhysicsFixedUpdate", "fixed");
+    (double scripts, int scriptSamples) = Mean(scopes, "UnityEngine.PlayerLoop.FixedUpdate+ScriptRunBehaviourFixedUpdate", "fixed");
+    (double update, int updateSamples) = Mean(scopes, "UnityEngine.PlayerLoop.Update+ScriptRunBehaviourUpdate", "frame");
     bool physicsDomain = stable && first.GetProperty("loaded").GetBoolean() &&
         !first.GetProperty("packed").GetBoolean() && !first.GetProperty("paused").GetBoolean() &&
         physicsSamples > 0 && scriptSamples == physicsSamples;
@@ -53,7 +68,7 @@ foreach (string path in paths)
     double fixedChildMs = physics + scripts;
     results.Add(new {
         source = Path.GetFileName(Path.GetDirectoryName(path)) + "/" + Path.GetFileName(path),
-        stableContext = stable,
+        observedBoundaryFieldsStable = stable,
         pressureQualified = physicsDomain,
         reason = physicsDomain ? "loaded-unpacked-stable-physics-domain" : "pressure estimate requires stable loaded unpacked physics and matched child counts",
         factors = new {
@@ -95,13 +110,28 @@ return 0;
 
 static double Number(JsonElement element, string name) => element.GetProperty(name).GetDouble();
 
-static (double mean, int count) Mean(JsonElement scopes, string name)
+static void Require(bool condition, string message)
 {
+    if (!condition) throw new InvalidDataException(message);
+}
+
+static (double mean, int count) Mean(JsonElement scopes, string name, string timeDomain)
+{
+    JsonElement? found = null;
     foreach (JsonElement scope in scopes.EnumerateArray())
         if (scope.GetProperty("name").GetString() == name)
-        {
-            JsonElement milliseconds = scope.GetProperty("milliseconds");
-            return (Number(milliseconds, "mean"), milliseconds.GetProperty("count").GetInt32());
-        }
-    return (0, 0);
+        { Require(found == null, "Duplicate timing scope: " + name); found = scope; }
+    Require(found != null, "Missing timing scope: " + name);
+    JsonElement row = found.Value;
+    JsonElement milliseconds = row.GetProperty("milliseconds");
+    int count = milliseconds.GetProperty("count").GetInt32();
+    double mean = Number(milliseconds, "mean");
+    Require(row.GetProperty("status").GetString() == "observed" &&
+        row.GetProperty("timeDomain").GetString() == timeDomain &&
+        row.GetProperty("sequenceErrors").GetInt32() == 0 &&
+        row.GetProperty("droppedSamples").GetInt32() == 0 &&
+        count == row.GetProperty("samples").GetArrayLength() && count > 0 &&
+        double.IsFinite(mean) && mean >= 0,
+        "Unqualified timing scope: " + name);
+    return (mean, count);
 }
