@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using HarmonyLib;
 using UnityEngine;
 using FixedLoop = UnityEngine.PlayerLoop.FixedUpdate;
@@ -20,8 +21,11 @@ namespace KspContinuum
         readonly Harmony harmony = new Harmony(Owner);
         readonly Dictionary<MethodBase, int> slots = new Dictionary<MethodBase, int>();
         readonly CallbackAttributionAccumulator accumulator = new CallbackAttributionAccumulator(Stopwatch.Frequency);
+        int[] depths;
         long windowStart, activeWindowTicks;
+        int activeThreadId;
         bool activeWindow, installed, disposed;
+        public struct CallState { public long Started; public int Slot; public bool Outermost; }
         public CallbackAttributionReport Report { get; private set; }
 
         public FixedCallbackAttribution()
@@ -47,6 +51,7 @@ namespace KspContinuum
                     Report.patchedMethods++;
                 }
                 if (Report.patchedMethods == 0) throw new InvalidOperationException("No patchable managed FixedUpdate callbacks were found.");
+                depths = new int[Report.patchedMethods];
                 installed = true; Report.status = "installed"; Report.cleanupStatus = "installed";
             }
             catch (Exception error)
@@ -114,7 +119,7 @@ namespace KspContinuum
         {
             if (!installed || scope != typeof(FixedLoop.ScriptRunBehaviourFixedUpdate).FullName) return;
             if (activeWindow) { Report.callbackErrors++; return; }
-            activeWindow = true; windowStart = Stopwatch.GetTimestamp();
+            activeWindow = true; activeThreadId = Thread.CurrentThread.ManagedThreadId; windowStart = Stopwatch.GetTimestamp();
         }
         public void After(string scope, int frame, double time)
         {
@@ -125,24 +130,29 @@ namespace KspContinuum
         }
         public void Fault(string scope, Exception error) { if (scope == typeof(FixedLoop.ScriptRunBehaviourFixedUpdate).FullName) Report.callbackErrors++; }
 
-        public static void Prefix(MethodBase __originalMethod, ref long __state)
+        public static void Prefix(MethodBase __originalMethod, ref CallState __state)
         {
             FixedCallbackAttribution owner = activeOwner;
-            __state = owner != null && owner.installed && owner.activeWindow ? Stopwatch.GetTimestamp() : 0;
+            if (owner == null || !owner.installed || !owner.activeWindow ||
+                Thread.CurrentThread.ManagedThreadId != owner.activeThreadId) return;
+            int slot;
+            if (!owner.slots.TryGetValue(__originalMethod, out slot)) { owner.Report.callbackErrors++; return; }
+            __state.Slot = slot; __state.Outermost = owner.depths[slot]++ == 0; __state.Started = Stopwatch.GetTimestamp();
         }
-        public static Exception Finalizer(Exception __exception, MethodBase __originalMethod, ref long __state)
+        public static Exception Finalizer(Exception __exception, ref CallState __state)
         {
-            Complete(__originalMethod, ref __state); return __exception;
+            Complete(ref __state); return __exception;
         }
-        static void Complete(MethodBase method, ref long state)
+        static void Complete(ref CallState state)
         {
-            if (state == 0) return;
-            long end = Stopwatch.GetTimestamp(), start = state; state = 0;
+            if (state.Started == 0) return;
+            long end = Stopwatch.GetTimestamp(), start = state.Started; state.Started = 0;
             FixedCallbackAttribution owner = activeOwner;
             if (owner == null || end < start) { if (owner != null) owner.Report.callbackErrors++; return; }
-            int slot;
-            if (!owner.slots.TryGetValue(method, out slot)) { owner.Report.callbackErrors++; return; }
-            try { owner.accumulator.Record(slot, end - start); } catch { owner.Report.callbackErrors++; }
+            if (state.Slot < 0 || state.Slot >= owner.depths.Length || owner.depths[state.Slot] < 1)
+            { owner.Report.callbackErrors++; return; }
+            owner.depths[state.Slot]--;
+            try { owner.accumulator.Record(state.Slot, end - start, state.Outermost); } catch { owner.Report.callbackErrors++; }
         }
 
         static long MeasureFloor()

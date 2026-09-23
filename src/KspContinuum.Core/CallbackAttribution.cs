@@ -17,9 +17,11 @@ namespace KspContinuum
     [Serializable] public sealed class CallbackAttributionRow
     {
         public string category, assembly, assemblyVersion, assemblyMvid, declaringType, method;
-        public int metadataToken, calls;
-        public long inclusiveTicks, maximumTicks;
+        public int metadataToken, calls, outermostCalls;
+        public long inclusiveTicks, maximumTicks, outermostInclusiveTicks, outermostMaximumTicks;
         public double inclusiveMilliseconds, meanMilliseconds, maximumMilliseconds, fractionOfActiveWindow;
+        public double outermostInclusiveMilliseconds, outermostMeanMilliseconds, outermostMaximumMilliseconds,
+            outermostFractionOfActiveWindow;
     }
 
     public sealed class CallbackAttributionAccumulator
@@ -46,13 +48,19 @@ namespace KspContinuum
             slots.Add(new Slot(row)); return slots.Count - 1;
         }
 
-        public void Record(int slot, long elapsedTicks)
+        public void Record(int slot, long elapsedTicks, bool outermost)
         {
             if (finished || slot < 0 || slot >= slots.Count || elapsedTicks < 0) throw new ArgumentException("Invalid callback timing sample.");
             CallbackAttributionRow row = slots[slot].Row;
             row.calls++;
             checked { row.inclusiveTicks += elapsedTicks; }
             if (elapsedTicks > row.maximumTicks) row.maximumTicks = elapsedTicks;
+            if (outermost)
+            {
+                row.outermostCalls++;
+                checked { row.outermostInclusiveTicks += elapsedTicks; }
+                if (elapsedTicks > row.outermostMaximumTicks) row.outermostMaximumTicks = elapsedTicks;
+            }
         }
 
         public CallbackAttributionRow[] Finish(long activeWindowTicks)
@@ -68,9 +76,13 @@ namespace KspContinuum
                 row.meanMilliseconds = row.inclusiveMilliseconds / row.calls;
                 row.maximumMilliseconds = row.maximumTicks * (1000.0 / frequency);
                 row.fractionOfActiveWindow = activeWindowTicks == 0 ? 0 : (double)row.inclusiveTicks / activeWindowTicks;
+                row.outermostInclusiveMilliseconds = row.outermostInclusiveTicks * (1000.0 / frequency);
+                row.outermostMeanMilliseconds = row.outermostCalls == 0 ? 0 : row.outermostInclusiveMilliseconds / row.outermostCalls;
+                row.outermostMaximumMilliseconds = row.outermostMaximumTicks * (1000.0 / frequency);
+                row.outermostFractionOfActiveWindow = activeWindowTicks == 0 ? 0 : (double)row.outermostInclusiveTicks / activeWindowTicks;
                 rows.Add(row);
             }
-            rows.Sort((left, right) => right.inclusiveTicks.CompareTo(left.inclusiveTicks));
+            rows.Sort((left, right) => right.outermostInclusiveTicks.CompareTo(left.outermostInclusiveTicks));
             return rows.ToArray();
         }
     }
