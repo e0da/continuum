@@ -18,11 +18,20 @@ static class Program
         public bool PredictEvent;
     }
     struct Result { public Vec Position, Velocity; public int Candidates; }
+    sealed class Measurement
+    {
+        public int Workers, Repetitions;
+        public double[] Milliseconds;
+        public long[] Allocations;
+        public string Hash;
+    }
 
     static int Main(string[] args)
     {
         try
         {
+            if (Environment.GetEnvironmentVariable("DOTNET_TieredCompilation") != "0")
+                throw new InvalidOperationException("Set DOTNET_TieredCompilation=0 so tier promotion cannot bias worker order.");
             int samples = 7; bool quick = false;
             for (int i = 0; i < args.Length; i++)
             {
@@ -36,27 +45,36 @@ static class Program
             int[] work = quick ? new[] { 1, 8 } : new[] { 1, 8, 32 };
             double[] eventDensity = quick ? new[] { 0d, 1d } : new[] { 0d, .25, 1d };
             var rows = new List<object>();
+            WarmSharedPaths(workers);
             foreach (int count in counts) foreach (int steps in work) foreach (double density in eventDensity)
             {
                 Vessel[] fleet = Fixture(count, density);
                 Result[] reference = Execute(fleet, steps, 1);
                 string expectedHash = Hash(reference);
-                foreach (int workerCount in workers)
-                    rows.Add(Measure(fleet, steps, density, workerCount, samples, expectedHash));
+                rows.AddRange(MeasureScenario(fleet, steps, density, workers, samples, expectedHash));
             }
             Console.WriteLine(JsonSerializer.Serialize(new {
-                schema = "ksp-continuum-fleet-bench/v1", samples, quick, warmups = 3, timerTargetMilliseconds = 20,
+                schema = "ksp-continuum-fleet-bench/v1", samples, quick, sharedPrewarmRounds = 48,
+                scenarioWarmupsPerStrategy = 3, timerTargetMilliseconds = 20,
                 logicalProcessors = Environment.ProcessorCount,
                 runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
                 architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+                tieredCompilationDisabled = true,
                 workload = "independent persistent two-body trajectory samples plus optional two-object encounter plans",
-                timing = "complete ordered fleet evaluation; calibration chooses repeated passes; validation and hashing outside timing",
+                timing = "all strategies share prewarm; per-scenario calibration precedes rotated interleaved samples; trailing serial sentinel detects drift",
                 allocation = "process-wide allocated bytes during timed window; includes runtime worker activity and is not retained memory",
                 rows
             }, new JsonSerializerOptions { WriteIndented = true }));
             return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+    }
+
+    static void WarmSharedPaths(int[] workers)
+    {
+        Vessel[] fleet = Fixture(64, 1);
+        for (int round = 0; round < 48; round++)
+            foreach (int workerCount in workers) Execute(fleet, 8, workerCount);
     }
 
     static Vessel[] Fixture(int count, double eventDensity)
@@ -101,35 +119,58 @@ static class Program
         return output;
     }
 
-    static object Measure(Vessel[] fleet, int steps, double density, int workers, int samples, string expectedHash)
+    static IEnumerable<object> MeasureScenario(Vessel[] fleet, int steps, double density, int[] workers, int samples, string expectedHash)
     {
-        for (int i = 0; i < 3; i++) Verify(Execute(fleet, steps, workers), expectedHash);
-        int repetitions = 1;
-        while (true)
+        var measurements = workers.Select(worker => new Measurement {
+            Workers = worker, Repetitions = 1, Milliseconds = new double[samples], Allocations = new long[samples]
+        }).ToArray();
+        foreach (Measurement measurement in measurements)
+            for (int i = 0; i < 3; i++) Verify(Execute(fleet, steps, measurement.Workers), expectedHash);
+        foreach (Measurement measurement in measurements)
         {
-            var calibration = Stopwatch.StartNew();
-            for (int i = 0; i < repetitions; i++) Execute(fleet, steps, workers);
-            calibration.Stop();
-            if (calibration.Elapsed.TotalMilliseconds >= 20 || repetitions >= 16384) break;
-            repetitions *= 2;
+            while (true)
+            {
+                var calibration = Stopwatch.StartNew();
+                for (int i = 0; i < measurement.Repetitions; i++) Execute(fleet, steps, measurement.Workers);
+                calibration.Stop();
+                if (calibration.Elapsed.TotalMilliseconds >= 20 || measurement.Repetitions >= 16384) break;
+                measurement.Repetitions *= 2;
+            }
         }
-        var milliseconds = new double[samples]; var allocations = new long[samples]; string hash = null;
         for (int sample = 0; sample < samples; sample++)
         {
-            long before = GC.GetTotalAllocatedBytes(true); Result[] result = null;
-            var clock = Stopwatch.StartNew();
-            for (int i = 0; i < repetitions; i++) result = Execute(fleet, steps, workers);
-            clock.Stop(); long after = GC.GetTotalAllocatedBytes(true);
-            hash = Hash(result); Verify(result, expectedHash);
-            milliseconds[sample] = clock.Elapsed.TotalMilliseconds / repetitions;
-            allocations[sample] = (after - before) / repetitions;
+            for (int offset = 0; offset < measurements.Length; offset++)
+            {
+                Measurement measurement = measurements[(sample + offset) % measurements.Length];
+                long before = GC.GetTotalAllocatedBytes(true); Result[] result = null;
+                var clock = Stopwatch.StartNew();
+                for (int i = 0; i < measurement.Repetitions; i++) result = Execute(fleet, steps, measurement.Workers);
+                clock.Stop(); long after = GC.GetTotalAllocatedBytes(true);
+                measurement.Hash = Hash(result); Verify(result, expectedHash);
+                measurement.Milliseconds[sample] = clock.Elapsed.TotalMilliseconds / measurement.Repetitions;
+                measurement.Allocations[sample] = (after - before) / measurement.Repetitions;
+            }
         }
-        Array.Sort(milliseconds); Array.Sort(allocations);
-        double median = milliseconds[(samples - 1) / 2];
-        return new { vessels = fleet.Length, samplesPerVessel = steps, eventDensity = density, workers, repetitions,
-            medianMilliseconds = median, p95Milliseconds = milliseconds[(int)Math.Ceiling(samples * .95) - 1],
-            medianAllocatedBytes = allocations[(samples - 1) / 2], vesselsPerSecond = fleet.Length * 1000 / median,
-            outputHash = hash, deterministicOrder = true };
+        Measurement serial = measurements.Single(x => x.Workers == 1);
+        var sentinels = new double[samples];
+        for (int sample = 0; sample < samples; sample++)
+        {
+            var clock = Stopwatch.StartNew(); Result[] result = null;
+            for (int i = 0; i < serial.Repetitions; i++) result = Execute(fleet, steps, 1);
+            clock.Stop(); Verify(result, expectedHash); sentinels[sample] = clock.Elapsed.TotalMilliseconds / serial.Repetitions;
+        }
+        Array.Sort(sentinels); double sentinelMedian = sentinels[(samples - 1) / 2];
+        foreach (Measurement measurement in measurements)
+        {
+            Array.Sort(measurement.Milliseconds); Array.Sort(measurement.Allocations);
+            double median = measurement.Milliseconds[(samples - 1) / 2];
+            yield return new { vessels = fleet.Length, samplesPerVessel = steps, eventDensity = density,
+                workers = measurement.Workers, repetitions = measurement.Repetitions,
+                medianMilliseconds = median, p95Milliseconds = measurement.Milliseconds[(int)Math.Ceiling(samples * .95) - 1],
+                medianAllocatedBytes = measurement.Allocations[(samples - 1) / 2], vesselsPerSecond = fleet.Length * 1000 / median,
+                trailingSerialMedianMilliseconds = sentinelMedian,
+                outputHash = measurement.Hash, deterministicOrder = true };
+        }
     }
 
     static void Verify(Result[] result, string expectedHash)

@@ -352,9 +352,15 @@ fn verify_islands(root: &Path) -> Result {
 }
 
 fn verify_fleet(root: &Path) -> Result {
-    let r = dotnet_json(root, "tools/KspContinuum.FleetBench", &["--quick", "--samples", "3"])?;
+    let output = Command::new("dotnet").args(["run", "--project", "tools/KspContinuum.FleetBench", "-c", "Release", "--",
+        "--quick", "--samples", "3"]).env("DOTNET_TieredCompilation", "0").current_dir(root).output()
+        .map_err(|error| format!("fleet benchmark failed to start: {error}"))?;
+    require(output.status.success(), &format!("fleet benchmark failed: {}{}",
+        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)))?;
+    let r: Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
     eq_str(&r, "schema", "ksp-continuum-fleet-bench/v1")?;
     truth(&r, "quick")?;
+    truth(&r, "tieredCompilationDisabled")?;
     let rows = array(&r, "rows")?;
     require(!rows.is_empty(), "fleet benchmark emitted no rows")?;
     for row in rows {
