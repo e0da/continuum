@@ -171,6 +171,7 @@ fn portable(root: &Path) -> Result {
     verify_encounter(root)?;
     verify_handoff(root)?;
     verify_islands(root)?;
+    verify_fleet(root)?;
     verify_layout(root)?;
     verify_program_branch(root)?;
     verify_worker(root)?;
@@ -348,6 +349,20 @@ fn verify_islands(root: &Path) -> Result {
     }
     truth(&r["safety"], "cancellationObserved")?;
     truth(&r["safety"], "failureObserved")
+}
+
+fn verify_fleet(root: &Path) -> Result {
+    let r = dotnet_json(root, "tools/KspContinuum.FleetBench", &["--quick", "--samples", "3"])?;
+    eq_str(&r, "schema", "ksp-continuum-fleet-bench/v1")?;
+    truth(&r, "quick")?;
+    let rows = array(&r, "rows")?;
+    require(!rows.is_empty(), "fleet benchmark emitted no rows")?;
+    for row in rows {
+        require(row["deterministicOrder"] == true, "fleet worker output order diverged")?;
+        require(row["medianMilliseconds"].as_f64().unwrap_or(0.0) > 0.0, "fleet timing missing")?;
+        require(row["medianAllocatedBytes"].as_i64().unwrap_or(-1) >= 0, "fleet allocation missing")?;
+    }
+    Ok(())
 }
 
 fn verify_layout(root: &Path) -> Result {
