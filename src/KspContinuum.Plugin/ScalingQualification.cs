@@ -17,7 +17,7 @@ namespace KspContinuum
         bool active, capturing, finished, strategySweep, quitAfterQualification;
         float eligibleSince;
         int expectedParts = -1;
-        bool physicsWarp, warpRequested;
+        bool physicsWarp, atmosphericStress, warpRequested;
         float warpRequestedAt;
         int stableWarpFrames;
         const float RequestedPhysicsWarp = 4;
@@ -63,9 +63,11 @@ namespace KspContinuum
         {
             File.WriteAllText(Path.Combine(directory, "scope.txt"),
                 (strategySweep ? "Repeated in-process stock, full-publication batch and resident dry-domain orbital windows.\n" :
+                atmosphericStress ? "Single loaded high-speed atmospheric stress window.\n" :
                 "Single settled stock-vessel orbital window.\n") +
                 "PlayerLoop scopes overlap and must not be summed. The active fixed parent owns strategy comparison.\n" +
                 "Experimental strategies are opt-in and do not establish complete stock semantics.\n" +
+                (atmosphericStress ? "Atmospheric stress admits a loaded descending Kerbin vessel and records topology changes instead of rejecting them.\n" : "") +
                 (physicsWarp ? "Requested 4x LOW-mode physics warp before capture; rate is reset before exit.\n" : ""));
         }
 
@@ -83,6 +85,8 @@ namespace KspContinuum
                 { Finish("missing-playerloop-flag", 2); return; }
                 strategySweep = Array.IndexOf(arguments, "--continuum-dry-buoyancy-sweep") >= 0;
                 physicsWarp = Array.IndexOf(arguments, "--continuum-physics-warp-pressure") >= 0;
+                atmosphericStress = Array.IndexOf(arguments, "--continuum-atmospheric-stress") >= 0;
+                if (atmosphericStress) physicsWarp = true;
                 if (physicsWarp && strategySweep) { Finish("physics-warp-does-not-support-strategy-sweep", 2); return; }
                 foreach (string argument in arguments) if (argument.StartsWith("--continuum-scale-parts=", StringComparison.Ordinal))
                 {
@@ -104,8 +108,8 @@ namespace KspContinuum
             if (ScaleCheckpointLoadState.Requested && !ScaleCheckpointLoadState.Ready) return;
             Vessel vessel = FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
             bool eligible = vessel != null && vessel.loaded && !vessel.packed && !FlightDriver.Pause &&
-                vessel.situation == Vessel.Situations.ORBITING &&
-                vessel.ctrlState != null && vessel.ctrlState.mainThrottle < 0.01 &&
+                (atmosphericStress ? AtmosphericFlight(vessel) :
+                vessel.situation == Vessel.Situations.ORBITING && vessel.ctrlState != null && vessel.ctrlState.mainThrottle < 0.01) &&
                 (!ScaleCheckpointLoadState.Requested || vessel.id == ScaleCheckpointLoadState.VesselId) &&
                 (expectedParts < 1 || vessel.parts.Count == expectedParts);
             if (!eligible) { eligibleSince = 0; stableWarpFrames = 0; return; }
@@ -125,7 +129,7 @@ namespace KspContinuum
             }
             if (TimeWarp.CurrentRate != 1 || TimeWarp.CurrentRateIndex != 0) { eligibleSince = 0; return; }
             if (eligibleSince == 0) { eligibleSince = Time.realtimeSinceStartup; return; }
-            if (Time.realtimeSinceStartup - eligibleSince < 10) return;
+            if (Time.realtimeSinceStartup - eligibleSince < (atmosphericStress ? .5f : 10f)) return;
             if (physicsWarp)
             {
                 if (!SetWarpMode(TimeWarp.Modes.LOW))
@@ -203,7 +207,8 @@ namespace KspContinuum
             try
             {
                 File.WriteAllText(Path.Combine(directory, "markers.json"), ReportJson.Encode(report));
-                string reason; bool valid = Stable(report, physicsWarp ? RequestedPhysicsWarp : 1, out reason);
+                string reason; bool valid = atmosphericStress ? AtmosphericStressComplete(report, out reason) :
+                    Stable(report, physicsWarp ? RequestedPhysicsWarp : 1, out reason);
                 bool sourceUnchanged = !ScaleCheckpointLoadState.Requested || ScaleCheckpointLoadState.SourceUnchanged();
                 if (!sourceUnchanged)
                 { valid = false; reason = "source-checkpoint-changed"; }
@@ -253,6 +258,37 @@ namespace KspContinuum
                 report.dryBuoyancy.cleanupStatus != "restored-owned-enables" || report.dryBuoyancy.ownedComponents < 1 ||
                 report.dryBuoyancy.fixedSteps < 1 || report.dryBuoyancy.bypassed < 1 || report.dryBuoyancy.errors != 0))
             { reason = "dry-buoyancy-strategy-invalid"; return false; }
+            return true;
+        }
+
+        static bool AtmosphericFlight(Vessel vessel)
+        {
+            CelestialBody body = vessel.mainBody;
+            return body != null && body.bodyName == "Kerbin" && body.atmosphere &&
+                vessel.altitude >= 0 && vessel.altitude < body.atmosphereDepth;
+        }
+
+        static bool AtmosphericStressComplete(ProbeReport report, out string reason)
+        {
+            reason = "verified-atmospheric-stress-capture";
+            if (report == null || report.status != "complete" || report.completedFrames != report.requestedFrames ||
+                report.frames == null || report.frames.Length == 0)
+            { reason = "incomplete-capture"; return false; }
+            foreach (ProfileFrame frame in report.frames)
+                if (frame == null || frame.warpRate != RequestedPhysicsWarp ||
+                    !FinitePositive(frame.fixedDeltaSeconds) || !FinitePositive(frame.timeScale) ||
+                    !frame.universalTime.HasValue || double.IsNaN(frame.universalTime.Value) ||
+                    double.IsInfinity(frame.universalTime.Value))
+                { reason = "atmospheric-stress-context-lost"; return false; }
+            if (report.playerLoop == null || report.playerLoop.schema != "ksp-continuum-playerloop/v2" ||
+                report.playerLoop.status != "observed" || report.playerLoop.integrityStatus != "verified-at-boundaries" ||
+                report.playerLoop.cleanupStatus != "removed-owned-hooks")
+            { reason = "playerloop-unqualified"; return false; }
+            if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-callback-attribution") >= 0 &&
+                (report.callbackAttribution == null || report.callbackAttribution.status != "observed" ||
+                 report.callbackAttribution.cleanupStatus != "removed-owned-patches" || report.callbackAttribution.patchedMethods < 1 ||
+                 report.callbackAttribution.callbacks == null || report.callbackAttribution.callbacks.Length < 1))
+            { reason = "callback-attribution-invalid"; return false; }
             return true;
         }
 
