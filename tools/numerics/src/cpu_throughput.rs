@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 
 pub const BLOCK_WIDTH: usize = 8;
+const SOA_COLUMN_SKEW: usize = 17;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Body {
@@ -29,59 +30,62 @@ impl AosView {
 
 #[derive(Clone, Debug)]
 pub struct SoaView {
-    pub px: Vec<f64>,
-    pub py: Vec<f64>,
-    pub pz: Vec<f64>,
-    pub vx: Vec<f64>,
-    pub vy: Vec<f64>,
-    pub vz: Vec<f64>,
-    pub fx: Vec<f64>,
-    pub fy: Vec<f64>,
-    pub fz: Vec<f64>,
-    pub inverse_mass: Vec<f64>,
+    storage: Vec<f64>,
+    len: usize,
 }
 
 impl SoaView {
     pub fn from_bodies(bodies: &[Body]) -> Self {
         let mut view = Self {
-            px: Vec::with_capacity(bodies.len()),
-            py: Vec::with_capacity(bodies.len()),
-            pz: Vec::with_capacity(bodies.len()),
-            vx: Vec::with_capacity(bodies.len()),
-            vy: Vec::with_capacity(bodies.len()),
-            vz: Vec::with_capacity(bodies.len()),
-            fx: Vec::with_capacity(bodies.len()),
-            fy: Vec::with_capacity(bodies.len()),
-            fz: Vec::with_capacity(bodies.len()),
-            inverse_mass: Vec::with_capacity(bodies.len()),
+            storage: vec![0.0; (bodies.len() + SOA_COLUMN_SKEW) * 10],
+            len: bodies.len(),
         };
-        for body in bodies {
-            view.px.push(body.px);
-            view.py.push(body.py);
-            view.pz.push(body.pz);
-            view.vx.push(body.vx);
-            view.vy.push(body.vy);
-            view.vz.push(body.vz);
-            view.fx.push(body.fx);
-            view.fy.push(body.fy);
-            view.fz.push(body.fz);
-            view.inverse_mass.push(body.inverse_mass);
+        let stride = view.stride();
+        for (index, body) in bodies.iter().enumerate() {
+            for (field, value) in [
+                body.px,
+                body.py,
+                body.pz,
+                body.vx,
+                body.vy,
+                body.vz,
+                body.fx,
+                body.fy,
+                body.fz,
+                body.inverse_mass,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                view.storage[field * stride + index] = value;
+            }
         }
         view
     }
 
     pub fn integrate(&mut self, dt: f64) {
-        self.px
+        let len = self.len;
+        let stride = self.stride();
+        let (px, rest) = self.storage.split_at_mut(stride);
+        let (py, rest) = rest.split_at_mut(stride);
+        let (pz, rest) = rest.split_at_mut(stride);
+        let (vx, rest) = rest.split_at_mut(stride);
+        let (vy, rest) = rest.split_at_mut(stride);
+        let (vz, rest) = rest.split_at_mut(stride);
+        let (fx, rest) = rest.split_at_mut(stride);
+        let (fy, rest) = rest.split_at_mut(stride);
+        let (fz, inverse_mass) = rest.split_at_mut(stride);
+        px[..len]
             .iter_mut()
-            .zip(&mut self.py)
-            .zip(&mut self.pz)
-            .zip(&mut self.vx)
-            .zip(&mut self.vy)
-            .zip(&mut self.vz)
-            .zip(&self.fx)
-            .zip(&self.fy)
-            .zip(&self.fz)
-            .zip(&self.inverse_mass)
+            .zip(&mut py[..len])
+            .zip(&mut pz[..len])
+            .zip(&mut vx[..len])
+            .zip(&mut vy[..len])
+            .zip(&mut vz[..len])
+            .zip(&fx[..len])
+            .zip(&fy[..len])
+            .zip(&fz[..len])
+            .zip(&inverse_mass[..len])
             .for_each(
                 |(((((((((px, py), pz), vx), vy), vz), fx), fy), fz), inverse_mass)| {
                     let scale = dt * inverse_mass;
@@ -93,6 +97,14 @@ impl SoaView {
                     *pz += *vz * dt;
                 },
             );
+    }
+
+    fn stride(&self) -> usize {
+        self.len + SOA_COLUMN_SKEW
+    }
+    fn column(&self, field: usize) -> &[f64] {
+        let start = field * self.stride();
+        &self.storage[start..start + self.len]
     }
 }
 
@@ -222,18 +234,19 @@ pub fn checksum_bodies(bodies: &[Body]) -> u64 {
 }
 
 pub fn materialize_soa(view: &SoaView) -> Vec<Body> {
-    (0..view.px.len())
+    let columns: Vec<&[f64]> = (0..10).map(|field| view.column(field)).collect();
+    (0..view.len)
         .map(|i| Body {
-            px: view.px[i],
-            py: view.py[i],
-            pz: view.pz[i],
-            vx: view.vx[i],
-            vy: view.vy[i],
-            vz: view.vz[i],
-            fx: view.fx[i],
-            fy: view.fy[i],
-            fz: view.fz[i],
-            inverse_mass: view.inverse_mass[i],
+            px: columns[0][i],
+            py: columns[1][i],
+            pz: columns[2][i],
+            vx: columns[3][i],
+            vy: columns[4][i],
+            vz: columns[5][i],
+            fx: columns[6][i],
+            fy: columns[7][i],
+            fz: columns[8][i],
+            inverse_mass: columns[9][i],
         })
         .collect()
 }
@@ -278,5 +291,15 @@ mod tests {
         assert_eq!(aos.0, materialize_soa(&soa));
         assert_eq!(aos.0, materialize_blocked(&blocked));
         assert_eq!(aos.0, materialize_blocked(&parallel));
+    }
+
+    #[test]
+    fn soa_columns_have_distinct_power_of_two_page_offsets() {
+        let view = SoaView::from_bodies(&fixture(65_536));
+        let offsets: Vec<usize> = (0..10)
+            .map(|field| view.column(field).as_ptr() as usize % 4096)
+            .collect();
+        let unique: std::collections::BTreeSet<usize> = offsets.iter().copied().collect();
+        assert_eq!(unique.len(), offsets.len());
     }
 }

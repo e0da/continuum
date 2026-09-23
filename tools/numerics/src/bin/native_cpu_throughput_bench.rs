@@ -145,7 +145,7 @@ fn run() -> Result<(), String> {
             warmup_windows: WARMUP_WINDOWS,
             minimum_requested_window_ns: MINIMUM_WINDOW.as_nanos(),
             baseline: "safe Rust f64 array-of-structs scalar loop; persistent state; compiler autovectorization not asserted",
-            soa: "safe Rust f64 sealed structure-of-arrays scalar loop; persistent state; compiler autovectorization not asserted",
+            soa: "safe Rust f64 single-allocation cache-skewed structure-of-arrays loop; persistent state",
             blocked: "safe Rust f64 eight-lane array-of-structs-of-arrays scalar loop; persistent state; compiler autovectorization not asserted",
             parallel: "same eight-lane blocked layout using the persistent process-global Rayon pool; every timed window includes dispatch and join",
             scope: "Synthetic independent-body integration only; excludes KSP, Unity, capture, publication, native ABI, solver constraints, contacts, rendering, and frame-rate claims.",
