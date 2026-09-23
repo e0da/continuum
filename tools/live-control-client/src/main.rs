@@ -202,7 +202,8 @@ fn run_sweep(options: &Options) -> Result<(), String> {
     );
     let reply = exchange(&mut stream, &mut reader, &start)?;
     require_ok(&reply, "sweep-start", false)?;
-    print_sweep(reply.sweep.as_ref().ok_or("start reply omitted sweep")?);
+    let started = require_sweep_started(&reply)?;
+    print_sweep(started);
     let mut previous = String::new();
     loop {
         std::thread::sleep(Duration::from_millis(250));
@@ -236,6 +237,14 @@ fn run_sweep(options: &Options) -> Result<(), String> {
             other => return Err(format!("unknown sweep state {other}")),
         }
     }
+}
+
+fn require_sweep_started(reply: &Reply) -> Result<&SweepStatus, String> {
+    let sweep = reply.sweep.as_ref().ok_or("start reply omitted sweep")?;
+    if let Some(reason) = &sweep.reason {
+        return Err(format!("sweep start rejected: {reason}"));
+    }
+    Ok(sweep)
 }
 
 fn print_sweep(sweep: &SweepStatus) {
@@ -418,6 +427,30 @@ mod tests {
             parse_options(&["--dry-buoyancy-sweep".into(), "--quit-when-idle".into()])
                 .unwrap_err()
                 .contains("choose one")
+        );
+    }
+
+    #[test]
+    fn rejected_sweep_start_does_not_attach_to_an_existing_run() {
+        let reply = Reply {
+            status: "ok".into(),
+            reason: None,
+            request_id: Some("sweep-start".into()),
+            identity: None,
+            snapshot: None,
+            observer_nanoseconds: None,
+            sweep: Some(SweepStatus {
+                state: "running".into(),
+                reason: Some("qualification-already-active".into()),
+                directory: None,
+                window: Some("stock-01".into()),
+                window_index: 0,
+            }),
+        };
+        assert!(
+            require_sweep_started(&reply)
+                .unwrap_err()
+                .contains("qualification-already-active")
         );
     }
 
