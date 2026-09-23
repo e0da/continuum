@@ -13,7 +13,8 @@ namespace KspContinuum
         const string Flag = "--continuum-live-setdrag-provider";
         const string QuitFlag = "--continuum-setdrag-quit-after-qualification";
         const string Owner = "continuum.live-setdrag-provider";
-        const int RequiredShadowMatches = 128;
+        const int RequiredWarmupMatches = 32;
+        const int RequiredMeasuredMatches = 256;
         const int MaximumSubstitutions = 256;
         static readonly AccessTools.FieldRef<DragCubeList, DragCubeList.CubeData> CubeData =
             AccessTools.FieldRefAccess<DragCubeList, DragCubeList.CubeData>("cubeData");
@@ -22,10 +23,12 @@ namespace KspContinuum
         MethodInfo target;
         AeroSetDragSubstitutionReport report;
         bool requested, active, exported, quitAfterQualification;
+        int patchGraphFrame = -1;
 
         struct CallState
         {
             public bool Shadow;
+            public bool Measured;
             public DragCubeList.CubeData Candidate;
             public long StockStarted;
         }
@@ -36,8 +39,8 @@ namespace KspContinuum
             requested = true;
             quitAfterQualification = Array.IndexOf(Environment.GetCommandLineArgs(), QuitFlag) >= 0;
             report = new AeroSetDragSubstitutionReport {
-                requiredShadowMatches = RequiredShadowMatches, maximumSubstitutions = MaximumSubstitutions,
-                status = "active"
+                requiredWarmupMatches = RequiredWarmupMatches, requiredMeasuredMatches = RequiredMeasuredMatches,
+                maximumSubstitutions = MaximumSubstitutions, stopwatchFrequency = Stopwatch.Frequency, status = "active"
             };
             active = true;
             try
@@ -60,17 +63,22 @@ namespace KspContinuum
             __state = new CallState();
             AeroSetDragProviderQualification owner = instance;
             if (owner == null || !owner.active) return true;
-            if (!TargetStillOwned(owner.target)) { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
             try
             {
                 long started = Stopwatch.GetTimestamp();
+                if (!owner.TargetOwnedForFrame())
+                { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
                 __state.Candidate = Calculate(__instance, vector, machNumber);
-                owner.report.candidateStopwatchTicks += Stopwatch.GetTimestamp() - started;
-                if (owner.report.matchedCompleteOutputs < RequiredShadowMatches)
-                {
-                    __state.Shadow = true; __state.StockStarted = Stopwatch.GetTimestamp(); return true;
-                }
                 CubeData(__instance) = __state.Candidate;
+                int requiredShadow = RequiredWarmupMatches + RequiredMeasuredMatches;
+                if (owner.report.matchedCompleteOutputs < requiredShadow)
+                {
+                    __state.Shadow = true;
+                    __state.Measured = owner.report.matchedCompleteOutputs >= RequiredWarmupMatches;
+                    long candidateStopped = Stopwatch.GetTimestamp();
+                    if (__state.Measured) owner.report.candidateStopwatchTicks += candidateStopped - started;
+                    __state.StockStarted = Stopwatch.GetTimestamp(); return true;
+                }
                 owner.report.suppressedOriginalCalls++;
                 if (owner.report.suppressedOriginalCalls >= MaximumSubstitutions)
                     owner.Stop("bounded-substitution-limit-reached");
@@ -86,13 +94,15 @@ namespace KspContinuum
         {
             AeroSetDragProviderQualification owner = instance;
             if (owner == null || !__state.Shadow) return;
-            owner.report.stockStopwatchTicks += Stopwatch.GetTimestamp() - __state.StockStarted;
+            if (__state.Measured) owner.report.stockStopwatchTicks += Stopwatch.GetTimestamp() - __state.StockStarted;
             owner.report.shadowComparisons++;
             double error;
             if (!Equivalent(__state.Candidate, Snapshot(__instance), out error))
             { owner.report.maximumRelativeError = Math.Max(owner.report.maximumRelativeError, error); owner.Stop("complete-output-mismatch"); return; }
             owner.report.maximumRelativeError = Math.Max(owner.report.maximumRelativeError, error);
             owner.report.matchedCompleteOutputs++;
+            if (__state.Measured) owner.report.shadowMeasuredComparisons++;
+            else owner.report.shadowWarmupComparisons++;
         }
 
         static DragCubeList.CubeData Calculate(DragCubeList cubes, Vector3 input, float mach)
@@ -101,15 +111,12 @@ namespace KspContinuum
             if (cubes.RotateDragVector) direction = cubes.DragVectorRotation * direction;
             PhysicsGlobals.SurfaceCurvesList curves = cubes.SurfaceCurves;
             float[] weightedDrag = cubes.WeightedDrag;
-            var areas = Faces(cubes.AreaOccluded); var drags = Faces(weightedDrag); var depths = Faces(cubes.WeightedDepth);
-            var dragCd = new AeroFaceValues(
-                cubes.DragCurveCd.Evaluate(weightedDrag[0]), cubes.DragCurveCd.Evaluate(weightedDrag[1]),
-                cubes.DragCurveCd.Evaluate(weightedDrag[2]), cubes.DragCurveCd.Evaluate(weightedDrag[3]),
-                cubes.DragCurveCd.Evaluate(weightedDrag[4]), cubes.DragCurveCd.Evaluate(weightedDrag[5]));
-            var bodyLift = new AeroFaceValues(
-                cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, direction.x)), cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, -direction.x)),
-                cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, direction.y)), cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, -direction.y)),
-                cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, direction.z)), cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, -direction.z)));
+            var areas = TrustedFaces(cubes.AreaOccluded); var drags = TrustedFaces(weightedDrag); var depths = TrustedFaces(cubes.WeightedDepth);
+            var dragCd = AeroFaceValues.Trusted(Cd(cubes, weightedDrag[0]), Cd(cubes, weightedDrag[1]),
+                Cd(cubes, weightedDrag[2]), Cd(cubes, weightedDrag[3]), Cd(cubes, weightedDrag[4]), Cd(cubes, weightedDrag[5]));
+            var liftCurve = cubes.BodyLiftCurve.liftCurve;
+            var bodyLift = AeroFaceValues.Trusted(Lift(liftCurve, direction.x), Lift(liftCurve, -direction.x),
+                Lift(liftCurve, direction.y), Lift(liftCurve, -direction.y), Lift(liftCurve, direction.z), Lift(liftCurve, -direction.z));
             AeroCompleteSetDragResult result = AeroCompleteSetDrag.Evaluate(new Vec(direction.x, direction.y, direction.z),
                 areas, drags, depths, dragCd, bodyLift, curves.dragCurveTail.Evaluate(mach),
                 curves.dragCurveSurface.Evaluate(mach), curves.dragCurveMultiplier.Evaluate(mach),
@@ -123,7 +130,9 @@ namespace KspContinuum
             };
         }
 
-        static AeroFaceValues Faces(float[] values) => new AeroFaceValues(values[0], values[1], values[2], values[3], values[4], values[5]);
+        static AeroFaceValues TrustedFaces(float[] values) => AeroFaceValues.Trusted(values[0], values[1], values[2], values[3], values[4], values[5]);
+        static double Cd(DragCubeList cubes, float drag) => drag < 1 ? cubes.DragCurveCd.Evaluate(drag) : 0;
+        static double Lift(FloatCurve curve, float dot) => dot > 0 ? curve.Evaluate(dot) : 0;
         static Vector3 Vector(Vec value) => new Vector3((float)value.X, (float)value.Y, (float)value.Z);
         static DragCubeList.CubeData Snapshot(DragCubeList cubes) => new DragCubeList.CubeData {
             dragVector = cubes.DragVector, liftForce = cubes.LiftForce, area = cubes.Area,
@@ -159,6 +168,14 @@ namespace KspContinuum
             return patches != null && patches.Prefixes.Count == 1 && patches.Postfixes.Count == 1 &&
                 patches.Transpilers.Count == 0 && patches.Finalizers.Count == 0 &&
                 patches.Prefixes[0].owner == Owner && patches.Postfixes[0].owner == Owner;
+        }
+        bool TargetOwnedForFrame()
+        {
+            int frame = Time.frameCount;
+            if (frame == patchGraphFrame) return true;
+            report.patchGraphInspections++;
+            if (!TargetStillOwned(target)) return false;
+            patchGraphFrame = frame; return true;
         }
         void Stop(string reason)
         {
