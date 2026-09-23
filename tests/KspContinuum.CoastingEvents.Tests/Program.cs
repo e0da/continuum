@@ -105,13 +105,15 @@ static class Program
             eventDirection = "outward", eventUniversalTime = manyCrossings.TimeSeconds,
             eventRadiusMeters = semiMajor, eventRadiusErrorMeters = Math.Abs(Radius(manyCrossings.Body.Position) - semiMajor),
             engineFrontierAtEvent = true, warpStopRequested = true,
-            synchronizationStopwatchFrequency = 10000000, stateCaptureTicks = 17, forecastAdmissionTicks = 19,
+            synchronizationStopwatchFrequency = 10000000, synchronizationMeasuredCallbacks = 1,
+            stateCaptureTicks = 17, forecastAdmissionTicks = 19,
             engineSamples = 3, callbackTicks = 110, evaluationTicks = 10, publicationTicks = 20,
             validationTicks = 30, driverRemainderTicks = 50
         };
         string encoded = ReportJson.Encode(report);
         Check(encoded.Contains("\"eventKind\":\"radius-crossing\"") &&
             encoded.Contains("\"engineFrontierAtEvent\":true") && encoded.Contains("\"warpStopRequested\":true") &&
+            encoded.Contains("\"synchronizationMeasuredCallbacks\":1") &&
             encoded.Contains("\"evaluationTicks\":10") && encoded.Contains("\"publicationTicks\":20") &&
             encoded.Contains("\"validationTicks\":30") && encoded.Contains("\"driverRemainderTicks\":50"),
             "coasting event report fields did not cross the real serializer seam");

@@ -27,8 +27,8 @@ The adapter seeds `Orbit.UpdateFromStateVectors`, then arms a thread-local one-s
 
 The JSON and cadence text receipts separate the bridge's synchronization cost. `stateCaptureTicks` measures the one-time
 successful KSP state read and engine/reference construction after eligibility. `forecastAdmissionTicks` measures the
-completed-forecast checks and authority admission, excluding background forecast time. Per authoritative driver callback,
-`evaluationTicks` measures Continuum sampling or interpolation, `publicationTicks` measures
+completed-forecast checks and authority admission, excluding background forecast time. Per successfully validated
+authoritative driver callback, `evaluationTicks` measures Continuum sampling or interpolation, `publicationTicks` measures
 `Orbit.UpdateFromStateVectors`, and `validationTicks` measures stock-reference, injected-orbit and driver readback plus
 error gates. `driverRemainderTicks` is the nonnegative remainder of total measured callback time after those three nested
 phases; it includes KSP's retained `OrbitDriver.UpdateOrbit` work between prefix and postfix as well as timer and wrapper
@@ -36,6 +36,12 @@ overhead. The total starts after the Harmony prefix has identified the owned dri
 completion bookkeeping. It therefore does not measure Harmony dispatch or the whole fixed step. `stopwatchFrequency`
 converts ticks to seconds. Direct and Hermite runs from the same package expose whether fewer engine samples reduce
 evaluation cost while publication and retained KSP driver work remain unchanged.
+
+The per-callback phase totals contain only callbacks that consumed the exact suppression token and completed every
+readback and validation step. `synchronizationMeasuredCallbacks` is that denominator and equals
+`candidateDriverCalls` for a qualified run. A candidate exception, missing token, changed driver or readback exception
+invalidates the run but is omitted from these phase totals because it did not reach the common timing boundary. The
+separate fallback/error counters expose those omissions; phase comparisons require both to be zero.
 
 The bounded run compares every Continuum sample with an independent stock `Orbit` initialized from the same seed. It also verifies the driver's presented position and velocity against the seeded orbit after KSP's swizzle. Any comparison outside tolerance releases immediately. Fixed-forecast mode completes after 256 accepted calls. Event mode remains admitted only until its bounded event horizon or the earlier guard, then confirms the independently advanced frontier did not move during presentation sampling, reseeds the live orbit at current KSP time while the same packed domain is still valid, and removes its Harmony patches. `--continuum-coast-quit-after-qualification` exits after either qualification path finishes.
 

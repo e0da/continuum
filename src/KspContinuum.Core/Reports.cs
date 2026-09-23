@@ -143,7 +143,8 @@ namespace KspContinuum
         public int admittedWarpRateIndex;
         public int eventEvaluations, warpRateIndexBeforeStopRequest, warpRateIndexAfterStopRequest;
         public long candidateDriverCalls, suppressedStockPropagations, stockFallbacks, errors;
-        public long synchronizationStopwatchFrequency, stateCaptureTicks, forecastAdmissionTicks,
+        public long synchronizationStopwatchFrequency, synchronizationMeasuredCallbacks,
+            stateCaptureTicks, forecastAdmissionTicks,
             engineSamples, callbackTicks, maximumCallbackTicks,
             evaluationTicks, maximumEvaluationTicks,
             publicationTicks, maximumPublicationTicks,

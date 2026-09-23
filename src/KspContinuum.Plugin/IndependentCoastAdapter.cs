@@ -585,6 +585,7 @@ namespace KspContinuum
         void PopulateSynchronizationReport()
         {
             report.synchronizationStopwatchFrequency = Stopwatch.Frequency;
+            report.synchronizationMeasuredCallbacks = report.candidateDriverCalls;
             report.engineSamples = cadence == null ? 0 : cadence.EngineSampleCount;
             report.callbackTicks = callbackTicks; report.maximumCallbackTicks = maximumCallbackTicks;
             report.evaluationTicks = sampleTicks; report.maximumEvaluationTicks = maximumSampleTicks;
@@ -602,6 +603,7 @@ namespace KspContinuum
                 "driverCallbacks=" + report.candidateDriverCalls + newline +
                 "engineSamples=" + cadence.EngineSampleCount + newline +
                 "stopwatchFrequency=" + Stopwatch.Frequency + newline +
+                "synchronizationMeasuredCallbacks=" + report.candidateDriverCalls + newline +
                 "callbackTicksTotal=" + callbackTicks + newline + "callbackTicksMaximum=" + maximumCallbackTicks + newline +
                 "sampleTicksTotal=" + sampleTicks + newline + "sampleTicksMaximum=" + maximumSampleTicks + newline +
                 "publicationTicksTotal=" + seedTicks + newline + "publicationTicksMaximum=" + maximumSeedTicks + newline +
