@@ -89,6 +89,7 @@ namespace KspContinuum
                 type != typeof(StructuralVesselAttachmentRow) && type != typeof(StructuralVesselCandidateSummary) &&
                 type != typeof(StructuralVesselCaptureContextReport) &&
                 type != typeof(LiveControlIdentity) && type != typeof(LiveVesselSnapshot) &&
+                type != typeof(LiveSweepStatus) &&
                 type != typeof(LiveControlReply) &&
                 type != typeof(NativeBoundaryMonoReport) && type != typeof(NativeBoundaryMonoRow) &&
                 type != typeof(NativeBoundaryMonoTiming))

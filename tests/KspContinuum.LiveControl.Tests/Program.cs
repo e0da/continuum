@@ -108,6 +108,14 @@ static class Program
             20, 3, Capture, StartSweep, SweepStatus);
         Check(completed.status == "ok" && completed.sweep.state == "complete" && completed.sweep.windowIndex == 5,
             "poll named sweep");
+        using (var json = JsonDocument.Parse(ReportJson.Encode(completed)))
+        {
+            JsonElement sweep = json.RootElement.GetProperty("sweep");
+            Check(sweep.GetProperty("state").GetString() == "complete" &&
+                sweep.GetProperty("directory").GetString() == "/runtime/report" &&
+                sweep.GetProperty("windowIndex").GetInt32() == 5,
+                "populated sweep reply encoding");
+        }
         LiveControlReply busyQuit = control.Execute(LiveControlRequest.Parse("quit-when-idle 1.1.0 quit1 " + Session + " 1"),
             20, 3, Capture, StartSweep, SweepStatus, () => "experiment-busy");
         Check(busyQuit.status == "rejected" && busyQuit.reason == "experiment-busy", "active sweep blocks quit");
