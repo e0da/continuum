@@ -1,0 +1,25 @@
+using System;
+
+namespace KspContinuum
+{
+    [Serializable]
+    public sealed class AeroSetDragSubstitutionReport
+    {
+        public string schema = "ksp-continuum-set-drag-substitution/v1";
+        public string status = "created";
+        public string reason;
+        public string strategy = "complete-stock-set-drag-reduction/v1";
+        public int requiredShadowMatches;
+        public int maximumSubstitutions;
+        public int shadowComparisons;
+        public int matchedCompleteOutputs;
+        public int suppressedOriginalCalls;
+        public int stockFallbacks;
+        public long candidateStopwatchTicks;
+        public long stockStopwatchTicks;
+        public double maximumRelativeError;
+        public bool stockUpdateAerodynamicsRemainedAuthoritative = true;
+        public bool stockForceApplicationRemainedAuthoritative = true;
+        public bool unityIntegrationRemainedAuthoritative = true;
+    }
+}

@@ -141,6 +141,17 @@ which remains diagnostic because it consumes stock-computed magnitude terms. See
 [`aero-set-drag-reconstruction.md`](aero-set-drag-reconstruction.md) for the frozen hypotheses, tolerances, and the
 passing development/held-out capture-v3 qualification gate. Body lift remains excluded.
 
+`AeroCompleteSetDrag` extends that bounded reduction to every `DragCubeList.CubeData` output: drag vector, lift force,
+area, area drag, depth, cross-sectional area, exposed area, drag coefficient, and taper. Unity remains responsible for
+curve evaluation; the portable kernel receives the resulting samples and performs the allocation-free six-face
+reduction. The opt-in `--continuum-live-setdrag-provider` addon first compares 128 complete candidate outputs with stock,
+then suppresses and replaces exactly 256 original `SetDrag` calls. Its receipt records both counts, maximum relative
+error, and separately timed candidate and stock windows. Any mismatch, nonfinite result, unsupported KSP version, or
+competing patch on `SetDrag` stops substitution and leaves subsequent calls to stock. `UpdateAerodynamics`, body-drag
+and body-lift application, ocean handling, and Unity integration remain stock-owned. A mod such as KSP Community Fixes
+that inlines this reduction in a broader `UpdateAerodynamics` replacement can bypass the `SetDrag` seam entirely; the
+bounded provider makes no compatibility claim for that configuration.
+
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
 The default archive and metadata filenames include the archive's full SHA-256, and the metadata points to that immutable

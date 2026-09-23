@@ -33,6 +33,12 @@ static class Program
         Check(state.TryBeginPublication(true, true)); state.PublicationFailed("InvalidOperationException");
         Check(report.status == "abstained" && report.reason == "publication-failed:InvalidOperationException" && report.stockFallbacks == 1);
         Check(ReportJson.Encode(report).Contains("\"unityIntegrationRemainedAuthoritative\":true"));
+        var setDrag = new AeroSetDragSubstitutionReport { status = "complete", matchedCompleteOutputs = 128,
+            suppressedOriginalCalls = 256, maximumRelativeError = 1e-6 };
+        string encoded = ReportJson.Encode(setDrag);
+        Check(encoded.Contains("\"schema\":\"ksp-continuum-set-drag-substitution/v1\"") &&
+            encoded.Contains("\"suppressedOriginalCalls\":256") &&
+            encoded.Contains("\"stockForceApplicationRemainedAuthoritative\":true"));
         Console.WriteLine("PASS " + checks + " aero force substitution assertions");
     }
 }

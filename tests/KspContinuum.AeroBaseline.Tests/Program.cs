@@ -260,6 +260,39 @@ static class Program
         Near(2, EvaluateClamp(clamped, 2), "clamp-forever post-wrap", 0);
     }
 
+    static void CompleteSetDragReduction()
+    {
+        var ones = new AeroFaceValues(1, 1, 1, 1, 1, 1);
+        var drags = new AeroFaceValues(2, 2, 2, 2, 2, 2);
+        var depths = new AeroFaceValues(1, 2, 3, 4, 5, 6);
+        AeroCompleteSetDragResult result = AeroCompleteSetDrag.Evaluate(new Vec(1, 0, 0), ones, drags,
+            depths, ones, ones, 1, 2, 2, 3, 1);
+        Near(new Vec(1, 0, 0), result.DragVector, "complete SetDrag direction");
+        Near(new Vec(-2, 0, 0), result.LiftForce, "complete SetDrag lift");
+        Near(24, result.AreaSquareMeters, "complete SetDrag area");
+        Near(48, result.AreaDragSquareMeters, "complete SetDrag area drag");
+        Near(1, result.DepthMeters, "complete SetDrag depth");
+        Near(1, result.CrossSectionalAreaSquareMeters, "complete SetDrag cross section");
+        Near(12, result.ExposedAreaSquareMeters, "complete SetDrag exposed area");
+        Near(2, result.DragCoefficient, "complete SetDrag coefficient");
+        Near(1, result.TaperDot, "complete SetDrag taper");
+
+        var subunit = new AeroFaceValues(.5, .5, .5, .5, .5, .5);
+        var cd = new AeroFaceValues(.25, .25, .25, .25, .25, .25);
+        result = AeroCompleteSetDrag.Evaluate(new Vec(-1, 0, 0), ones, subunit, depths, cd,
+            ones, 1, 1, 1, 1, 2);
+        Near(3d / 8d, result.AreaDragSquareMeters, "complete SetDrag Cd curve reduction");
+        Near(2, result.DepthMeters, "negative face depth");
+        Near(2, result.TaperDot, "subunit drag taper weighting");
+        result = AeroCompleteSetDrag.Evaluate(new Vec(), ones, drags, depths, ones, ones, 1, 2, 2, 3, 1);
+        Near(new Vec(), result.DragVector, "zero direction retained");
+        Near(24, result.AreaSquareMeters, "zero direction surface area");
+        Check(Reject(() => AeroCompleteSetDrag.Evaluate(new Vec(1, 0, 0), ones, drags, depths, ones, ones,
+            1, 2, 0, 3, 1)), "zero surface multiplier rejected");
+        Check(Reject(() => AeroCompleteSetDrag.Evaluate(new Vec(2, 0, 0), ones, drags, depths, ones, ones,
+            1, 2, 2, 3, 1)), "non-unit direction rejected");
+    }
+
     static double EvaluateClamp(AeroFloatCurveDefinition curve, double time)
     {
         var inputs = new AeroSetDragInputs(new[] { 1d, 0, 0, 0, 0, 0 }, new[] { time, 2, 2, 2, 2, 2 },
@@ -271,7 +304,7 @@ static class Program
     static int Main()
     {
         DynamicPressureAndFaces(); MetamorphicBehavior(); DomainAndBatches(); RegimeMatrix(); SetDragCaptureSufficiency();
-        SetDragReconstruction();
+        SetDragReconstruction(); CompleteSetDragReduction();
         Console.WriteLine("PASS " + checks + " aerodynamic baseline assertions");
         return 0;
     }
