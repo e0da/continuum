@@ -40,7 +40,8 @@ namespace KspContinuum
         public void Awake()
         {
             string[] arguments = Environment.GetCommandLineArgs();
-            if (Array.IndexOf(arguments, "--continuum-scale-profile") < 0 || !ScaleQualificationSelection.Requested(arguments)) return;
+            if ((Array.IndexOf(arguments, "--continuum-scale-profile") < 0 &&
+                Array.IndexOf(arguments, "--continuum-experiment-host") < 0) || !ScaleQualificationSelection.Requested(arguments)) return;
             active = true; started = Time.realtimeSinceStartup; DontDestroyOnLoad(gameObject);
             GameEvents.onLevelWasLoadedGUIReady.Add(OnGuiReady);
             try

@@ -143,3 +143,84 @@ One installed paired observation used source `da653dc950447d3f99aeb6dd3d186806e0
 Outermost-per-method means in the attributed run were 0.70957 ms for `FlightIntegrator.FixedUpdate`, 0.67048 ms for `FlightInputHandler.FixedUpdate`, 0.26942 ms for `FlightIntegrator.UpdateThermodynamics`, and 0.22355 ms for the recursive `FlightIntegrator.Integrate` entry. `Integrate` made 42,728 total calls but only 218 outermost calls; its raw 626.19 ms inclusive total demonstrates why recursive totals cannot rank providers. Six `ModuleDeployableSolarPanel.FixedUpdate` calls per step averaged 0.05971 ms each, but its base `ModuleDeployablePart.FixedUpdate` row is nested and must not be added. These rows identify concrete optimization candidates while retaining overlap and instrumentation limits.
 
 No solar, body or convection occlusion seam ran inside this fixed-update window. Stock `FlightIntegrator.Update`, outside the measured subtree, owns steady `UpdateOcclusion(false)` work; absence here does not establish that thermal occlusion was idle or cheap. The separate script-update scope was about 1.21 ms p50 in the preceding observation, but this experiment does not attribute it. Update-scope attribution is a later experiment, not part of this fixed-callback result.
+## Experimental dry-orbit buoyancy admission
+
+The 196-part station attribution observed 23,980 stock buoyancy calls across 218 fixed steps (110 per step) and 51.8151
+ms of instrumented inclusive time, or 0.23768 ms per step. That was only an upper bound because callback timing overhead
+is material at this cadence.
+
+The first `--continuum-dry-buoyancy` candidate used one Harmony prefix per part callback. It ran only for initialized,
+settled dry parts of the active loaded vessel in a high `ORBITING` regime around an ocean body. The paired installed
+experiment used source `810e40a`, package SHA-256
+`4b9e47a4ffdc6e66666ac6b1f20ba4fc8f9bf80df131059bc72706dc2e9ccd9e`, plugin SHA-256
+`12fb9edbbd120c4afaecbcee7f6205edc32a938546ffc58d125c14c578dd1a75`, and the unchanged station checkpoint. All four
+runs completed and exited 0. Both candidate runs verified every dry publication, recorded zero fallback or callback
+errors, and removed their owned prefix.
+
+| Order | Prefix | Component bypasses | Script p50 / p95 (ms) | Physics p50 / p95 (ms) | Active fixed parent mean (ms) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | Off | 0 | 2.9456 / 3.62945 | 1.1558 / 1.45595 | 4.20405 |
+| 2 | On | 22,550 | 2.9063 / 3.6597 | 1.2139 / 1.52186 | 4.23730 |
+| 3 | On | 20,790 | 2.9040 / 3.87878 | 1.2059 / 1.5440 | 4.28663 |
+| 4 | Off | 0 | 2.9460 / 3.5857 | 1.1408 / 1.4203 | 4.18168 |
+
+The prefix reduced script p50 by about 0.04 ms, but the enclosing active fixed-step parent mean was about 0.8% and 2.5%
+slower than its neighboring baselines. This experiment demonstrates no end-to-end gain. The component callbacks and
+per-part prefix dispatch remained in the hot path.
+
+The current strategy, identified as `playerloop-batch-disable` in new receipts, moves admission to the existing
+PlayerLoop boundary. Before each `ScriptRunBehaviourFixedUpdate` traversal it revalidates the vessel and every owned
+component, republishes and verifies dry integration state as one batch, and disables only the initially enabled
+`PartBuoyancy` behaviours that Continuum owns. [Unity does not update disabled behaviours](https://docs.unity3d.com/2019.4/Documentation/ScriptReference/Behaviour-enabled.html). Any ineligible state, loop
+fault, or teardown restores and reads back every owned enable independently before stock script traversal continues.
+The probe also restores the batch at the first boundary audit that detects PlayerLoop invalidation; work between an
+external loop mutation and that next audit is outside the qualified interval.
+The batch report distinguishes fixed steps, owned components, component-step bypasses, publications, fallbacks, errors,
+and cleanup. Its work runs before the script child timer begins, so only the enclosing active fixed-step parent can
+establish a net gain.
+
+Both strategies use a 10 km minimum clearance plus a two-tick swept descent bound and fall back for ambiguous, wet,
+near-surface, packed, inactive, delayed-call, prior-wet, or nonfinite state. Diagnostic geometry and depth fields retain
+their last dry values, so this remains an opt-in KSP 1.12.5 physical-equivalence experiment rather than a complete
+stock-output substitute. Existing Harmony ownership is checked at installation; a foreign patch added later is not
+detected. A verified publication establishes internal consistency after Continuum writes it, not equality with an
+independently executed stock trajectory.
+
+The corrected full-publication batch also failed to show a repeatable enclosing-parent improvement across separate
+launches. Its first on/off comparison was 4.41218/4.44056 ms active-parent mean (0.64% lower with the batch); the
+reversed comparison was 4.21881/3.94583 ms (6.92% higher with the batch). The two stock baselines differed by about
+11%, overwhelming the candidate effect and making more one-window-per-launch comparisons a poor experiment.
+
+`--continuum-dry-buoyancy-sweep` therefore runs six windows inside one process:
+stock, full-publication, resident-domain, stock, resident-domain, and full-publication. Every window gets an independent
+300-frame receipt and owned PlayerLoop lifetime, with restoration between windows. `resident-dry-domain` performs the
+full per-part check only when entering the high dry orbit domain. While vessel-level eligibility remains true it leaves
+the owned callbacks disabled and performs no per-part validation or publication. This deliberately tests the value of
+resident Continuum state and coarse domain scheduling; dry publications and diagnostics remain stale, and same-count
+topology replacement is outside this experiment. Stock callbacks are restored before an ineligible script traversal.
+The sweep can auto-run from the qualification CLI or be started and polled through the loopback control plane without
+quitting KSP.
+
+The corrected experiment host completed two externally started sweeps against the headless 196-part station. The
+client observed all six states in each sweep, both runs exited 0, and each result is the active fixed-step parent mean
+in milliseconds:
+
+| Sweep | Stock 1 | Full publication 1 | Resident 1 | Stock 2 | Resident 2 | Full publication 2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `022211884-aca1bc88a09d4d938514c662d362d9b5` | 4.18850 | 4.01463 | 4.12285 | 4.40089 | 4.24304 | 4.36755 |
+| `022254725-bdf40959c8f14a7ba2b74d75daf393bb` | 4.46643 | 4.34313 | 4.27167 | 4.39509 | 4.24516 | 4.38166 |
+
+The four resident windows were 1.57% to 4.36% lower than their neighboring stock window. This fixed-order exploratory
+sample supports continuing the resident-domain design; it does not establish a universal speedup, an FPS change, or
+the contribution of buoyancy independently from order and thermal drift. The host used source `2e5f177`, package
+SHA-256 `754da21acb639382a0fef60de1ead729c202f9f0a15e5edf484e211dd83e5c83`, and plugin SHA-256
+`6fbfc1cfe0d85104bfa890ac821fcbeee3000132cc46b1cccab69f569c1a60ed`.
+
+For a repeatable control-plane host, launch with `--continuum-experiment-host`,
+`--continuum-scale-save SAVE`, `--continuum-scale-checkpoint CHECKPOINT`, and
+`--continuum-control-port=47771`. The persistent loader selects the immutable checkpoint, but the scaling component
+remains idle and never quits KSP. Send the sweep start command after Flight is ready; subsequent starts reuse the live
+vessel and create a new result directory.
+
+This boundary probe is not Continuum's permanent object-callback architecture. The follow-up is vessel- or island-level
+domain selection over Continuum-owned state, with KSP reconciliation at explicit boundaries.

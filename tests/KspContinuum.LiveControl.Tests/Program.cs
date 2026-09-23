@@ -97,7 +97,31 @@ static class Program
         LiveControlReply hello = Execute(control, "hello 1.0.0 hello1", 20, 3, Capture);
         Check(hello.status == "ok" && hello.identity.epoch == 1 && hello.snapshot == null &&
             hello.requestId == "hello1" && hello.protocolVersion == "1.0.0", "hello identity");
-        Check(hello.capabilities.Length == 2 && captures == 0, "read-only capabilities");
+        Check(hello.capabilities.Length == 4 && captures == 0, "live control capabilities");
+        LiveSweepStatus StartSweep() => new LiveSweepStatus { state = "running", window = "stock-01", windowIndex = 0 };
+        LiveSweepStatus SweepStatus() => new LiveSweepStatus { state = "complete", directory = "/runtime/report", window = "full-publication-02", windowIndex = 5 };
+        LiveControlReply started = control.Execute(LiveControlRequest.Parse("sweep-start 1.1.0 sweep1 " + Session + " 1 dry-buoyancy"),
+            20, 3, Capture, StartSweep, SweepStatus);
+        Check(started.status == "ok" && started.protocolVersion == "1.1.0" && started.sweep.state == "running" &&
+            started.sweep.windowIndex == 0, "start named sweep");
+        LiveControlReply completed = control.Execute(LiveControlRequest.Parse("sweep-status 1.1.0 sweep2 " + Session + " 1 dry-buoyancy"),
+            20, 3, Capture, StartSweep, SweepStatus);
+        Check(completed.status == "ok" && completed.sweep.state == "complete" && completed.sweep.windowIndex == 5,
+            "poll named sweep");
+        using (var json = JsonDocument.Parse(ReportJson.Encode(completed)))
+        {
+            JsonElement sweep = json.RootElement.GetProperty("sweep");
+            Check(sweep.GetProperty("state").GetString() == "complete" &&
+                sweep.GetProperty("directory").GetString() == "/runtime/report" &&
+                sweep.GetProperty("windowIndex").GetInt32() == 5,
+                "populated sweep reply encoding");
+        }
+        LiveControlReply busyQuit = control.Execute(LiveControlRequest.Parse("quit-when-idle 1.1.0 quit1 " + Session + " 1"),
+            20, 3, Capture, StartSweep, SweepStatus, () => "experiment-busy");
+        Check(busyQuit.status == "rejected" && busyQuit.reason == "experiment-busy", "active sweep blocks quit");
+        LiveControlReply acceptedQuit = control.Execute(LiveControlRequest.Parse("quit-when-idle 1.1.0 quit2 " + Session + " 1"),
+            20, 3, Capture, StartSweep, SweepStatus, () => null);
+        Check(acceptedQuit.status == "ok", "idle host accepts quit");
         Check(Execute(control, "snapshot 1.0.0 snap1 " + Session + " 1 3", 21, 4, Capture).snapshot.parts == 14, "snapshot");
         control.Observe("Flight", Vessel, true);
         Check(Execute(control, "snapshot 1.0.0 rebound " + Session + " 1 3", 21, 4, Capture).reason == "stale-identity",

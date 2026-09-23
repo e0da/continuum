@@ -25,6 +25,7 @@ namespace KspContinuum
         ActiveVesselPhysicsSubstitutionCanary substitutionCanary;
         PartForceObservation partForces;
         FixedCallbackAttribution callbackAttribution;
+        DryBuoyancyRuntime dryBuoyancy;
         Action<ProbeReport> completion;
         bool started, finished;
         int completed;
@@ -32,6 +33,11 @@ namespace KspContinuum
         string lastVesselId;
         int structuralRigidbodies = -1, structuralJoints = -1, structuralColliders = -1;
         const int FrameCount = 300;
+        readonly string dryBuoyancyStrategy;
+        readonly bool forcePlayerLoop;
+
+        public Probe(string dryBuoyancyStrategy = null, bool forcePlayerLoop = false)
+        { this.dryBuoyancyStrategy = dryBuoyancyStrategy; this.forcePlayerLoop = forcePlayerLoop; }
 
         public IEnumerator Run(Action<ProbeReport> complete)
         {
@@ -77,11 +83,21 @@ namespace KspContinuum
                     callbackAttribution = new FixedCallbackAttribution(); callbackAttribution.Start();
                     report.callbackAttribution = callbackAttribution.Report;
                 }
-                if (Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null)
+                bool explicitStock = dryBuoyancyStrategy == DryBuoyancyRuntime.Stock;
+                string requestedDryStrategy = explicitStock ? null : dryBuoyancyStrategy;
+                if (!explicitStock && requestedDryStrategy == null && Array.IndexOf(arguments, "--continuum-dry-buoyancy") >= 0)
+                    requestedDryStrategy = DryBuoyancyRuntime.FullPublication;
+                if (requestedDryStrategy != null)
+                {
+                    dryBuoyancy = new DryBuoyancyRuntime(requestedDryStrategy); dryBuoyancy.Start(); report.dryBuoyancy = dryBuoyancy.Report;
+                    if (dryBuoyancy.Report.status != "installed") throw new InvalidOperationException("Dry buoyancy admission did not install: " + dryBuoyancy.Report.status);
+                }
+                if (forcePlayerLoop || Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null || dryBuoyancy != null)
                 {
                     IPlayerLoopBracketObserver observer = writerCensus == null ? null : writerCensus.Census;
                     if (substitutionCanary != null) observer = new CompositePlayerLoopObserver(observer, substitutionCanary);
                     if (callbackAttribution != null) observer = new CompositePlayerLoopObserver(observer, callbackAttribution);
+                    if (dryBuoyancy != null) observer = new CompositePlayerLoopObserver(observer, dryBuoyancy);
                     playerLoop = new PlayerLoopTiming(observer); playerLoop.Start(); report.playerLoop = playerLoop.Report;
                     if (substitutionCanary != null) substitutionCanary.Start();
                 }
@@ -100,7 +116,15 @@ namespace KspContinuum
                 {
                     yield return null;
                     if (finished) yield break;
-                    if (playerLoop != null) playerLoop.Audit();
+                    if (playerLoop != null)
+                    {
+                        playerLoop.Audit();
+                        if (dryBuoyancy != null && playerLoop.Report.integrityStatus == "invalidated")
+                        {
+                            dryBuoyancy.Dispose();
+                            dryBuoyancy = null;
+                        }
+                    }
                     if (partForces != null) partForces.Tick();
                     double now = clock.Elapsed.TotalSeconds;
                     previous.observedFrame = Time.frameCount;
@@ -219,6 +243,14 @@ namespace KspContinuum
                 catch (Exception error) { errors.Add("CallbackAttribution: " + error.GetType().Name); }
                 if (callbackAttribution.Report.cleanupStatus == "cleanup-error") errors.Add("CallbackAttribution: cleanup-error");
                 callbackAttribution = null;
+            }
+            if (dryBuoyancy != null)
+            {
+                try { dryBuoyancy.Dispose(); }
+                catch (Exception error) { errors.Add("DryBuoyancy: " + error.GetType().Name); }
+                if (dryBuoyancy.Report.cleanupStatus == "cleanup-error") errors.Add("DryBuoyancy: cleanup-error");
+                if (dryBuoyancy.Report.status != "complete") errors.Add("DryBuoyancy: " + dryBuoyancy.Report.status);
+                dryBuoyancy = null;
             }
             if (partForces != null)
             {

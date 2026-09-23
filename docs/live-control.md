@@ -1,6 +1,6 @@
-# Read-only live control slice
+# Live experiment control slice
 
-[E0D-1882](https://linear.app/e0da/issue/E0D-1882/expose-a-typed-external-control-and-observation-plane-for-live-ksp) owns the broader external control and observation plane. This first slice is an opt-in, read-only loopback endpoint for KSP 1.12.5 flight. It exposes `hello` and one active-vessel snapshot. It does not pause, step, inject inputs, stream telemetry, restore saves, or confer simulation authority.
+[E0D-1882](https://linear.app/e0da/issue/E0D-1882/expose-a-typed-external-control-and-observation-plane-for-live-ksp) owns the broader external control and observation plane. The opt-in loopback endpoint for KSP 1.12.5 flight exposes `hello`, an active-vessel snapshot, and a named dry-buoyancy strategy sweep. It does not pause, step, inject inputs, stream telemetry, restore saves, or confer general simulation authority.
 
 Start KSP with `--continuum-control-port=47771` and the Continuum addon installed. The port is an example; choose a free local port. The listener binds only `127.0.0.1` and exists only while the flight addon exists. Keep a TCP connection open and send ASCII command lines ending in LF; each receives one JSON line with the matching request ID. This first implementation handles one request at a time per connection. Frames are limited to 256 bytes, the accept backlog is one, pending game-thread work is bounded, and at most one request is handled per `Update`. The protocol has no remote access or authentication and should be used only with trusted local processes.
 
@@ -9,9 +9,25 @@ Start KSP with `--continuum-control-port=47771` and the Continuum addon installe
 
 The wire grammar has no optional fields in version 1.0.0: extra tokens are rejected as `invalid-request`, unknown operations as `unknown-operation`, and unsupported versions as `unsupported-version`. IDs use up to 64 ASCII letters, digits, `_`, or `-`. Replies echo valid IDs, name typed status/reason values, and advertise the minimum and maximum supported protocol version. Future minor versions may add optional response fields and capabilities; clients should ignore unknown response fields and gate behavior on negotiated capabilities. Removing or changing a field or operation requires a new major version and an explicit deprecation period. No telemetry events exist yet. When added, telemetry may have bounded/drop policies; commands, acknowledgements, and history cannot share a droppable queue.
 
+Protocol 1.1 adds `sweep-start` and `sweep-status` for the single named `dry-buoyancy` experiment. Both bind the request to the negotiated session and vessel epoch. Status reports the current state and window; a completed run reports its local result directory. The same KSP process can run the sweep again after completion. `quit-when-idle` asks the owned process to exit after experiments and rejects while a sweep is waiting or running.
+
+The Rust client starts the sweep and prints state changes until it completes, without restarting KSP:
+
+```sh
+tools/live-control-client/target/release/continuum-live-control-client \
+  --address 127.0.0.1:47771 --dry-buoyancy-sweep
+```
+
+After the experiment queue is idle, close the owned host through the same endpoint:
+
+```sh
+tools/live-control-client/target/release/continuum-live-control-client \
+  --address 127.0.0.1:47771 --quit-when-idle
+```
+
 The snapshot contains bounded scalar fields: vessel identity and name, body, situation, loaded/packed flags, part count, universal time, altitude, surface/orbital speed, and throttle. It does not enumerate parts or expose Unity object references. `observedFixedCallbacks` counts this addon's `FixedUpdate` calls; it is not a claim of a global deterministic physics tick. Snapshot capture and request validation run on Unity's main thread during `Update`. Socket I/O runs on a background thread. `observerNanoseconds` measures main-thread validation and capture, excluding JSON serialization, queue wait, socket I/O, and the small per-frame vessel/scene identity check. It is diagnostic overhead, not a whole-frame profile.
 
-The portable test exercises identity invalidation, invalid data, socket framing, and the socket-to-game-thread queue. A successful portable or addon build does not prove this endpoint works in an installed KSP process. The next qualification is an opt-in live `hello` and snapshot against a known vessel, with observed frame impact and teardown checked. Subsequent control operations need explicit writer ownership and safe-boundary acknowledgements; the read-only endpoint grants neither.
+The portable test exercises identity invalidation, invalid data, named sweep dispatch, socket framing, and the socket-to-game-thread queue. A successful portable or addon build does not prove this endpoint works in an installed KSP process. The sweep reuses the experiment runner's own single-owner admission and cleanup; the endpoint does not grant authority to other writers.
 
 ## Live qualification
 

@@ -60,6 +60,7 @@ namespace KspContinuum
             if (type != typeof(BenchReport) && type != typeof(Sample) && type != typeof(QueuedForceIsolationSample) && type != typeof(VesselReport) &&
                 type != typeof(PartReport) && type != typeof(ProbeReport) && type != typeof(MarkerReport) &&
                 type != typeof(CallbackAttributionReport) && type != typeof(CallbackAttributionRow) &&
+                type != typeof(DryBuoyancyReport) &&
                 type != typeof(ProfileFrame) && type != typeof(ProfileDistribution) && type != typeof(ProfileMarkerSummary) &&
                 type != typeof(LoopTimingReport) && type != typeof(LoopTimingScope) && type != typeof(LoopTimingSample) &&
                 type != typeof(WriterCensusReport) && type != typeof(WriterCensusInterval) &&
@@ -88,6 +89,7 @@ namespace KspContinuum
                 type != typeof(StructuralVesselAttachmentRow) && type != typeof(StructuralVesselCandidateSummary) &&
                 type != typeof(StructuralVesselCaptureContextReport) &&
                 type != typeof(LiveControlIdentity) && type != typeof(LiveVesselSnapshot) &&
+                type != typeof(LiveSweepStatus) &&
                 type != typeof(LiveControlReply) &&
                 type != typeof(NativeBoundaryMonoReport) && type != typeof(NativeBoundaryMonoRow) &&
                 type != typeof(NativeBoundaryMonoTiming))
