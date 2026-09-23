@@ -87,6 +87,21 @@ static class Program
         var circular = new CoastingEngine(0, 3.5316e12, new[] { Periapsis(0, 3.5316e12, 700000, 0) }, 1);
         Check(CoastingEventScheduler.FindFirst(circular, new RadiusCrossingSearch(0, 1000, 710000,
             RadiusCrossingDirection.Outward)) == null, "non-crossing circular orbit produced an event");
+        Check(!CoastingEventScheduler.GuardReached(epoch + 90, epoch + 100, 5),
+            "warp guard fired before its lead window");
+        Check(CoastingEventScheduler.GuardReached(epoch + 95, epoch + 100, 5) &&
+            CoastingEventScheduler.GuardReached(epoch + 101, epoch + 100, 5),
+            "warp guard missed its boundary or an already reached event");
+        var report = new CoastingAdapterReport {
+            eventConfigured = true, eventFound = true, eventKind = manyCrossings.Kind,
+            eventDirection = "outward", eventUniversalTime = manyCrossings.TimeSeconds,
+            eventRadiusMeters = semiMajor, eventRadiusErrorMeters = Math.Abs(Radius(manyCrossings.Body.Position) - semiMajor),
+            engineFrontierAtEvent = true, warpStopRequested = true
+        };
+        string encoded = ReportJson.Encode(report);
+        Check(encoded.Contains("\"eventKind\":\"radius-crossing\"") &&
+            encoded.Contains("\"engineFrontierAtEvent\":true") && encoded.Contains("\"warpStopRequested\":true"),
+            "coasting event report fields did not cross the real serializer seam");
         bool rejected = false;
         try { new RadiusCrossingSearch(0, 0, 700000, RadiusCrossingDirection.Outward); }
         catch (ArgumentException) { rejected = true; }
@@ -95,6 +110,10 @@ static class Program
         try { new RadiusCrossingSearch(0, 10, 700000, (RadiusCrossingDirection)99, 1); }
         catch (ArgumentException) { rejected = true; }
         Check(rejected, "unknown crossing direction accepted");
+        rejected = false;
+        try { CoastingEventScheduler.GuardReached(0, 10, 0); }
+        catch (ArgumentException) { rejected = true; }
+        Check(rejected, "nonpositive event guard accepted");
         Console.WriteLine("PASS " + checks + " coasting-event assertions; elapsed ms 1=" + oneMs.ToString("F3") +
             " 64=" + count64.ToString("F3") + " 512=" + count512.ToString("F3"));
         return 0;

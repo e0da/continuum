@@ -57,6 +57,14 @@ namespace KspContinuum
             return first == null ? null : new RadiusCrossingEvent(first.BodyId, first.TimeSeconds, first.Body, evaluations);
         }
 
+        public static bool GuardReached(double currentTimeSeconds, double eventTimeSeconds, double leadSeconds)
+        {
+            AssemblyModel.Finite(currentTimeSeconds); AssemblyModel.Finite(eventTimeSeconds);
+            AssemblyModel.Positive(leadSeconds);
+            if (eventTimeSeconds <= currentTimeSeconds) return true;
+            return eventTimeSeconds - currentTimeSeconds <= leadSeconds;
+        }
+
         static bool TryPredict(CoastingBody seed, double epoch, double mu, RadiusCrossingSearch search,
             out double time, out double period)
         {
