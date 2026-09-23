@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Globalization;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -102,8 +103,22 @@ namespace KspContinuum
             if (!Eligible(current)) return;
             double ut = Planetarium.GetUniversalTime();
             double atmosphere = current.mainBody.atmosphere ? current.mainBody.atmosphereDepth : 0;
-            if (current.orbit.eccentricity >= 1 || current.orbit.PeA <= atmosphere + 1000 ||
-                (!double.IsInfinity(current.orbit.EndUT) && current.orbit.EndUT <= ut + ForecastSeconds))
+            bool hasNextPatch = current.orbit.nextPatch != null;
+            bool nextPatchAfterForecast = Finite(current.orbit.EndUT) && current.orbit.EndUT > ut + ForecastSeconds;
+            report.admittedEccentricity = current.orbit.eccentricity;
+            report.admittedPeriapsisAltitude = current.orbit.PeA;
+            report.admittedApoapsisRadius = current.orbit.ApR;
+            report.admittedSphereOfInfluence = Number(current.mainBody.sphereOfInfluence);
+            report.admittedPatchEndUniversalTime = Number(current.orbit.EndUT);
+            report.admittedPatchEndTransition = current.orbit.patchEndTransition.ToString();
+            report.admittedHasNextPatch = hasNextPatch;
+            double sphereOfInfluence = current.mainBody.sphereOfInfluence;
+            bool validSphereOfInfluence = (Finite(sphereOfInfluence) && sphereOfInfluence > 0) ||
+                double.IsPositiveInfinity(sphereOfInfluence);
+            if (!Finite(current.orbit.eccentricity) || current.orbit.eccentricity < 0 || current.orbit.eccentricity >= 1 ||
+                !Finite(current.orbit.PeR) || current.orbit.PeR <= current.mainBody.Radius + atmosphere + 1000 ||
+                !Finite(current.orbit.ApR) || !validSphereOfInfluence || current.orbit.ApR >= sphereOfInfluence ||
+                (hasNextPatch && !nextPatchAfterForecast))
             { Fail("orbit-outside-qualified-coast-domain"); return; }
             Vector3d position = current.orbit.getRelativePositionAtUT(ut);
             Vector3d velocity = current.orbit.getOrbitalVelocityAtUT(ut);
@@ -181,6 +196,12 @@ namespace KspContinuum
                     Magnitude(V(position) + expected.Position * -1));
                 owner.report.maximumVelocityErrorMetersPerSecond = Math.Max(owner.report.maximumVelocityErrorMetersPerSecond,
                     Magnitude(V(velocity) + expected.Velocity * -1));
+                Vector3d injectedPosition = __instance.orbit.getRelativePositionAtUT(__state.UniversalTime);
+                Vector3d injectedVelocity = __instance.orbit.getOrbitalVelocityAtUT(__state.UniversalTime);
+                owner.report.maximumInjectedPositionErrorMeters = Math.Max(owner.report.maximumInjectedPositionErrorMeters,
+                    Magnitude(V(injectedPosition) + expected.Position * -1));
+                owner.report.maximumInjectedVelocityErrorMetersPerSecond = Math.Max(owner.report.maximumInjectedVelocityErrorMetersPerSecond,
+                    Magnitude(V(injectedVelocity) + expected.Velocity * -1));
                 Vector3d expectedDriverPosition = __instance.orbit.pos; expectedDriverPosition.Swizzle();
                 Vector3d expectedDriverVelocity = __instance.orbit.vel; expectedDriverVelocity.Swizzle();
                 owner.report.maximumDriverPositionErrorMeters = Math.Max(owner.report.maximumDriverPositionErrorMeters,
@@ -192,6 +213,8 @@ namespace KspContinuum
                 {
                     bool accurate = owner.report.maximumPositionErrorMeters <= PositionToleranceMeters &&
                         owner.report.maximumVelocityErrorMetersPerSecond <= VelocityToleranceMetersPerSecond &&
+                        owner.report.maximumInjectedPositionErrorMeters <= 1e-6 &&
+                        owner.report.maximumInjectedVelocityErrorMetersPerSecond <= 1e-6 &&
                         owner.report.maximumDriverPositionErrorMeters <= 1e-6 &&
                         owner.report.maximumDriverVelocityErrorMetersPerSecond <= 1e-6;
                     owner.Stop(accurate ? "bounded-call-limit-reached" : "comparison-outside-tolerance");
@@ -233,7 +256,12 @@ namespace KspContinuum
                 if (vessel == null || vessel != FlightGlobals.ActiveVessel || vessel.orbit == null ||
                     referenceBody == null || vessel.mainBody != referenceBody || vessel.orbit.referenceBody != referenceBody ||
                     !vessel.packed || vessel.orbitDriver == null ||
-                    vessel.orbitDriver.updateMode != OrbitDriver.UpdateMode.UPDATE) return;
+                    vessel.orbitDriver.updateMode != OrbitDriver.UpdateMode.UPDATE)
+                {
+                    if (report.status == "complete")
+                    { report.status = "invalid"; report.reason = "release-domain-changed"; }
+                    return;
+                }
                 double ut = Planetarium.GetUniversalTime();
                 CoastingBody body = engine.SampleAt(ut).Bodies[0];
                 vessel.orbit.UpdateFromStateVectors(V(body.Position), V(body.Velocity), referenceBody, ut);
@@ -257,7 +285,8 @@ namespace KspContinuum
             {
                 try { if (TimeWarp.CurrentRateIndex != 0) TimeWarp.SetRate(0, true); }
                 catch (Exception error) { UnityEngine.Debug.LogException(error); }
-                Application.Quit(report.status == "complete" && report.cleanupStatus == "removed-owned-patches" ? 0 : 2);
+                Application.Quit(report.status == "complete" && report.releasedToStock &&
+                    report.authorityExitAttested && report.cleanupStatus == "removed-owned-patches" ? 0 : 2);
             }
         }
 
@@ -325,6 +354,14 @@ namespace KspContinuum
         static Vec V(Vector3d value) { return new Vec(value.x, value.y, value.z); }
         static Vector3d V(Vec value) { return new Vector3d(value.X, value.Y, value.Z); }
         static double Magnitude(Vec value) { return Math.Sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z); }
+        static bool Finite(double value) { return !double.IsNaN(value) && !double.IsInfinity(value); }
+        static string Number(double value)
+        {
+            if (double.IsPositiveInfinity(value)) return "positive-infinity";
+            if (double.IsNegativeInfinity(value)) return "negative-infinity";
+            if (double.IsNaN(value)) return "nan";
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
 
         public void OnDestroy()
         {

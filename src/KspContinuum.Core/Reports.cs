@@ -133,11 +133,15 @@ namespace KspContinuum
         public string reason, vesselId, referenceBody, installationStatus = "not-installed",
             cleanupStatus = "not-attempted";
         public double seedUniversalTime, forecastUniversalTime, finalGameUniversalTime,
+            admittedEccentricity, admittedPeriapsisAltitude, admittedApoapsisRadius,
             maximumPositionErrorMeters, maximumVelocityErrorMetersPerSecond,
+            maximumInjectedPositionErrorMeters, maximumInjectedVelocityErrorMetersPerSecond,
             maximumDriverPositionErrorMeters, maximumDriverVelocityErrorMetersPerSecond;
         public long candidateDriverCalls, suppressedStockPropagations, stockFallbacks, errors;
+        public string admittedSphereOfInfluence, admittedPatchEndUniversalTime, admittedPatchEndTransition;
         public bool forecastCompletedBeforePresentation, frontierUnchangedByPresentation,
             authorityAdmissionAttested, authorityExitAttested, releasedToStock;
+        public bool admittedHasNextPatch;
     }
 
     [Serializable] public sealed class PhysicsSubstitutionCanaryReport
