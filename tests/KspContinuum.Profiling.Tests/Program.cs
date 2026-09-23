@@ -53,6 +53,19 @@ static class Program
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[] { 1 }, blocks = new int[] { 0 }, available = new bool[] { true } })));
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[0], blocks = new int[] { 1 }, available = new bool[] { true } })));
 
+        var attribution = new CallbackAttributionAccumulator(1000);
+        int slow = attribution.Register(new CallbackAttributionRow { category = "unity-fixed-callback", assembly = "Game", declaringType = "Slow", method = "FixedUpdate" });
+        int fast = attribution.Register(new CallbackAttributionRow { category = "stock-provider-seam", assembly = "Game", declaringType = "Fast", method = "Work" });
+        attribution.Record(fast, 2, true); attribution.Record(slow, 7, true); attribution.Record(slow, 3, false);
+        CallbackAttributionRow[] attributed = attribution.Finish(20);
+        Check(attributed.Length == 2 && attributed[0].declaringType == "Slow" && attributed[0].calls == 2);
+        Near(attributed[0].inclusiveMilliseconds, 10); Near(attributed[0].meanMilliseconds, 5);
+        Near(attributed[0].maximumMilliseconds, 7); Near(attributed[0].fractionOfActiveWindow, .5);
+        Check(attributed[0].outermostCalls == 1 && attributed[0].outermostInclusiveTicks == 7);
+        Near(attributed[0].outermostInclusiveMilliseconds, 7); Near(attributed[0].outermostFractionOfActiveWindow, .35);
+        Check(attributed[1].calls == 1 && attributed[1].inclusiveTicks == 2);
+        Check(Reject(() => attribution.Record(slow, 1, true)));
+
         var baselinePerformance = Observation("scalar", new[] { 2.0, 4.0, 3.0 }, new long[] { 100, 120, 110 });
         var candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
         PerformanceObservations.Validate(baselinePerformance);
@@ -97,7 +110,9 @@ static class Program
         marker.summary = summary;
         var report = new ProbeReport { markers = new[] { marker }, frames = new[] { new ProfileFrame {
             contextFrame = 10, markerFrame = 10, observedFrame = 11, contextAligned = true, wallMilliseconds = 16.7,
-            vesselStatus = "unavailable-no-active-vessel", parts = -1, vesselId = null } }, wallIntervals = distribution };
+            vesselStatus = "unavailable-no-active-vessel", parts = -1, vesselId = null } }, wallIntervals = distribution,
+            callbackAttribution = new CallbackAttributionReport { status = "observed", cleanupStatus = "removed-owned-patches",
+                callbacks = attributed } };
         using (JsonDocument json = JsonDocument.Parse(ReportJson.Encode(report)))
         {
             Check(json.RootElement.GetProperty("schema").GetString() == "ksp-continuum-markers/v2");
@@ -105,6 +120,9 @@ static class Program
             Check(json.RootElement.GetProperty("frames")[0].GetProperty("vesselId").ValueKind == JsonValueKind.Null);
             Check(!json.RootElement.GetProperty("markers")[0].GetProperty("available")[2].GetBoolean());
             Near(json.RootElement.GetProperty("markers")[0].GetProperty("summary").GetProperty("observedMilliseconds").GetProperty("mean").GetDouble(), 2);
+            Check(json.RootElement.GetProperty("callbackAttribution").GetProperty("schema").GetString() ==
+                "ksp-continuum-fixed-callback-attribution/v1");
+            Check(json.RootElement.GetProperty("callbackAttribution").GetProperty("callbacks")[0].GetProperty("declaringType").GetString() == "Slow");
         }
         var interrupted = new ProbeReport { requestedFrames = 3, frames = new[] {
             new ProfileFrame { wallMilliseconds = 10, contextAligned = true },

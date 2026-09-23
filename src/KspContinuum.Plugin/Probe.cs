@@ -24,6 +24,7 @@ namespace KspContinuum
         ActiveVesselWriterCensus writerCensus;
         ActiveVesselPhysicsSubstitutionCanary substitutionCanary;
         PartForceObservation partForces;
+        FixedCallbackAttribution callbackAttribution;
         Action<ProbeReport> completion;
         bool started, finished;
         int completed;
@@ -71,10 +72,16 @@ namespace KspContinuum
                     substitutionCanary = new ActiveVesselPhysicsSubstitutionCanary(writerCensus);
                     report.substitutionCanary = substitutionCanary.Report;
                 }
-                if (Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null)
+                if (Array.IndexOf(arguments, "--continuum-callback-attribution") >= 0)
+                {
+                    callbackAttribution = new FixedCallbackAttribution(); callbackAttribution.Start();
+                    report.callbackAttribution = callbackAttribution.Report;
+                }
+                if (Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null)
                 {
                     IPlayerLoopBracketObserver observer = writerCensus == null ? null : writerCensus.Census;
                     if (substitutionCanary != null) observer = new CompositePlayerLoopObserver(observer, substitutionCanary);
+                    if (callbackAttribution != null) observer = new CompositePlayerLoopObserver(observer, callbackAttribution);
                     playerLoop = new PlayerLoopTiming(observer); playerLoop.Start(); report.playerLoop = playerLoop.Report;
                     if (substitutionCanary != null) substitutionCanary.Start();
                 }
@@ -205,6 +212,13 @@ namespace KspContinuum
                 try { writerCensus.Dispose(); }
                 catch (Exception error) { errors.Add("WriterCensus: " + error.GetType().Name); }
                 writerCensus = null;
+            }
+            if (callbackAttribution != null)
+            {
+                try { callbackAttribution.Dispose(); }
+                catch (Exception error) { errors.Add("CallbackAttribution: " + error.GetType().Name); }
+                if (callbackAttribution.Report.cleanupStatus == "cleanup-error") errors.Add("CallbackAttribution: cleanup-error");
+                callbackAttribution = null;
             }
             if (partForces != null)
             {
