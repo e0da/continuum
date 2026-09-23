@@ -107,7 +107,15 @@ namespace KspContinuum
                 {
                     yield return null;
                     if (finished) yield break;
-                    if (playerLoop != null) playerLoop.Audit();
+                    if (playerLoop != null)
+                    {
+                        playerLoop.Audit();
+                        if (dryBuoyancy != null && playerLoop.Report.integrityStatus == "invalidated")
+                        {
+                            dryBuoyancy.Dispose();
+                            dryBuoyancy = null;
+                        }
+                    }
                     if (partForces != null) partForces.Tick();
                     double now = clock.Elapsed.TotalSeconds;
                     previous.observedFrame = Time.frameCount;

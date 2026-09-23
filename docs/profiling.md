@@ -173,6 +173,8 @@ PlayerLoop boundary. Before each `ScriptRunBehaviourFixedUpdate` traversal it re
 component, republishes and verifies dry integration state as one batch, and disables only the initially enabled
 `PartBuoyancy` behaviours that Continuum owns. [Unity does not update disabled behaviours](https://docs.unity3d.com/2019.4/Documentation/ScriptReference/Behaviour-enabled.html). Any ineligible state, loop
 fault, or teardown restores and reads back every owned enable independently before stock script traversal continues.
+The probe also restores the batch at the first boundary audit that detects PlayerLoop invalidation; work between an
+external loop mutation and that next audit is outside the qualified interval.
 The batch report distinguishes fixed steps, owned components, component-step bypasses, publications, fallbacks, errors,
 and cleanup. Its work runs before the script child timer begins, so only the enclosing active fixed-step parent can
 establish a net gain.
