@@ -20,6 +20,10 @@ name = "curve-bounds"
 path = "src/bin/curve_bounds.rs"
 
 [[bin]]
+name = "event-certificate"
+path = "src/bin/event_certificate.rs"
+
+[[bin]]
 name = "modal-rocket"
 path = "src/bin/modal_rocket.rs"
 

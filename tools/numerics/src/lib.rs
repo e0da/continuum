@@ -1,5 +1,6 @@
 pub mod cpu_throughput;
 pub mod curve;
+pub mod event_certificate;
 pub mod execution_view;
 pub mod field;
 pub mod gpu_execution;
