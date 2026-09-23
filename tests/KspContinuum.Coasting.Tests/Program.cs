@@ -52,12 +52,15 @@ static class Program
         Check(historical.TimeSeconds == epoch - 10, "absolute sample API incorrectly enforced frontier monotonicity");
         var continued = new CoastingEngine(epoch, mu, fixture, 3);
         continued.AdvanceTo(epoch + 100, 5);
-        CoastingAdvanceResult continuation = continued.AdvanceTo(target, 1);
+        CoastingAdvanceResult continuation = continued.AdvanceTo(target, 2);
         Same(finePresentation.Final, continuation.Final);
         Check(detached.TimeSeconds < continuation.Final.TimeSeconds, "presentation snapshot was not detached from engine time");
         bool rejected = false;
         try { new CoastingEngine(epoch, mu, fixture, 0); } catch (ArgumentException) { rejected = true; }
         Check(rejected, "invalid work batch accepted");
+        rejected = false;
+        try { new CoastingEngine(epoch, mu, fixture, 1).AdvanceTo(epoch + 5000, 1); } catch (ArgumentException) { rejected = true; }
+        Check(rejected, "unbounded presentation request accepted");
         Console.WriteLine("PASS " + checks + " coasting-engine assertions");
         return 0;
     }

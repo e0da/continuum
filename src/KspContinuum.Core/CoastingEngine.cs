@@ -52,6 +52,7 @@ namespace KspContinuum
 
     public sealed class CoastingEngine
     {
+        public const int MaximumPublicationsPerAdvance = 4096;
         readonly CoastingBody[] origin;
         readonly double epoch, mu;
         readonly int workBatchSize;
@@ -91,6 +92,9 @@ namespace KspContinuum
             var publications = new List<CoastingSnapshot>();
             if (publicationIntervalSeconds > 0)
             {
+                double requested = Math.Ceiling((targetTimeSeconds - current.TimeSeconds) / publicationIntervalSeconds) - 1;
+                if (double.IsInfinity(requested) || requested > MaximumPublicationsPerAdvance)
+                    throw new ArgumentException("Publication request exceeds the bounded advance limit.");
                 double sample = current.TimeSeconds + publicationIntervalSeconds;
                 while (sample < targetTimeSeconds)
                 {

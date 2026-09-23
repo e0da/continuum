@@ -12,7 +12,7 @@ workspace and the current native boundary does not expose orbital propagation.
 Independent bodies are divided into configurable parallel work batches. Presentation snapshots may be requested at
 any positive time cadence, but each snapshot is an immutable evaluation of engine state and cannot feed back into the
 trajectory. Tests require bitwise-identical final states across work batch sizes 1, 7, and 64 and presentation cadences
-17 seconds, 311 seconds, and disabled.
+17 seconds, 311 seconds, and disabled. One advance permits at most 4,096 intermediate publications.
 
 `SampleAt(UT)` evaluates an immutable snapshot at any finite absolute time without moving the engine frontier. An
 adapter can therefore project a forecast or a historical sample without rewinding authoritative engine time.
