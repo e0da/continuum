@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using UnityEngine;
 
 namespace KspContinuum
@@ -16,6 +17,12 @@ namespace KspContinuum
         bool active, capturing, finished, strategySweep, quitAfterQualification;
         float eligibleSince;
         int expectedParts = -1;
+        bool physicsWarp, warpRequested;
+        float warpRequestedAt;
+        int stableWarpFrames;
+        const float RequestedPhysicsWarp = 4;
+        static readonly MethodInfo WarpModeSetter = typeof(TimeWarp).GetMethod("setMode",
+            BindingFlags.Instance | BindingFlags.NonPublic, null, new[] { typeof(TimeWarp.Modes) }, null);
 
         public void Awake() { instance = this; }
 
@@ -58,7 +65,8 @@ namespace KspContinuum
                 (strategySweep ? "Repeated in-process stock, full-publication batch and resident dry-domain orbital windows.\n" :
                 "Single settled stock-vessel orbital window.\n") +
                 "PlayerLoop scopes overlap and must not be summed. The active fixed parent owns strategy comparison.\n" +
-                "Experimental strategies are opt-in and do not establish complete stock semantics.\n");
+                "Experimental strategies are opt-in and do not establish complete stock semantics.\n" +
+                (physicsWarp ? "Requested 4x LOW-mode physics warp before capture; rate is reset before exit.\n" : ""));
         }
 
         public void Start()
@@ -74,6 +82,8 @@ namespace KspContinuum
                 if (Array.IndexOf(arguments, "--continuum-playerloop") < 0)
                 { Finish("missing-playerloop-flag", 2); return; }
                 strategySweep = Array.IndexOf(arguments, "--continuum-dry-buoyancy-sweep") >= 0;
+                physicsWarp = Array.IndexOf(arguments, "--continuum-physics-warp-pressure") >= 0;
+                if (physicsWarp && strategySweep) { Finish("physics-warp-does-not-support-strategy-sweep", 2); return; }
                 foreach (string argument in arguments) if (argument.StartsWith("--continuum-scale-parts=", StringComparison.Ordinal))
                 {
                     int parsed;
@@ -94,13 +104,35 @@ namespace KspContinuum
             if (ScaleCheckpointLoadState.Requested && !ScaleCheckpointLoadState.Ready) return;
             Vessel vessel = FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
             bool eligible = vessel != null && vessel.loaded && !vessel.packed && !FlightDriver.Pause &&
-                TimeWarp.CurrentRate == 1 && vessel.situation == Vessel.Situations.ORBITING &&
+                vessel.situation == Vessel.Situations.ORBITING &&
                 vessel.ctrlState != null && vessel.ctrlState.mainThrottle < 0.01 &&
                 (!ScaleCheckpointLoadState.Requested || vessel.id == ScaleCheckpointLoadState.VesselId) &&
                 (expectedParts < 1 || vessel.parts.Count == expectedParts);
-            if (!eligible) { eligibleSince = 0; return; }
+            if (!eligible) { eligibleSince = 0; stableWarpFrames = 0; return; }
+            if (physicsWarp && warpRequested)
+            {
+                bool entered = TimeWarp.fetch != null && TimeWarp.WarpMode == TimeWarp.Modes.LOW &&
+                    TimeWarp.CurrentRateIndex == 3 && TimeWarp.CurrentRate == RequestedPhysicsWarp;
+                if (!entered)
+                {
+                    stableWarpFrames = 0;
+                    if (Time.realtimeSinceStartup - warpRequestedAt > 5) Finish("physics-warp-not-entered", 2);
+                    return;
+                }
+                stableWarpFrames++;
+                if (stableWarpFrames < 3) return;
+                capturing = true; probe = new Probe(); StartCoroutine(Capture()); return;
+            }
+            if (TimeWarp.CurrentRate != 1 || TimeWarp.CurrentRateIndex != 0) { eligibleSince = 0; return; }
             if (eligibleSince == 0) { eligibleSince = Time.realtimeSinceStartup; return; }
             if (Time.realtimeSinceStartup - eligibleSince < 10) return;
+            if (physicsWarp)
+            {
+                if (!SetWarpMode(TimeWarp.Modes.LOW))
+                { Finish("physics-warp-mode-rejected", 2); return; }
+                TimeWarp.SetRate(3, true); warpRequested = true; warpRequestedAt = Time.realtimeSinceStartup;
+                return;
+            }
             capturing = true;
             if (strategySweep) { sweepState = "running"; StartCoroutine(CaptureSweep()); }
             else { probe = new Probe(); StartCoroutine(Capture()); }
@@ -171,7 +203,7 @@ namespace KspContinuum
             try
             {
                 File.WriteAllText(Path.Combine(directory, "markers.json"), ReportJson.Encode(report));
-                string reason; bool valid = Stable(report, out reason);
+                string reason; bool valid = Stable(report, physicsWarp ? RequestedPhysicsWarp : 1, out reason);
                 bool sourceUnchanged = !ScaleCheckpointLoadState.Requested || ScaleCheckpointLoadState.SourceUnchanged();
                 if (!sourceUnchanged)
                 { valid = false; reason = "source-checkpoint-changed"; }
@@ -185,6 +217,9 @@ namespace KspContinuum
         }
 
         static bool Stable(ProbeReport report, out string reason)
+        { return Stable(report, 1, out reason); }
+
+        static bool Stable(ProbeReport report, float expectedWarp, out string reason)
         {
             reason = "verified-fixed-orbital-context";
             if (report == null || report.status != "complete" || report.completedFrames != report.requestedFrames || report.frames == null || report.frames.Length == 0)
@@ -194,7 +229,9 @@ namespace KspContinuum
                 if (frame == null || frame.vesselId != first.vesselId || frame.parts != first.parts ||
                     frame.rigidbodies != first.rigidbodies || frame.joints != first.joints || frame.colliders != first.colliders ||
                     frame.loadedVessels != first.loadedVessels || frame.loaded != true || frame.packed != false || frame.paused != false ||
-                    frame.warpRate != 1 || !frame.throttleCommand.HasValue || frame.throttleCommand.Value >= 0.01 ||
+                    frame.warpRate != expectedWarp || !FinitePositive(frame.fixedDeltaSeconds) || !FinitePositive(frame.timeScale) ||
+                    frame.fixedDeltaSeconds != first.fixedDeltaSeconds || frame.timeScale != first.timeScale ||
+                    !frame.throttleCommand.HasValue || frame.throttleCommand.Value >= 0.01 ||
                     frame.situation != Vessel.Situations.ORBITING.ToString())
                 { reason = "context-or-topology-changed"; return false; }
             if (report.playerLoop == null || report.playerLoop.schema != "ksp-continuum-playerloop/v2" ||
@@ -219,6 +256,10 @@ namespace KspContinuum
             return true;
         }
 
+        static bool FinitePositive(double value) { return !double.IsNaN(value) && !double.IsInfinity(value) && value > 0; }
+        static bool SetWarpMode(TimeWarp.Modes mode)
+        { return TimeWarp.fetch != null && WarpModeSetter != null && (bool)WarpModeSetter.Invoke(TimeWarp.fetch, new object[] { mode }); }
+
         void Fail(Exception error)
         {
             sweepState = "error";
@@ -233,6 +274,23 @@ namespace KspContinuum
             active = false;
             try { if (probe != null) probe.Dispose(); } catch (Exception error) { Debug.LogException(error); code = 2; }
             probe = null;
+            bool resetFailed = false;
+            if (physicsWarp)
+                try
+                {
+                    if (TimeWarp.fetch != null)
+                    {
+                        TimeWarp.SetRate(0, true);
+                        if (!SetWarpMode(TimeWarp.Modes.HIGH)) { code = 2; resetFailed = true; }
+                        if (TimeWarp.CurrentRateIndex != 0 || TimeWarp.CurrentRate != 1 || TimeWarp.WarpMode != TimeWarp.Modes.HIGH)
+                        { code = 2; resetFailed = true; }
+                    }
+                    else { code = 2; resetFailed = true; }
+                }
+                catch (Exception error) { Debug.LogException(error); code = 2; resetFailed = true; }
+            if (resetFailed && directory != null)
+                try { File.WriteAllText(Path.Combine(directory, "status.txt"), "invalid\nreason=physics-warp-reset-failed\n"); }
+                catch { code = 2; }
             if (directory != null && !File.Exists(Path.Combine(directory, "status.txt")))
                 try { File.WriteAllText(Path.Combine(directory, "status.txt"), status + "\n"); } catch { code = 2; }
             if (quitAfterQualification) Application.Quit(code);
