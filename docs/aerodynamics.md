@@ -141,6 +141,43 @@ which remains diagnostic because it consumes stock-computed magnitude terms. See
 [`aero-set-drag-reconstruction.md`](aero-set-drag-reconstruction.md) for the frozen hypotheses, tolerances, and the
 passing development/held-out capture-v3 qualification gate. Body lift remains excluded.
 
+`AeroCompleteSetDrag` extends that bounded reduction to every `DragCubeList.CubeData` output: drag vector, lift force,
+area, area drag, depth, cross-sectional area, exposed area, drag coefficient, and taper. Unity remains responsible for
+curve evaluation; the portable kernel receives the resulting samples and performs the allocation-free six-face
+reduction. The opt-in `--continuum-live-setdrag-provider` addon first compares 128 complete candidate outputs with stock,
+then suppresses and replaces exactly 256 original `SetDrag` calls. Its receipt records both counts, maximum relative
+error, separately timed candidate and stock windows, and patch-removal readback. Any mismatch, nonfinite result, unsupported KSP version, or
+competing patch on `SetDrag` stops substitution and leaves subsequent calls to stock. `UpdateAerodynamics`, body-drag
+and body-lift application, ocean handling, and Unity integration remain stock-owned. A mod such as KSP Community Fixes
+that inlines this reduction in a broader `UpdateAerodynamics` replacement can bypass the `SetDrag` seam entirely; the
+bounded provider makes no compatibility claim for that configuration.
+Add `--continuum-setdrag-quit-after-qualification` for an automated run that exits with code 0 only after a complete
+receipt and verified patch removal; abstention or cleanup failure exits with code 2.
+When combined with the existing scale-checkpoint loader flags, this provider-owned termination mode leaves the orbital
+scale profiler inactive so it cannot overwrite the powered-descent qualification's exit status during teardown.
+
+Two fresh headless runs loaded the immutable `scenarios/Powered Landing` checkpoint and exited 0 after verified cleanup.
+The final run used source `11aaea33584a5311db2c740af2a589e52a84bd68`, package SHA-256
+`397a7e6ffe1c0ad27c683009a47ce500c3ddf0b8e0e3fbae2e02274b6dde9f86`, and installed plugin SHA-256
+`7ba49d9afa36f6a643606c75556d047150028596b652366e642430c2470a8eaf`. It matched all 128 complete stock outputs,
+suppressed 256 original calls, recorded zero fallbacks, removed its owned patches, and observed maximum relative error
+`2.1706087635072911e-6`. The checkpoint remained byte-identical at SHA-256
+`f9cafd86957b99b9fe58eac61963678ca068cee2de04aeaaba8c31e3a1b6d2e6`.
+
+The precursor run from source `702991fe0582d309fa86062c21a01d06b57fd99f` independently passed the same
+128-match/256-suppression/zero-fallback gates with maximum relative error `2.5471993994525494e-6`, verified cleanup,
+exit 0, and the same unchanged checkpoint. Its package SHA-256 was
+`c3178570a688210bb0ab0a014f517a3553277ac77affcfe36d001e2421281ea7`; its installed plugin SHA-256 was
+`d9bb3e67ff125716b9fef853a57b5179b45dbda9d432ba97292cf3125cab65d6`.
+
+This first replacement is slower in its measured section. The final run recorded 63,631 candidate ticks over 384
+calls and 15,790 stock ticks over 128 shadow calls: 165.71 versus 123.36 ticks per call, or about 1.34 times stock.
+The precursor run observed 166.73 versus 123.61 ticks per call, or about 1.35 times stock. Candidate and stock samples
+come from different phases and counts, include first-use and JIT effects, and exclude surrounding publication and
+patch-graph validation. They are diagnostic method-section averages, not a controlled end-to-end ratio, frame-rate
+result, or full-provider measurement. The useful result is real suppression with complete-output parity and an exact
+optimization baseline; no speedup is claimed.
+
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
 The default archive and metadata filenames include the archive's full SHA-256, and the metadata points to that immutable

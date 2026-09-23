@@ -64,6 +64,7 @@ namespace KspContinuum
                 type != typeof(WriterCensusReport) && type != typeof(WriterCensusInterval) &&
                 type != typeof(WriterCensusSnapshot) && type != typeof(WriterCensusBody) &&
                 type != typeof(PhysicsSubstitutionCanaryReport) && type != typeof(AeroForceSubstitutionReport) &&
+                type != typeof(AeroSetDragSubstitutionReport) &&
                 type != typeof(ForceObservationReport) && type != typeof(ForceObservationContext) &&
                 type != typeof(LifecycleTraceReport) && type != typeof(LifecycleTraceEvent) &&
                 type != typeof(LifecycleTraceContext) && type != typeof(LifecyclePartSample) &&
