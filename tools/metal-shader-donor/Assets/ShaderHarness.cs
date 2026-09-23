@@ -18,6 +18,22 @@ public sealed class ShaderHarness : MonoBehaviour
 
     void Start()
     {
+        try { Configure(); }
+        catch (Exception error)
+        {
+            Debug.LogException(error);
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                try { File.WriteAllText(output, "status=setup-failed\nerror=" + error.GetType().Name + "\n"); }
+                catch (Exception writeError) { Debug.LogException(writeError); }
+            }
+            enabled = false;
+            Application.Quit(1);
+        }
+    }
+
+    void Configure()
+    {
         output = Environment.GetEnvironmentVariable("CONTINUUM_HARNESS_REPORT");
         var bundlePath = Environment.GetEnvironmentVariable("CONTINUUM_SHADER_BUNDLE");
         if (string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(bundlePath))
@@ -62,6 +78,7 @@ public sealed class ShaderHarness : MonoBehaviour
         frame++;
         if (frame == 60) StartCoroutine(Capture());
         if (frame != 90) return;
+        long screenshotBytes = File.Exists(output + ".png") ? new FileInfo(output + ".png").Length : 0;
         File.WriteAllText(output,
             "unity=" + Application.unityVersion + "\n" +
             "renderer=" + SystemInfo.graphicsDeviceType + "\n" +
@@ -69,8 +86,8 @@ public sealed class ShaderHarness : MonoBehaviour
             "donor=" + donor.name + "\n" +
             "donor_supported=" + donor.isSupported + "\n" +
             "visual_match=" + visualMatch + "\n" +
-            "screenshot_bytes=" + (File.Exists(output + ".png") ? new FileInfo(output + ".png").Length : 0) + "\n");
-        Application.Quit(visualMatch && donor.isSupported ? 0 : 1);
+            "screenshot_bytes=" + screenshotBytes + "\n");
+        Application.Quit(visualMatch && donor.isSupported && screenshotBytes > 0 ? 0 : 1);
     }
 
     IEnumerator Capture()
@@ -79,14 +96,29 @@ public sealed class ShaderHarness : MonoBehaviour
         var image = new Texture2D(Screen.width, Screen.height, TextureFormat.RGB24, false);
         image.ReadPixels(new Rect(0, 0, Screen.width, Screen.height), 0, 0);
         image.Apply();
-        var reference = image.GetPixel(Screen.width / 2 - 175, Screen.height / 2);
-        var actual = image.GetPixel(Screen.width / 2 + 175, Screen.height / 2);
         var background = new Color(0.08f, 0.1f, 0.18f);
-        float difference = Mathf.Max(Mathf.Abs(reference.r - actual.r), Mathf.Abs(reference.g - actual.g), Mathf.Abs(reference.b - actual.b));
-        float contrast = Mathf.Max(Mathf.Abs(reference.r - background.r), Mathf.Abs(reference.g - background.g), Mathf.Abs(reference.b - background.b));
-        visualMatch = difference < 0.05f && contrast > 0.1f;
+        int[] offsets = { -90, 90 };
+        float difference = 0, contrast = 0, spread = 0;
+        Color first = Color.clear;
+        bool firstSample = true;
+        foreach (int y in offsets)
+        foreach (int x in offsets)
+        {
+            var reference = image.GetPixel(Screen.width / 2 - 175 + x, Screen.height / 2 + y);
+            var actual = image.GetPixel(Screen.width / 2 + 175 + x, Screen.height / 2 + y);
+            difference = Mathf.Max(difference, ChannelDifference(reference, actual));
+            contrast = Mathf.Max(contrast, ChannelDifference(reference, background));
+            if (firstSample) { first = reference; firstSample = false; }
+            else spread = Mathf.Max(spread, ChannelDifference(reference, first));
+        }
+        visualMatch = difference < 0.05f && contrast > 0.1f && spread > 0.2f;
         Destroy(image);
         ScreenCapture.CaptureScreenshot(output + ".png");
+    }
+
+    static float ChannelDifference(Color a, Color b)
+    {
+        return Mathf.Max(Mathf.Abs(a.r - b.r), Mathf.Abs(a.g - b.g), Mathf.Abs(a.b - b.b));
     }
 
     void OnDestroy() { if (bundle != null) bundle.Unload(false); }
