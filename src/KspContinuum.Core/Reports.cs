@@ -125,6 +125,21 @@ namespace KspContinuum
         public long fixedSteps, domainAdmissions, bypassed, dryPublications, verifiedPublications, fallbacks, errors;
     }
 
+    [Serializable] public sealed class CoastingAdapterReport
+    {
+        public string schema = "ksp-continuum-coasting-adapter/v1";
+        public string status = "not-started";
+        public string limitation = "Opt-in packed active-vessel canary. Continuum evaluates a fixed-reference-body two-body coast while KSP retains global time, vessel lifecycle, SOI transitions, rendering and release to stock physics.";
+        public string reason, vesselId, referenceBody, installationStatus = "not-installed",
+            cleanupStatus = "not-attempted";
+        public double seedUniversalTime, forecastUniversalTime, finalGameUniversalTime,
+            maximumPositionErrorMeters, maximumVelocityErrorMetersPerSecond,
+            maximumDriverPositionErrorMeters, maximumDriverVelocityErrorMetersPerSecond;
+        public long candidateDriverCalls, suppressedStockPropagations, stockFallbacks, errors;
+        public bool forecastCompletedBeforePresentation, frontierUnchangedByPresentation,
+            authorityAdmissionAttested, authorityExitAttested, releasedToStock;
+    }
+
     [Serializable] public sealed class PhysicsSubstitutionCanaryReport
     {
         public string schema = "ksp-continuum-physics-substitution-canary/v1";

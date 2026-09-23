@@ -1,8 +1,10 @@
 # Continuum direction and goal index
 
-Reviewed 2026-09-22. [Linear owns the live roadmap, milestones, priorities and issue state](https://linear.app/e0da/project/continuum-3e8d50ef8c85). This page connects those outcomes to shipped documentation and preserves the full product direction. Implementation is active in parallel across real-vessel structural census, live aerodynamic parity, and end-to-end performance observation.
+Reviewed 2026-09-23. [Linear owns the live roadmap, milestones, priorities and issue state](https://linear.app/e0da/project/continuum-3e8d50ef8c85). This page connects those outcomes to shipped documentation and preserves the full product direction. Current work prioritizes independent simulation time and trajectory evaluation, the KSP presentation adapter, and measurements that distinguish engine work from host synchronization.
 
-The immediate goal is a useful Continuum computation controlling a bounded KSP behavior, followed by a reproducible improvement in frame or physics-tick performance. A small positive result in the actual game is more valuable than further generic infrastructure without a consumer. Continuum is the engine; [Gimbal is the game/experience layer](continuum-gimbal-boundary.md). `KspContinuum` remains the adapter namespace.
+Continuum owns its simulation model, time, scheduling and data. KSP is a client and adapter; its per-part callbacks and render loop do not define how Continuum must compute. Faster stock callbacks demonstrate integration seams, but are not the architectural destination. Continuum is the engine; [Gimbal is the game/experience layer](continuum-gimbal-boundary.md). `KspContinuum` remains the adapter namespace.
+
+The immediate goal is an independent coasting simulation evaluated at requested times, followed by a bounded KSP adapter that displays those states without duplicate stock propagation. Worker batching, state publication and rendering cadence must not alter authoritative results. Presentation smoothing never feeds back into integration. The first adapter may retain KSP's global universal time while Continuum owns the vessel trajectory; this does not establish independent global warp, background resource simulation or whole-game replacement. Measure engine throughput, synchronization cost and complete game frame/tick cost separately.
 
 ## Discoveries and limits
 
@@ -29,13 +31,15 @@ The coordinator advances independent worker lanes concurrently and integrates th
 
 | Lane | Acceptance | Linear |
 | --- | --- | --- |
+| Independent coast and time | Evaluate two-body trajectories from immutable seeds at requested times; stop at a declared time boundary; show cadence-independent results and bounded numerical error | [E0D-1876](https://linear.app/e0da/issue/E0D-1876) |
+| KSP trajectory adapter | Identify and suppress the selected stock trajectory writer while retaining presentation; compare sampled state and release continuity in the owned instance | [E0D-1871](https://linear.app/e0da/issue/E0D-1871) |
 | Live physics | Select a provider or isolated world with explicit force ownership; then run nonempty bounded dynamics with stock/candidate motion, exact restoration and full tick/frame timings | [E0D-1871](https://linear.app/e0da/issue/E0D-1871) |
 | Aerodynamics | Move from the successful direct `SetDrag` probe to a coarse batched engine boundary and measure capture, compute, publication, and complete fixed-tick effect | [E0D-1872](https://linear.app/e0da/issue/E0D-1872) |
 | Rust execution | Connect the measured x86 in-process boundary to one captured KSP workload through persistent pinned views, dirty refresh and selective publication | [E0D-1873](https://linear.app/e0da/issue/E0D-1873) |
 | Structural reduction | Populate the conservative classifier from a real vessel; then validate one admitted compound candidate's collider and mass properties | [E0D-1874](https://linear.app/e0da/issue/E0D-1874) |
 | Performance observation | Record workload identity plus capture, pack, compute, synchronization, publication and total timings in a regression-friendly report used by one existing benchmark | [E0D-1875](https://linear.app/e0da/issue/E0D-1875) |
 
-Structural graph classification can support the live lane before geometry baking. Live graph mutation follows dynamics ownership. The smallest useful first replacement may be managed C#; Rust/GPU integration is an independent measured strategy, not a gate on showing KSP use our computation.
+Independent coast and its presentation adapter are the active implementation priorities. The other lanes remain preserved follow-ons; same-tick solar and aerodynamic micro-optimizations are not prerequisites. Structural graph classification can support later live dynamics before geometry baking. Live graph mutation follows dynamics ownership. The smallest useful first replacement may be managed C#; Rust/GPU integration is an independent measured strategy, not a gate on showing KSP use our computation.
 
 The three milestone exits are **useful live substitution**, **demonstrated game-performance improvement**, then **simulation beyond the camera**. [E0D-1875](https://linear.app/e0da/issue/E0D-1875) owns the performance outcome: frozen workload/tolerances, stock/candidate repeats, median and tail timings, and honest negative results. More physics fidelity can be a separate opt-in benefit, but cannot be counted as stock speedup without a like-for-like comparison.
 
