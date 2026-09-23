@@ -104,12 +104,22 @@ static class Program
             eventConfigured = true, eventFound = true, eventKind = manyCrossings.Kind,
             eventDirection = "outward", eventUniversalTime = manyCrossings.TimeSeconds,
             eventRadiusMeters = semiMajor, eventRadiusErrorMeters = Math.Abs(Radius(manyCrossings.Body.Position) - semiMajor),
-            engineFrontierAtEvent = true, warpStopRequested = true
+            engineFrontierAtEvent = true, warpStopRequested = true,
+            synchronizationStopwatchFrequency = 10000000, synchronizationMeasuredCallbacks = 1,
+            stateCaptureTicks = 17, forecastAdmissionTicks = 19,
+            engineSamples = 3, callbackTicks = 110, evaluationTicks = 10, publicationTicks = 20,
+            validationTicks = 30, driverRemainderTicks = 50
         };
         string encoded = ReportJson.Encode(report);
         Check(encoded.Contains("\"eventKind\":\"radius-crossing\"") &&
-            encoded.Contains("\"engineFrontierAtEvent\":true") && encoded.Contains("\"warpStopRequested\":true"),
+            encoded.Contains("\"engineFrontierAtEvent\":true") && encoded.Contains("\"warpStopRequested\":true") &&
+            encoded.Contains("\"synchronizationMeasuredCallbacks\":1") &&
+            encoded.Contains("\"evaluationTicks\":10") && encoded.Contains("\"publicationTicks\":20") &&
+            encoded.Contains("\"validationTicks\":30") && encoded.Contains("\"driverRemainderTicks\":50"),
             "coasting event report fields did not cross the real serializer seam");
+        Check(report.callbackTicks == report.evaluationTicks + report.publicationTicks +
+            report.validationTicks + report.driverRemainderTicks,
+            "coasting synchronization fixture did not partition total callback ticks");
         bool rejected = false;
         try { new RadiusCrossingSearch(0, 0, 700000, RadiusCrossingDirection.Outward); }
         catch (ArgumentException) { rejected = true; }

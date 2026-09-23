@@ -25,6 +25,35 @@ The radius is measured from the reference body's center. Direction must be `inwa
 
 The adapter seeds `Orbit.UpdateFromStateVectors`, then arms a thread-local one-shot token for the exact orbit object and bit-identical universal time. The corresponding `Orbit.UpdateFromUT` prefix consumes that token and suppresses only that duplicate propagation. The rest of `OrbitDriver.UpdateOrbit` still copies the orbit result, positions the packed vessel, handles events, and draws the orbit. A missing nested call, changed patch graph, changed body, or failed readback ends authority.
 
+The JSON and cadence text receipts separate the bridge's synchronization cost. `stateCaptureTicks` measures the one-time
+successful KSP state read and engine/reference construction after eligibility. `forecastAdmissionTicks` measures the
+completed-forecast checks and authority admission, excluding background forecast time. Per successfully validated
+authoritative driver callback, `evaluationTicks` measures Continuum sampling or interpolation, `publicationTicks` measures
+`Orbit.UpdateFromStateVectors`, and `validationTicks` measures stock-reference, injected-orbit and driver readback plus
+error gates. `driverRemainderTicks` is the nonnegative remainder of total measured callback time after those three nested
+phases; it includes KSP's retained `OrbitDriver.UpdateOrbit` work between prefix and postfix as well as timer and wrapper
+overhead. The total starts after the Harmony prefix has identified the owned driver and ends before timing-accounting and
+completion bookkeeping. It therefore does not measure Harmony dispatch or the whole fixed step. `stopwatchFrequency`
+converts ticks to seconds. Direct and Hermite runs from the same package expose whether fewer engine samples reduce
+evaluation cost while publication and retained KSP driver work remain unchanged.
+
+The per-callback phase totals contain only callbacks that consumed the exact suppression token and completed every
+readback and validation step. `synchronizationMeasuredCallbacks` is that denominator and equals
+`candidateDriverCalls` for a qualified run. A candidate exception, missing token, changed driver or readback exception
+invalidates the run but is omitted from these phase totals because it did not reach the common timing boundary. The
+separate fallback/error counters expose those omissions; phase comparisons require both to be zero.
+
+An installed same-package pair from the unchanged station checkpoint completed 256 validated callbacks per fresh
+process at a 10 MHz stopwatch frequency. Direct presentation used 256 engine samples and measured 716,993 total ticks:
+427,928 evaluation, 31,277 publication, 65,644 validation and 192,144 retained-driver remainder. Default two-second
+Hermite presentation used 26 engine samples and measured 389,952 total ticks: 135,983 evaluation, 31,569 publication,
+53,779 validation and 168,621 remainder. That is 280.1 versus 152.3 microseconds per validated callback, a 45.6% lower
+measured bridge callback for Hermite in this pair. Evaluation fell 68.2%; publication was effectively unchanged at
+about 12.2 microseconds per callback. Both runs had zero fallback/errors, matched all 256 stock suppressions, released
+to stock and removed owned patches. Separate process launches make phase deltas observational rather than paired
+within-process causality. These measurements exclude Harmony dispatch, completion accounting and the rest of the fixed
+step, so they establish no FPS or whole-step gain.
+
 The bounded run compares every Continuum sample with an independent stock `Orbit` initialized from the same seed. It also verifies the driver's presented position and velocity against the seeded orbit after KSP's swizzle. Any comparison outside tolerance releases immediately. Fixed-forecast mode completes after 256 accepted calls. Event mode remains admitted only until its bounded event horizon or the earlier guard, then confirms the independently advanced frontier did not move during presentation sampling, reseeds the live orbit at current KSP time while the same packed domain is still valid, and removes its Harmony patches. `--continuum-coast-quit-after-qualification` exits after either qualification path finishes.
 
 In event mode the configured guard is an earlier completion boundary. When KSP time enters `[event time - guard, event time)`, the adapter reseeds the live orbit at the current KSP time while it still owns the packed path, releases its patches, and calls `TimeWarp.SetRate(0, true)`. If one KSP update jumps to or beyond the event, the adapter releases the current trajectory state and requests rate zero but records the run as invalid with `event-crossing-overshot`; it never labels that as a pre-event stop. The JSON records the request time and the rate index before and immediately after the request. This is a verified request to leave on-rails warp before the predicted vessel event. It does not set universal time, prove the exact wall-clock frame at which KSP finishes all warp transitions, or own the global clock.

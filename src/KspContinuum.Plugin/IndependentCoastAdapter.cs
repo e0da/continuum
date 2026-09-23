@@ -75,7 +75,8 @@ namespace KspContinuum
         RadiusCrossingEvent predictedEvent;
         bool requested, active, failed, stopRequested, finished, exported, quitAfter;
         long callbackTicks, maximumCallbackTicks, sampleTicks, maximumSampleTicks,
-            seedTicks, maximumSeedTicks, residualTicks, maximumResidualTicks;
+            seedTicks, maximumSeedTicks, validationTicks, maximumValidationTicks,
+            residualTicks, maximumResidualTicks;
 
         public void Start()
         {
@@ -153,6 +154,7 @@ namespace KspContinuum
             { ResetWarpCandidate(); return; }
             if (TimeWarp.CurrentRateIndex <= 0 || TimeWarp.WarpMode != TimeWarp.Modes.HIGH) return;
             if (!Eligible(current)) return;
+            long captureStarted = Stopwatch.GetTimestamp();
             double ut = Planetarium.GetUniversalTime();
             double atmosphere = current.mainBody.atmosphere ? current.mainBody.atmosphereDepth : 0;
             bool hasNextPatch = current.orbit.nextPatch != null;
@@ -200,6 +202,7 @@ namespace KspContinuum
             }
             else forecast = Task.Run(() => new ForecastResult
             { Advance = engine.AdvanceTo(ut + ForecastSeconds, 3600) });
+            report.stateCaptureTicks = Stopwatch.GetTimestamp() - captureStarted;
         }
 
         static bool ReadyForWarp(Vessel candidate)
@@ -217,6 +220,9 @@ namespace KspContinuum
 
         void AdmitForecast()
         {
+            long admissionStarted = Stopwatch.GetTimestamp();
+            try
+            {
             if (forecast.IsFaulted || forecast.IsCanceled)
             { Fail("forecast-failed"); forecast = null; return; }
             ForecastResult result = forecast.Result;
@@ -250,6 +256,8 @@ namespace KspContinuum
             report.authorityAdmissionAttested = TargetsOwned();
             if (!report.authorityAdmissionAttested) { Fail("authority-admission-failed"); forecast = null; return; }
             active = true; report.status = "active";
+            }
+            finally { report.forecastAdmissionTicks = Stopwatch.GetTimestamp() - admissionStarted; }
         }
 
         void StopForEvent(double ut)
@@ -290,13 +298,14 @@ namespace KspContinuum
             __state = new DriverCall();
             IndependentCoastAdapter owner = instance;
             if (owner == null || !owner.active || __instance != owner.vessel.orbitDriver) return true;
+            __state.Started = Stopwatch.GetTimestamp();
             try
             {
                 if (!owner.Eligible(owner.vessel) || owner.vessel.mainBody != owner.referenceBody ||
                     __instance.orbit.referenceBody != owner.referenceBody)
                 { owner.report.stockFallbacks++; owner.Stop("driver-state-changed"); return true; }
                 double ut = Planetarium.GetUniversalTime();
-                __state.Candidate = true; __state.Started = Stopwatch.GetTimestamp(); __state.UniversalTime = ut;
+                __state.Candidate = true; __state.UniversalTime = ut;
                 long sampleStarted = Stopwatch.GetTimestamp();
                 CoastingBody body = owner.cadence.Evaluate(ut, owner.sampleBody);
                 __state.SampleTicks = Stopwatch.GetTimestamp() - sampleStarted;
@@ -327,6 +336,7 @@ namespace KspContinuum
         {
             IndependentCoastAdapter owner = instance;
             if (owner == null || __state == null || !__state.Candidate) return;
+            long validationStarted = Stopwatch.GetTimestamp();
             if (!__state.Consumed) { owner.Fail("one-shot-not-consumed"); return; }
             try
             {
@@ -352,12 +362,6 @@ namespace KspContinuum
                     Magnitude(V(__instance.pos) + V(expectedDriverPosition) * -1));
                 owner.report.maximumDriverVelocityErrorMetersPerSecond = Math.Max(owner.report.maximumDriverVelocityErrorMetersPerSecond,
                     Magnitude(V(__instance.vel) + V(expectedDriverVelocity) * -1));
-                long callback = Stopwatch.GetTimestamp() - __state.Started;
-                long residual = Math.Max(0, callback - __state.SampleTicks - __state.SeedTicks);
-                owner.callbackTicks += callback; owner.maximumCallbackTicks = Math.Max(owner.maximumCallbackTicks, callback);
-                owner.sampleTicks += __state.SampleTicks; owner.maximumSampleTicks = Math.Max(owner.maximumSampleTicks, __state.SampleTicks);
-                owner.seedTicks += __state.SeedTicks; owner.maximumSeedTicks = Math.Max(owner.maximumSeedTicks, __state.SeedTicks);
-                owner.residualTicks += residual; owner.maximumResidualTicks = Math.Max(owner.maximumResidualTicks, residual);
                 owner.report.candidateDriverCalls++; owner.report.suppressedStockPropagations++;
                 bool accurate = owner.report.maximumPositionErrorMeters <= PositionToleranceMeters &&
                     owner.report.maximumVelocityErrorMetersPerSecond <= VelocityToleranceMetersPerSecond &&
@@ -366,6 +370,14 @@ namespace KspContinuum
                     owner.report.maximumDriverPositionErrorMeters <= 1e-6 &&
                     owner.report.maximumDriverVelocityErrorMetersPerSecond <= 1e-6 &&
                     owner.report.suppressedStockPropagations >= 1;
+                long validation = Stopwatch.GetTimestamp() - validationStarted;
+                long callback = Stopwatch.GetTimestamp() - __state.Started;
+                long residual = Math.Max(0, callback - __state.SampleTicks - __state.SeedTicks - validation);
+                owner.callbackTicks += callback; owner.maximumCallbackTicks = Math.Max(owner.maximumCallbackTicks, callback);
+                owner.sampleTicks += __state.SampleTicks; owner.maximumSampleTicks = Math.Max(owner.maximumSampleTicks, __state.SampleTicks);
+                owner.seedTicks += __state.SeedTicks; owner.maximumSeedTicks = Math.Max(owner.maximumSeedTicks, __state.SeedTicks);
+                owner.validationTicks += validation; owner.maximumValidationTicks = Math.Max(owner.maximumValidationTicks, validation);
+                owner.residualTicks += residual; owner.maximumResidualTicks = Math.Max(owner.maximumResidualTicks, residual);
                 if (!accurate) owner.Stop("comparison-outside-tolerance");
                 else if (!owner.eventConfigured && owner.report.candidateDriverCalls >= MaximumCalls)
                 {
@@ -433,6 +445,7 @@ namespace KspContinuum
         void Finish()
         {
             if (finished) return; finished = true;
+            PopulateSynchronizationReport();
             report.authorityExitAttested = TargetsOwned(); Cleanup(); Export();
             if (quitAfter)
             {
@@ -569,6 +582,19 @@ namespace KspContinuum
 
         CoastingBody SampleBody(double universalTime) { return engine.SampleAt(universalTime).Bodies[0]; }
 
+        void PopulateSynchronizationReport()
+        {
+            report.synchronizationStopwatchFrequency = Stopwatch.Frequency;
+            report.synchronizationMeasuredCallbacks = report.candidateDriverCalls;
+            report.engineSamples = cadence == null ? 0 : cadence.EngineSampleCount;
+            report.callbackTicks = callbackTicks; report.maximumCallbackTicks = maximumCallbackTicks;
+            report.evaluationTicks = sampleTicks; report.maximumEvaluationTicks = maximumSampleTicks;
+            report.publicationTicks = seedTicks; report.maximumPublicationTicks = maximumSeedTicks;
+            report.validationTicks = validationTicks; report.maximumValidationTicks = maximumValidationTicks;
+            report.driverRemainderTicks = residualTicks;
+            report.maximumDriverRemainderTicks = maximumResidualTicks;
+        }
+
         string CadenceReport()
         {
             string newline = Environment.NewLine;
@@ -577,10 +603,15 @@ namespace KspContinuum
                 "driverCallbacks=" + report.candidateDriverCalls + newline +
                 "engineSamples=" + cadence.EngineSampleCount + newline +
                 "stopwatchFrequency=" + Stopwatch.Frequency + newline +
+                "synchronizationMeasuredCallbacks=" + report.candidateDriverCalls + newline +
                 "callbackTicksTotal=" + callbackTicks + newline + "callbackTicksMaximum=" + maximumCallbackTicks + newline +
                 "sampleTicksTotal=" + sampleTicks + newline + "sampleTicksMaximum=" + maximumSampleTicks + newline +
-                "seedTicksTotal=" + seedTicks + newline + "seedTicksMaximum=" + maximumSeedTicks + newline +
-                "residualTicksTotal=" + residualTicks + newline + "residualTicksMaximum=" + maximumResidualTicks + newline +
+                "publicationTicksTotal=" + seedTicks + newline + "publicationTicksMaximum=" + maximumSeedTicks + newline +
+                "validationTicksTotal=" + validationTicks + newline + "validationTicksMaximum=" + maximumValidationTicks + newline +
+                "driverRemainderTicksTotal=" + residualTicks + newline +
+                "driverRemainderTicksMaximum=" + maximumResidualTicks + newline +
+                "stateCaptureTicks=" + report.stateCaptureTicks + newline +
+                "forecastAdmissionTicks=" + report.forecastAdmissionTicks + newline +
                 "frontierUnchangedByPresentation=" + report.frontierUnchangedByPresentation + newline;
         }
 
