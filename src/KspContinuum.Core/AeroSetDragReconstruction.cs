@@ -33,7 +33,7 @@ namespace KspContinuum
                 return new AeroSetDragResult(AeroSetDragDisposition.Valid, AeroSetDragReason.ZeroFlow, 0);
             var attitude = new Rotation(input.worldAttitudeXYZ.X, input.worldAttitudeXYZ.Y,
                 input.worldAttitudeXYZ.Z, input.worldAttitudeW);
-            Vec worldDragDirection = input.relativeAirVelocity * (-1 / Math.Sqrt(speedSquared));
+            Vec worldDragDirection = input.relativeAirVelocity * (1 / Math.Sqrt(speedSquared));
             return Evaluate(attitude.Inverse.Rotate(worldDragDirection), input.mach, input.setDragInputs);
         }
 
@@ -93,8 +93,16 @@ namespace KspContinuum
         static double EvaluateCurve(AeroFloatCurveDefinition curve, double time)
         {
             if (curve.keys.Count == 1) return curve.keys[0].value;
-            if (time < curve.keys[0].time || time > curve.keys[curve.keys.Count - 1].time)
+            if (time < curve.keys[0].time)
+            {
+                if (curve.preWrapMode == 8) return curve.keys[0].value;
                 throw new CurveDomainException();
+            }
+            if (time > curve.keys[curve.keys.Count - 1].time)
+            {
+                if (curve.postWrapMode == 8) return curve.keys[curve.keys.Count - 1].value;
+                throw new CurveDomainException();
+            }
             int right = 1;
             while (right < curve.keys.Count - 1 && time > curve.keys[right].time) right++;
             AeroCurveKey leftKey = curve.keys[right - 1], rightKey = curve.keys[right];

@@ -135,11 +135,11 @@ derived from those exact parameters and is checked again while parsing. The adap
 existing read-only callback and retains no Unity or KSP object references.
 
 `AeroSetDragReconstruction` implements the installed stock `SetDrag` area reduction without reading stock's computed
-`AreaDrag` label. It supports ordinary unweighted curve keys inside their captured time domain and abstains on weighted
-keys or extrapolation. The comparison report records area-drag errors separately from the older stock-scalar product,
+`AreaDrag` label. It supports ordinary unweighted curve keys plus captured `ClampForever` pre/post-wrap behavior and
+abstains on weighted keys or unsupported extrapolation. The comparison report records area-drag errors separately from the older stock-scalar product,
 which remains diagnostic because it consumes stock-computed magnitude terms. See
 [`aero-set-drag-reconstruction.md`](aero-set-drag-reconstruction.md) for the frozen hypotheses, tolerances, and the
-pending held-out capture-v3 qualification gate. Body lift remains excluded.
+passing development/held-out capture-v3 qualification gate. Body lift remains excluded.
 
 This code compiles against Lib.Harmony but does not package `0Harmony.dll`. The package command emits local CKAN
 metadata that declares the shared `Harmony2` dependency from HarmonyKSP and binds the exact archive by size and hashes.
