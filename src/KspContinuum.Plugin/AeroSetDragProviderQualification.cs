@@ -65,11 +65,11 @@ namespace KspContinuum
             if (owner == null || !owner.active) return true;
             try
             {
-                long started = Stopwatch.GetTimestamp();
                 int requiredShadow = RequiredWarmupMatches + RequiredMeasuredMatches;
                 bool shadow = owner.report.matchedCompleteOutputs < requiredShadow;
                 bool measured = owner.report.matchedCompleteOutputs >= RequiredWarmupMatches &&
                     owner.report.matchedCompleteOutputs < requiredShadow;
+                long graphBefore = owner.report.measuredPatchGraphStopwatchTicks;
                 if (shadow && !owner.TargetOwnedForStep(measured))
                 { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
                 if (!shadow && owner.report.suppressedOriginalCalls == 0)
@@ -78,14 +78,38 @@ namespace KspContinuum
                     if (!owner.report.authorityAdmissionAttested)
                     { owner.Stop("authority-admission-patch-graph-changed"); owner.report.stockFallbacks++; return true; }
                 }
-                __state.Candidate = Calculate(__instance, vector, machNumber);
-                CubeData(__instance) = __state.Candidate;
+                if (measured)
+                {
+                    long admissionTicks, guardedTicks;
+                    DragCubeList.CubeData admission, guarded;
+                    if ((owner.report.shadowMeasuredComparisons & 1) == 0)
+                    {
+                        admission = TimedCalculateAndPublish(__instance, vector, machNumber, out admissionTicks);
+                        guarded = TimedCalculateAndPublish(__instance, vector, machNumber, out guardedTicks);
+                    }
+                    else
+                    {
+                        guarded = TimedCalculateAndPublish(__instance, vector, machNumber, out guardedTicks);
+                        admission = TimedCalculateAndPublish(__instance, vector, machNumber, out admissionTicks);
+                    }
+                    double strategyError;
+                    if (!Equivalent(admission, guarded, out strategyError))
+                    { owner.Stop("strategy-output-mismatch"); owner.report.stockFallbacks++; return true; }
+                    __state.Candidate = admission;
+                    CubeData(__instance) = admission;
+                    owner.report.admissionStrategyStopwatchTicks += admissionTicks;
+                    owner.report.candidateStopwatchTicks += guardedTicks +
+                        (owner.report.measuredPatchGraphStopwatchTicks - graphBefore);
+                }
+                else
+                {
+                    __state.Candidate = Calculate(__instance, vector, machNumber);
+                    CubeData(__instance) = __state.Candidate;
+                }
                 if (shadow)
                 {
                     __state.Shadow = true;
                     __state.Measured = measured;
-                    long candidateStopped = Stopwatch.GetTimestamp();
-                    if (__state.Measured) owner.report.candidateStopwatchTicks += candidateStopped - started;
                     __state.StockStarted = Stopwatch.GetTimestamp(); return true;
                 }
                 owner.report.suppressedOriginalCalls++;
@@ -97,6 +121,15 @@ namespace KspContinuum
             {
                 owner.report.stockFallbacks++; owner.Stop("candidate-failed:" + error.GetType().Name); return true;
             }
+        }
+
+        static DragCubeList.CubeData TimedCalculateAndPublish(DragCubeList cubes, Vector3 vector, float mach, out long elapsed)
+        {
+            long started = Stopwatch.GetTimestamp();
+            DragCubeList.CubeData candidate = Calculate(cubes, vector, mach);
+            CubeData(cubes) = candidate;
+            elapsed = Stopwatch.GetTimestamp() - started;
+            return candidate;
         }
 
         static void Postfix(DragCubeList __instance, CallState __state)

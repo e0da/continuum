@@ -38,7 +38,7 @@ static class Program
             maximumRelativeError = 1e-6, stopwatchFrequency = 10000000, patchGraphInspections = 4,
             patchGraphStopwatchTicks = 120, measuredPatchGraphInspections = 3,
             measuredPatchGraphStopwatchTicks = 90, authorityAdmissionAttested = true,
-            authorityExitAttested = true };
+            authorityExitAttested = true, admissionStrategyStopwatchTicks = 2400 };
         Check(setDrag.RecordCleanup(true, true) && setDrag.cleanupStatus == "removed-owned-patches" &&
             setDrag.status == "complete");
         string encoded = ReportJson.Encode(setDrag);
@@ -47,6 +47,7 @@ static class Program
             encoded.Contains("\"shadowMeasuredComparisons\":256") &&
             encoded.Contains("\"patchGraphStopwatchTicks\":120") &&
             encoded.Contains("\"measuredPatchGraphStopwatchTicks\":90") &&
+            encoded.Contains("\"admissionStrategyStopwatchTicks\":2400") &&
             encoded.Contains("\"authorityAdmissionAttested\":true") &&
             encoded.Contains("\"authorityExitAttested\":true") &&
             encoded.Contains("\"cleanupStatus\":\"removed-owned-patches\"") &&

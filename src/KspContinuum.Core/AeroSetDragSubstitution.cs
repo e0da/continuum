@@ -20,6 +20,7 @@ namespace KspContinuum
         public int suppressedOriginalCalls;
         public int stockFallbacks;
         public long candidateStopwatchTicks;
+        public long admissionStrategyStopwatchTicks;
         public long stockStopwatchTicks;
         public long stopwatchFrequency;
         public int patchGraphInspections;
