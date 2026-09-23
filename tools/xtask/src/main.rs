@@ -171,6 +171,7 @@ fn portable(root: &Path) -> Result {
     verify_encounter(root)?;
     verify_handoff(root)?;
     verify_islands(root)?;
+    verify_fleet(root)?;
     verify_layout(root)?;
     verify_program_branch(root)?;
     verify_worker(root)?;
@@ -348,6 +349,26 @@ fn verify_islands(root: &Path) -> Result {
     }
     truth(&r["safety"], "cancellationObserved")?;
     truth(&r["safety"], "failureObserved")
+}
+
+fn verify_fleet(root: &Path) -> Result {
+    let output = Command::new("dotnet").args(["run", "--project", "tools/KspContinuum.FleetBench", "-c", "Release", "--",
+        "--quick", "--samples", "3"]).env("DOTNET_TieredCompilation", "0").current_dir(root).output()
+        .map_err(|error| format!("fleet benchmark failed to start: {error}"))?;
+    require(output.status.success(), &format!("fleet benchmark failed: {}{}",
+        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)))?;
+    let r: Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    eq_str(&r, "schema", "ksp-continuum-fleet-bench/v1")?;
+    truth(&r, "quick")?;
+    truth(&r, "tieredCompilationDisabled")?;
+    let rows = array(&r, "rows")?;
+    require(!rows.is_empty(), "fleet benchmark emitted no rows")?;
+    for row in rows {
+        require(row["deterministicOrder"] == true, "fleet worker output order diverged")?;
+        require(row["medianMilliseconds"].as_f64().unwrap_or(0.0) > 0.0, "fleet timing missing")?;
+        require(row["medianAllocatedBytes"].as_i64().unwrap_or(-1) >= 0, "fleet allocation missing")?;
+    }
+    Ok(())
 }
 
 fn verify_layout(root: &Path) -> Result {
