@@ -25,7 +25,8 @@ static class Program
             bodyPresent = true, bodyHasOcean = true, altitudeMeters = 100000, vesselBoundMeters = 100, radialSpeedMetersPerSecond = 0, fixedDeltaSeconds = .02 };
         var dryPart = new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, settledDry = true };
         if (DryBuoyancyAdmission.Decide(dryVessel, dryPart) != DryBuoyancyDisposition.SkipStock) throw new Exception("High orbit rejected");
-        count++;
+        if (!DryBuoyancyAdmission.VesselEligible(dryVessel) || !DryBuoyancyAdmission.PartEligible(dryPart)) throw new Exception("Split admission rejected");
+        count += 3;
         var unsafeVessels = new[] {
             new DryBuoyancyVesselState(),
             new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true, bodyHasOcean = true,

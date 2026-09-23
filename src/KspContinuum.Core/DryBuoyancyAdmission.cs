@@ -22,20 +22,25 @@ namespace KspContinuum
 
         public static DryBuoyancyDisposition Decide(DryBuoyancyVesselState vessel, DryBuoyancyPartState part)
         {
+            return VesselEligible(vessel) && PartEligible(part) ? DryBuoyancyDisposition.SkipStock : DryBuoyancyDisposition.RunStock;
+        }
+
+        public static bool VesselEligible(DryBuoyancyVesselState vessel)
+        {
             if (!vessel.flightReady || !vessel.active || !vessel.loaded || vessel.packed || !vessel.orbiting ||
                 !vessel.bodyPresent || !vessel.bodyHasOcean)
-                return DryBuoyancyDisposition.RunStock;
-            if (!part.bodyInitialized || !part.bodyMatchesVessel || part.splashed || !part.settledDry ||
-                !Finite(part.depthMeters) || part.depthMeters > 0)
-                return DryBuoyancyDisposition.RunStock;
+                return false;
             if (!Finite(vessel.altitudeMeters) || !Finite(vessel.vesselBoundMeters) || vessel.vesselBoundMeters < 0 ||
                 !Finite(vessel.radialSpeedMetersPerSecond) || !Finite(vessel.fixedDeltaSeconds) || vessel.fixedDeltaSeconds <= 0)
-                return DryBuoyancyDisposition.RunStock;
+                return false;
 
             double approach = Math.Max(0, -vessel.radialSpeedMetersPerSecond) * vessel.fixedDeltaSeconds * 2;
             double clearance = Math.Max(MinimumClearanceMeters, vessel.vesselBoundMeters + approach);
-            return vessel.altitudeMeters > clearance ? DryBuoyancyDisposition.SkipStock : DryBuoyancyDisposition.RunStock;
+            return vessel.altitudeMeters > clearance;
         }
+
+        public static bool PartEligible(DryBuoyancyPartState part) => part.bodyInitialized && part.bodyMatchesVessel &&
+            !part.splashed && part.settledDry && Finite(part.depthMeters) && part.depthMeters <= 0;
 
         static bool Finite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
     }

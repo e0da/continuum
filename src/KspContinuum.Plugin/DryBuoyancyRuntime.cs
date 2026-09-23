@@ -83,12 +83,12 @@ namespace KspContinuum
             if (!HighLogic.LoadedSceneIsFlight || !FlightGlobals.ready || vessel == null || vessel.parts == null ||
                 !ReferenceEquals(vessel, FlightGlobals.ActiveVessel) || vessel.parts.Count != partCount) return false;
             CelestialBody body = vessel.mainBody; Vector3 size = vessel.vesselSize;
-            return DryBuoyancyAdmission.Decide(new DryBuoyancyVesselState {
+            return DryBuoyancyAdmission.VesselEligible(new DryBuoyancyVesselState {
                 flightReady = true, active = true, loaded = vessel.loaded, packed = vessel.packed,
                 orbiting = vessel.situation == Vessel.Situations.ORBITING, bodyPresent = body != null,
                 bodyHasOcean = body != null && body.ocean, altitudeMeters = vessel.altitude, vesselBoundMeters = size.magnitude,
                 radialSpeedMetersPerSecond = vessel.verticalSpeed, fixedDeltaSeconds = TimeWarp.fixedDeltaTime
-            }, new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, settledDry = true }) == DryBuoyancyDisposition.SkipStock;
+            });
         }
 
         bool EligiblePart(Entry entry)
@@ -96,17 +96,13 @@ namespace KspContinuum
             if (entry == null || entry.part == null || entry.buoyancy == null || entry.part.vessel != vessel) return false;
             PartBuoyancy value = entry.buoyancy;
             bool available = entry.disabledByOwner ? !value.enabled : value.enabled;
-            return available && DryBuoyancyAdmission.Decide(new DryBuoyancyVesselState {
-                flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true, bodyHasOcean = true,
-                altitudeMeters = DryBuoyancyAdmission.MinimumClearanceMeters + 1, vesselBoundMeters = 0,
-                radialSpeedMetersPerSecond = 0, fixedDeltaSeconds = TimeWarp.fixedDeltaTime
-            }, new DryBuoyancyPartState {
+            return available && DryBuoyancyAdmission.PartEligible(new DryBuoyancyPartState {
                 bodyInitialized = value.body != null, bodyMatchesVessel = ReferenceEquals(value.body, vessel.mainBody),
                 splashed = value.splashed, depthMeters = value.depth,
                 settledDry = !value.IsInvoking() && !value.wasSplashed && value.splashedCounter == 0 &&
                     !entry.part.WaterContact && value.submergedPortion == 0 && entry.part.submergedPortion == 0 &&
                     value.drag == 0 && value.lastBuoyantForce == Vector3.zero
-            }) == DryBuoyancyDisposition.SkipStock;
+            });
         }
 
         static void PublishDry(Entry entry)
@@ -134,9 +130,17 @@ namespace KspContinuum
             foreach (Entry entry in entries)
             {
                 if (!entry.disabledByOwner) continue;
-                if (entry.buoyancy == null) { Report.errors++; entry.disabledByOwner = false; continue; }
-                entry.buoyancy.enabled = true; entry.disabledByOwner = false;
-                if (!entry.buoyancy.enabled) Report.errors++;
+                try
+                {
+                    if (entry.buoyancy == null) { Report.errors++; continue; }
+                    entry.buoyancy.enabled = true;
+                    if (!entry.buoyancy.enabled) { Report.errors++; continue; }
+                    entry.disabledByOwner = false;
+                }
+                catch (Exception error)
+                {
+                    Report.errors++; if (string.IsNullOrEmpty(Report.detail)) Report.detail = error.GetType().Name + ": " + error.Message;
+                }
             }
         }
 
