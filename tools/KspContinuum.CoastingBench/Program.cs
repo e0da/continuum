@@ -38,7 +38,7 @@ static class Program
         public int logicalProcessors { get; set; } = Environment.ProcessorCount;
         public string measurement { get; set; } =
             "Each case has one untimed warmup followed by repeated process-local measurements. Engine and input construction occur before timing. " +
-            "Elapsed time includes Parallel.For scheduling, propagation, immutable result construction, snapshot array cloning, and publication retention. " +
+            "Elapsed time includes Parallel.For scheduling, propagation, immutable result construction, snapshot array cloning, and publication retention where applicable. " +
             "Process allocation deltas include worker-thread allocations but may include unrelated runtime activity; caller allocation excludes worker threads. " +
             "The epoch-copy case executes the same scheduling and snapshot path with zero propagation interval, so comparison with final-only estimates solve cost without claiming a pure component timer.";
         public string interpretation { get; set; } =
@@ -72,6 +72,12 @@ static class Program
         if (mode == "epoch-copy") final = engine.SampleAt(Epoch);
         else if (mode == "final-only") final = engine.SampleAt(Epoch + HorizonSeconds);
         else if (mode == "sparse-publication") final = engine.AdvanceTo(Epoch + HorizonSeconds, 300).Final;
+        else if (mode == "dense-evaluation-discard")
+        {
+            final = null;
+            for (double offset = 10; offset <= HorizonSeconds; offset += 10)
+                final = engine.SampleAt(Epoch + offset);
+        }
         else if (mode == "dense-publication") final = engine.AdvanceTo(Epoch + HorizonSeconds, 10).Final;
         else throw new ArgumentException("Unknown benchmark mode.");
         CoastingBody first = final.Bodies[0], last = final.Bodies[final.Bodies.Count - 1];
@@ -81,7 +87,7 @@ static class Program
     static int Evaluations(string mode)
     {
         if (mode == "sparse-publication") return 2;
-        if (mode == "dense-publication") return 60;
+        if (mode == "dense-evaluation-discard" || mode == "dense-publication") return 60;
         return 1;
     }
 
@@ -147,7 +153,7 @@ static class Program
             if (output != null && (File.Exists(output) || Directory.Exists(output)))
                 throw new ArgumentException("Output must be a new file path.");
 
-            string[] modes = { "epoch-copy", "final-only", "sparse-publication", "dense-publication" };
+            string[] modes = { "epoch-copy", "final-only", "sparse-publication", "dense-evaluation-discard", "dense-publication" };
             int[] counts = { 1, 16, 256, 4096 };
             var rows = new List<Measurement>();
             foreach (int count in counts)
@@ -166,20 +172,23 @@ static class Program
             Measurement copy4096 = Find(4096, 64, "epoch-copy");
             Measurement final4096 = Find(4096, 64, "final-only");
             Measurement sparse4096 = Find(4096, 64, "sparse-publication");
+            Measurement discard4096 = Find(4096, 64, "dense-evaluation-discard");
             Measurement dense4096 = Find(4096, 64, "dense-publication");
             Measurement fine256 = Find(256, 1, "final-only"), coarse256 = Find(256, 64, "final-only");
             Measurement fine4096 = Find(4096, 1, "final-only");
             var checks = new SortedDictionary<string, bool> {
                 ["batchStrategiesBitwiseStable"] = batchStable,
                 ["measurementsFinite"] = finiteMeasurements,
-                ["matrixComplete"] = rows.Count == 28
+                ["matrixComplete"] = rows.Count == 35
             };
             var costMap = new SortedDictionary<string, double> {
                 ["bodies4096EpochCopyMilliseconds"] = copy4096.medianMilliseconds,
                 ["bodies4096FinalOnlyMilliseconds"] = final4096.medianMilliseconds,
                 ["bodies4096EstimatedPropagationIncrementMilliseconds"] = Math.Max(0, final4096.medianMilliseconds - copy4096.medianMilliseconds),
                 ["bodies4096SparsePublicationMilliseconds"] = sparse4096.medianMilliseconds,
+                ["bodies4096DenseEvaluationDiscardMilliseconds"] = discard4096.medianMilliseconds,
                 ["bodies4096DensePublicationMilliseconds"] = dense4096.medianMilliseconds,
+                ["bodies4096DenseRetentionIncrementMilliseconds"] = Math.Max(0, dense4096.medianMilliseconds - discard4096.medianMilliseconds),
                 ["bodies4096DenseProcessAllocatedMegabytes"] = Median(dense4096.processAllocatedBytes) / (1024.0 * 1024),
                 ["bodies4096DenseToFinalElapsedRatio"] = dense4096.medianMilliseconds / final4096.medianMilliseconds,
                 ["bodies256CoarseToFineFinalElapsedRatio"] = coarse256.medianMilliseconds / fine256.medianMilliseconds,
