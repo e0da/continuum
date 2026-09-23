@@ -70,7 +70,7 @@ foreach (string path in paths)
         source = Path.GetFileName(Path.GetDirectoryName(path)) + "/" + Path.GetFileName(path),
         observedBoundaryFieldsStable = stable,
         pressureQualified = physicsDomain,
-        reason = physicsDomain ? "loaded-unpacked-stable-physics-domain" : "pressure estimate requires stable loaded unpacked physics and matched child counts",
+        reason = physicsDomain ? "loaded-unpacked-stable-observed-boundaries" : "pressure estimate requires stable observed loaded unpacked boundaries and matched child counts",
         factors = new {
             logicalProcessors = root.GetProperty("processorCount").GetInt32(),
             body = first.GetProperty("body").GetString(),
@@ -121,8 +121,7 @@ static (double mean, int count) Mean(JsonElement scopes, string name, string tim
     foreach (JsonElement scope in scopes.EnumerateArray())
         if (scope.GetProperty("name").GetString() == name)
         { Require(found == null, "Duplicate timing scope: " + name); found = scope; }
-    Require(found != null, "Missing timing scope: " + name);
-    JsonElement row = found.Value;
+    JsonElement row = found ?? throw new InvalidDataException("Missing timing scope: " + name);
     JsonElement milliseconds = row.GetProperty("milliseconds");
     int count = milliseconds.GetProperty("count").GetInt32();
     double mean = Number(milliseconds, "mean");
