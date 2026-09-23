@@ -121,6 +121,21 @@ Add `--continuum-scale-save SAVE --continuum-scale-checkpoint CHECKPOINT` to loa
 
 The harness writes `markers.json` and a fail-closed `status.txt` under `PluginData/scale-profile-*`. Without the named-checkpoint flags it does not load a save. It does not construct a craft, control the vessel, replace physics, or establish a speedup. Separate controlled saves and repeated runs own the part-count series and instrumentation-off perturbation measurement.
 
+#### Atmospheric 4x SetDrag experiment
+
+`--continuum-scale-profile --continuum-playerloop --continuum-atmospheric-stress` runs the existing 300-rendered-frame atmospheric window at 4x physics warp. Adding `--continuum-setdrag-stress-candidate` makes the opt-in SetDrag provider qualify 288 complete candidate/stock outputs before capture, then substitute for the whole window, with a 500,000-call ceiling and one stock-output comparison every 1,024 calls. It restores the original provider before exit. The candidate checks Harmony ownership at admission and exit and every 4,096 calls; a foreign patch that appears and disappears between checks can escape detection. This is an experimental performance setting, not mod-compatible gameplay authority.
+
+Fresh processes loaded the same immutable 196-part high-speed Kerbin checkpoint. The visible runs used OpenGL at 1920×1080. Fixed-parent means are complete `FixedUpdate` parent time per rendered frame; each such frame contained about four fixed steps, so they must not be compared with per-step child means. Achieved warp is universal-time advance divided by elapsed wall time between the first and last sampled frame.
+
+| Visible 300-frame run | SetDrag ownership | Mean frame (ms) | Mean fixed parent (ms/frame) | Achieved warp | Parts during capture |
+| --- | --- | ---: | ---: | ---: | --- |
+| Stock 1 | Stock | 85.64 | 30.17 | 3.726x | 196 to 195 |
+| Candidate 1 | Continuum, audit each fixed step | 95.83 | 30.41 | 3.331x | 196 to 195 |
+| Candidate 2 | Continuum, audit every 4,096 calls | 86.87 | 27.04 | 3.674x | 196 to 195 |
+| Stock 2 | Stock | 84.34 | 26.54 | 3.787x | 196 throughout |
+
+The low-audit candidate suppressed 217,319 original calls, matched all 212 in-window stock comparisons, recorded zero fallbacks and removed its patch. The full-audit candidate made 1,204 ownership inspections taking 320 ms; the low-audit candidate made 56 taking 90 ms. The two stock runs also differed in whether a part broke off, and their fixed-parent means differed by 3.63 ms. These runs show no repeatable whole-game speedup. They identify the per-part Harmony seam and its ownership audit as costs large enough to erase a faster six-face reduction. The next candidate should take authority at a coarser batch boundary and compare complete frame and fixed-step demand again.
+
 #### Initial station observation
 
 Two headless KSP 1.12.5 runs loaded the preserved station checkpoint with package SHA-256 `d2d437abdcb7a688afc687eb0b39be99f5fad9aea94d576d443830e04dd98191` from source commit `54bf455`. The source checkpoint hash was verified unchanged after both exits. Each observed graph contained 196 logical parts, 110 rigidbodies, 144 joints, 328 colliders and one loaded vessel. Both harnesses completed 300 rendered frames, exited with code 0, and reported intact PlayerLoop installation and cleanup with no dropped samples or sequence errors.

@@ -18,6 +18,10 @@ namespace KspContinuum
         public int shadowComparisons;
         public int matchedCompleteOutputs;
         public int suppressedOriginalCalls;
+        public bool atmosphericStressWindow;
+        public int stressShadowComparisons;
+        public int stressMatchedOutputs;
+        public int stressOriginalCalls;
         public int stockFallbacks;
         public long candidateStopwatchTicks;
         public long admissionStrategyStopwatchTicks;
