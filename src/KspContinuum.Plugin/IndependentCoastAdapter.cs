@@ -16,6 +16,7 @@ namespace KspContinuum
         const string Flag = "--continuum-coast-canary";
         const string QuitFlag = "--continuum-coast-quit-after-qualification";
         const string CadencePrefix = "--continuum-coast-publication-seconds=";
+        const string DirectCadenceFlag = "--continuum-coast-direct-presentation";
         const string Owner = "continuum.independent-coast-adapter";
         const int MaximumCalls = 256;
         const double ForecastSeconds = 600;
@@ -35,10 +36,10 @@ namespace KspContinuum
 
         sealed class DriverCall
         {
-            public bool Candidate, Published, Consumed;
+            public bool Candidate, Consumed;
             public long Started, SampleTicks, SeedTicks;
             public double UniversalTime;
-            public CoastingSnapshot Sample;
+            public CoastingBody Body;
         }
 
         Harmony harmony;
@@ -46,6 +47,7 @@ namespace KspContinuum
         CoastingAdapterReport report;
         CoastingEngine engine;
         CoastPresentationCadence cadence;
+        Func<double, CoastingBody> sampleBody;
         Task<CoastingAdvanceResult> forecast;
         Orbit stockReference;
         Vessel vessel;
@@ -66,7 +68,8 @@ namespace KspContinuum
             report = new CoastingAdapterReport { status = "waiting-for-packed-orbit" };
             try
             {
-                cadence = new CoastPresentationCadence(ParseCadence(arguments));
+                cadence = Array.IndexOf(arguments, DirectCadenceFlag) >= 0 ?
+                    CoastPresentationCadence.Direct() : new CoastPresentationCadence(ParseCadence(arguments));
                 if (Versioning.version_major != 1 || Versioning.version_minor != 12 || Versioning.Revision != 5)
                     throw new InvalidOperationException("KSP 1.12.5 is required.");
                 driverTarget = AccessTools.DeclaredMethod(typeof(OrbitDriver), "UpdateOrbit", new[] { typeof(bool) });
@@ -148,6 +151,7 @@ namespace KspContinuum
             vessel = current; referenceBody = current.mainBody;
             engine = new CoastingEngine(ut, referenceBody.gravParameter,
                 new[] { new CoastingBody(0, V(position), V(velocity)) }, 1);
+            sampleBody = SampleBody;
             stockReference = new Orbit();
             stockReference.UpdateFromStateVectors(position, velocity, referenceBody, ut);
             report.seedUniversalTime = ut; report.vesselId = vessel.id.ToString("D");
@@ -195,15 +199,13 @@ namespace KspContinuum
                 { owner.report.stockFallbacks++; owner.Stop("driver-state-changed"); return true; }
                 double ut = Planetarium.GetUniversalTime();
                 __state.Candidate = true; __state.Started = Stopwatch.GetTimestamp(); __state.UniversalTime = ut;
-                if (!owner.cadence.ShouldPublish(ut)) return true;
                 long sampleStarted = Stopwatch.GetTimestamp();
-                CoastingSnapshot sample = owner.engine.SampleAt(ut);
+                CoastingBody body = owner.cadence.Evaluate(ut, owner.sampleBody);
                 __state.SampleTicks = Stopwatch.GetTimestamp() - sampleStarted;
-                CoastingBody body = sample.Bodies[0];
                 long seedStarted = Stopwatch.GetTimestamp();
                 __instance.orbit.UpdateFromStateVectors(V(body.Position), V(body.Velocity), owner.referenceBody, ut);
                 __state.SeedTicks = Stopwatch.GetTimestamp() - seedStarted;
-                __state.Published = true; __state.Sample = sample;
+                __state.Body = body;
                 token = new SuppressionToken { Orbit = __instance.orbit,
                     UniversalTimeBits = BitConverter.DoubleToInt64Bits(ut), Call = __state };
                 return true;
@@ -227,19 +229,15 @@ namespace KspContinuum
         {
             IndependentCoastAdapter owner = instance;
             if (owner == null || __state == null || !__state.Candidate) return;
-            if (__state.Published && !__state.Consumed) { owner.Fail("one-shot-not-consumed"); return; }
+            if (!__state.Consumed) { owner.Fail("one-shot-not-consumed"); return; }
             try
             {
                 if (__instance != owner.vessel.orbitDriver || __instance.orbit.referenceBody != owner.referenceBody)
                 { owner.Fail("driver-readback-changed"); return; }
                 Vector3d position = owner.stockReference.getRelativePositionAtUT(__state.UniversalTime);
                 Vector3d velocity = owner.stockReference.getOrbitalVelocityAtUT(__state.UniversalTime);
-                Vec expectedPosition = V(position), expectedVelocity = V(velocity);
-                if (__state.Published)
-                {
-                    CoastingBody expected = __state.Sample.Bodies[0];
-                    expectedPosition = expected.Position; expectedVelocity = expected.Velocity;
-                }
+                CoastingBody expected = __state.Body;
+                Vec expectedPosition = expected.Position, expectedVelocity = expected.Velocity;
                 owner.report.maximumPositionErrorMeters = Math.Max(owner.report.maximumPositionErrorMeters,
                     Magnitude(V(position) + expectedPosition * -1));
                 owner.report.maximumVelocityErrorMetersPerSecond = Math.Max(owner.report.maximumVelocityErrorMetersPerSecond,
@@ -262,8 +260,7 @@ namespace KspContinuum
                 owner.sampleTicks += __state.SampleTicks; owner.maximumSampleTicks = Math.Max(owner.maximumSampleTicks, __state.SampleTicks);
                 owner.seedTicks += __state.SeedTicks; owner.maximumSeedTicks = Math.Max(owner.maximumSeedTicks, __state.SeedTicks);
                 owner.residualTicks += residual; owner.maximumResidualTicks = Math.Max(owner.maximumResidualTicks, residual);
-                owner.report.candidateDriverCalls++;
-                if (__state.Published) owner.report.suppressedStockPropagations++;
+                owner.report.candidateDriverCalls++; owner.report.suppressedStockPropagations++;
                 if (owner.report.candidateDriverCalls >= MaximumCalls)
                 {
                     bool accurate = owner.report.maximumPositionErrorMeters <= PositionToleranceMeters &&
@@ -282,7 +279,7 @@ namespace KspContinuum
         static Exception DriverFinalizer(Exception __exception, DriverCall __state)
         {
             IndependentCoastAdapter owner = instance;
-            if (__state != null && __state.Published && !__state.Consumed && owner != null)
+            if (__state != null && __state.Candidate && !__state.Consumed && owner != null)
                 owner.Fail("driver-exited-with-unconsumed-token");
             token = null;
             return __exception;
@@ -434,12 +431,15 @@ namespace KspContinuum
             return 2;
         }
 
+        CoastingBody SampleBody(double universalTime) { return engine.SampleAt(universalTime).Bodies[0]; }
+
         string CadenceReport()
         {
             string newline = Environment.NewLine;
-            return "publicationIntervalSeconds=" + cadence.IntervalSeconds.ToString("R", CultureInfo.InvariantCulture) + newline +
+            return "presentationStrategy=" + (cadence.IsDirect ? "direct" : "hermite") + newline +
+                "publicationIntervalSeconds=" + cadence.IntervalSeconds.ToString("R", CultureInfo.InvariantCulture) + newline +
                 "driverCallbacks=" + report.candidateDriverCalls + newline +
-                "publishedSamples=" + report.suppressedStockPropagations + newline +
+                "engineSamples=" + cadence.EngineSampleCount + newline +
                 "stopwatchFrequency=" + Stopwatch.Frequency + newline +
                 "callbackTicksTotal=" + callbackTicks + newline + "callbackTicksMaximum=" + maximumCallbackTicks + newline +
                 "sampleTicksTotal=" + sampleTicks + newline + "sampleTicksMaximum=" + maximumSampleTicks + newline +
