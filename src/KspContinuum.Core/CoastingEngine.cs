@@ -96,6 +96,8 @@ namespace KspContinuum
                 if (double.IsInfinity(requested) || requested > MaximumPublicationsPerAdvance)
                     throw new ArgumentException("Publication request exceeds the bounded advance limit.");
                 double sample = current.TimeSeconds + publicationIntervalSeconds;
+                if (sample <= current.TimeSeconds)
+                    throw new ArgumentException("Publication interval does not advance representable time.");
                 while (sample < targetTimeSeconds)
                 {
                     publications.Add(SampleAt(sample));
@@ -112,7 +114,7 @@ namespace KspContinuum
         CoastingSnapshot Evaluate(double time)
         {
             var result = new CoastingBody[origin.Length];
-            int batches = (origin.Length + workBatchSize - 1) / workBatchSize;
+            int batches = 1 + (origin.Length - 1) / workBatchSize;
             Parallel.For(0, batches, batch =>
             {
                 int first = batch * workBatchSize, last = Math.Min(origin.Length, first + workBatchSize);
@@ -138,6 +140,7 @@ namespace KspContinuum
                 double z = alpha * x * x, c = C(z), s = S(z);
                 double value = r0 * radial / rootMu * x * x * c + (1 - alpha * r0) * x * x * x * s + r0 * x - rootMu * dt;
                 double derivative = r0 * radial / rootMu * x * (1 - z * s) + (1 - alpha * r0) * x * x * c + r0;
+                if (Math.Abs(derivative) <= double.Epsilon || double.IsNaN(derivative) || double.IsInfinity(derivative)) break;
                 double delta = value / derivative; x -= delta;
                 if (Math.Abs(delta) <= settings.AnomalyTolerance * Math.Max(1, Math.Abs(x))) { converged = true; break; }
             }

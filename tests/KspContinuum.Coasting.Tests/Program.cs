@@ -34,6 +34,23 @@ static class Program
         const double mu = 3.986004418e14, radius = 7e6, epoch = 123456789;
         double period = 2 * Math.PI * Math.Sqrt(radius * radius * radius / mu), target = epoch + period;
         List<CoastingBody> fixture = Fixture(mu, radius);
+        double speed = Math.Sqrt(mu / radius);
+        CoastingBody quarter = new CoastingEngine(epoch, mu, fixture, 5).SampleAt(epoch + period / 4).Bodies[0];
+        Check(Norm(Difference(quarter.Position, new Vec(0, radius, 0))) < 1e-3,
+            "quarter-period position did not traverse the orbit");
+        Check(Norm(Difference(quarter.Velocity, new Vec(-speed, 0, 0))) < 1e-6,
+            "quarter-period velocity did not rotate with the orbit");
+        const double kerbinMu = 3.5316e12, semiMajor = 732639.5703, eccentricity = 0.00888570;
+        double periapsis = semiMajor * (1 - eccentricity), apoapsis = semiMajor * (1 + eccentricity);
+        double ellipsePeriod = 2 * Math.PI * Math.Sqrt(semiMajor * semiMajor * semiMajor / kerbinMu);
+        double periapsisSpeed = Math.Sqrt(kerbinMu * (2 / periapsis - 1 / semiMajor));
+        double apoapsisSpeed = Math.Sqrt(kerbinMu * (2 / apoapsis - 1 / semiMajor));
+        var ellipse = new[] { new CoastingBody(90, new Vec(periapsis, 0, 0), new Vec(0, periapsisSpeed, 0)) };
+        CoastingBody oppositeApsis = new CoastingEngine(epoch, kerbinMu, ellipse, 1).SampleAt(epoch + ellipsePeriod / 2).Bodies[0];
+        Check(Norm(Difference(oppositeApsis.Position, new Vec(-apoapsis, 0, 0))) < 1e-5,
+            "eccentric half-period position missed analytic apoapsis");
+        Check(Norm(Difference(oppositeApsis.Velocity, new Vec(0, -apoapsisSpeed, 0))) < 1e-8,
+            "eccentric half-period velocity missed analytic apoapsis");
         var finePresentation = new CoastingEngine(epoch, mu, fixture, 1).AdvanceTo(target, 17);
         var sparsePresentation = new CoastingEngine(epoch, mu, fixture, 7).AdvanceTo(target, 311);
         var noPresentation = new CoastingEngine(epoch, mu, fixture, 64).AdvanceTo(target);
@@ -61,6 +78,12 @@ static class Program
         rejected = false;
         try { new CoastingEngine(epoch, mu, fixture, 1).AdvanceTo(epoch + 5000, 1); } catch (ArgumentException) { rejected = true; }
         Check(rejected, "unbounded presentation request accepted");
+        Same(finePresentation.Final, new CoastingEngine(epoch, mu, fixture, int.MaxValue).SampleAt(target));
+        double largeEpoch = 1e20, representableStep = Math.BitIncrement(largeEpoch) - largeEpoch;
+        rejected = false;
+        try { new CoastingEngine(largeEpoch, mu, fixture, 1).AdvanceTo(largeEpoch + representableStep, representableStep / 4); }
+        catch (ArgumentException) { rejected = true; }
+        Check(rejected, "non-advancing first publication was staged");
         Console.WriteLine("PASS " + checks + " coasting-engine assertions");
         return 0;
     }
