@@ -1,0 +1,11 @@
+/Library/
+/Logs/
+/Temp/
+/UserSettings/
+/Assets/GeneratedHarness.unity
+/Assets/GeneratedHarness.unity.meta
+/Assets/UI-Default.shader
+/Assets/UI-Default.shader.meta
+/Packages/packages-lock.json
+/ProjectSettings/*
+!/ProjectSettings/ProjectVersion.txt
