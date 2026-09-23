@@ -176,11 +176,19 @@ namespace KspContinuum
         void Cleanup()
         {
             bool registered = harmony != null;
-            if (harmony != null) harmony.UnpatchAll(Owner);
-            bool removed = target == null || !HasOwner(target);
-            if (report != null) report.RecordCleanup(registered, removed);
-            harmony = null;
-            if (ReferenceEquals(instance, this)) instance = null;
+            bool removed = false;
+            try
+            {
+                if (harmony != null) harmony.UnpatchAll(Owner);
+                removed = target == null || !HasOwner(target);
+            }
+            catch (Exception error) { UnityEngine.Debug.LogException(error); }
+            finally
+            {
+                if (report != null) report.RecordCleanup(registered, removed);
+                harmony = null;
+                if (ReferenceEquals(instance, this)) instance = null;
+            }
         }
         static bool HasOwner(MethodBase method)
         {
