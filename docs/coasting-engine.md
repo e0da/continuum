@@ -22,8 +22,12 @@ adapter can therefore project a forecast or a historical sample without rewindin
 The universal-anomaly solve defaults to relative anomaly tolerance `1e-12` and at most 32 Newton iterations. A
 37-body circular-orbit fixture advances one period and requires position error below `1e-3` meters and velocity error
 below `1e-6` meters per second against its analytic return state. A quarter-period sample must also reach the orthogonal
-analytic position and velocity within the same bounds, excluding a no-motion implementation. Those bounds qualify this
-fixture and solver setting; they are not a general long-horizon orbit accuracy guarantee. Hyperbolic, near-parabolic,
+analytic position and velocity within the same bounds, excluding a no-motion implementation. For elliptic seeds, the
+solver now reduces elapsed time to the signed remainder of the computed orbital period before solving the anomaly.
+A circular fixture samples 10,000 years forward and backward and matches direct samples at the reduced phase within
+1 mm and 1 micrometer per second. Work for one sample is independent of the number of completed revolutions. Floating
+point rounding of the computed period still affects phase over long spans; this does not prove general 10,000-year
+trajectory accuracy. These bounds qualify this fixture and solver setting. Hyperbolic, near-parabolic,
 extreme-scale, multi-body,
 perturbed, finite-burn, event-location, cancellation, and live-adapter behavior remain unqualified.
 

@@ -88,6 +88,20 @@ static class Program
         double velocityError = Norm(Difference(final.Velocity, initial.Velocity));
         Check(positionError < 1e-3, "one-period position error exceeded one millimeter: " + positionError.ToString("R"));
         Check(velocityError < 1e-6, "one-period velocity error exceeded one micrometer per second: " + velocityError.ToString("R"));
+        double tenThousandYears = 10000 * 365.25 * 86400;
+        double alpha = 2 / radius - speed * speed / mu;
+        double solverPeriod = 2 * Math.PI / (Math.Sqrt(mu) * alpha * Math.Sqrt(alpha));
+        double reducedTime = Math.IEEERemainder(tenThousandYears, solverPeriod);
+        CoastingBody longCoast = new CoastingEngine(0, mu, fixture, 37).SampleAt(tenThousandYears).Bodies[0];
+        CoastingBody samePhase = new CoastingEngine(0, mu, fixture, 37).SampleAt(reducedTime).Bodies[0];
+        Check(Norm(Difference(longCoast.Position, samePhase.Position)) < 1e-3,
+            "10,000-year elliptic coast lost its reduced orbital phase: " + Norm(Difference(longCoast.Position, samePhase.Position)).ToString("R"));
+        Check(Norm(Difference(longCoast.Velocity, samePhase.Velocity)) < 1e-6,
+            "10,000-year elliptic coast lost its reduced orbital velocity");
+        CoastingBody reverseLongCoast = new CoastingEngine(0, mu, fixture, 37).SampleAt(-tenThousandYears).Bodies[0];
+        CoastingBody reversePhase = new CoastingEngine(0, mu, fixture, 37).SampleAt(-reducedTime).Bodies[0];
+        Check(Norm(Difference(reverseLongCoast.Position, reversePhase.Position)) < 1e-3,
+            "10,000-year reverse coast lost its reduced orbital phase");
         CoastingSnapshot detached = finePresentation.Publications[0];
         Same(finePresentation.Final, new CoastingEngine(epoch, mu, fixture, 13).SampleAt(target));
         CoastingSnapshot historical = new CoastingEngine(epoch, mu, fixture, 13).SampleAt(epoch - 10);

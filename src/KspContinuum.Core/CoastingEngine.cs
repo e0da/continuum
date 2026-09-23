@@ -148,6 +148,13 @@ namespace KspContinuum
             double r0 = Norm(r0v), v02 = Dot(v0v, v0v);
             if (r0 == 0) throw new ArgumentException("Central-gravity position is singular.");
             double rootMu = Math.Sqrt(mu), radial = Dot(r0v, v0v) / r0, alpha = 2 / r0 - v02 / mu;
+            if (alpha > 0)
+            {
+                double period = 2 * Math.PI / (rootMu * alpha * Math.Sqrt(alpha));
+                if (double.IsInfinity(period) || double.IsNaN(period) || period <= 0)
+                    throw new InvalidOperationException("Elliptic period is not representable.");
+                if (Math.Abs(dt) > period) dt = Math.IEEERemainder(dt, period);
+            }
             double x = Math.Abs(alpha) > 1e-12 ? rootMu * Math.Abs(alpha) * dt : rootMu * dt / r0;
             bool converged = false;
             for (int iteration = 0; iteration < settings.MaximumIterations; iteration++)
