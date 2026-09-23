@@ -109,11 +109,16 @@ namespace KspContinuum
         {
             Vector3 direction = -input;
             if (cubes.RotateDragVector) direction = cubes.DragVectorRotation * direction;
+            double magnitudeSquared = direction.sqrMagnitude;
+            if (!Finite(magnitudeSquared) || (magnitudeSquared != 0 && Math.Abs(magnitudeSquared - 1) > 1e-4))
+                throw new ArgumentException("Direction must be finite and unit length or zero.");
             PhysicsGlobals.SurfaceCurvesList curves = cubes.SurfaceCurves;
             float[] areas = cubes.AreaOccluded, drags = cubes.WeightedDrag, depths = cubes.WeightedDepth;
             double tail = curves.dragCurveTail.Evaluate(mach), surface = curves.dragCurveSurface.Evaluate(mach);
             double multiplier = curves.dragCurveMultiplier.Evaluate(mach), tip = curves.dragCurveTip.Evaluate(mach);
             double power = cubes.DragCurveCdPower.Evaluate(mach);
+            if (!Finite(tail) || !Finite(surface) || !Finite(multiplier) || !Finite(tip) || !Finite(power) || multiplier == 0)
+                throw new ArgumentException("Curve samples must be finite and the surface multiplier must be nonzero.");
             double area = 0, areaDrag = 0, section = 0, exposure = 0, dotSum = 0;
             double depth = 0, taper = 0, liftX = 0, liftY = 0, liftZ = 0;
             for (int face = 0; face < 6; face++)
@@ -145,13 +150,22 @@ namespace KspContinuum
             if (dotSum > 0) { depth /= dotSum; taper /= dotSum; }
             double coefficient = area > 0 ? areaDrag / area : 0;
             if (area <= 0) areaDrag = 0;
-            return new DragCubeList.CubeData {
+            var candidate = new DragCubeList.CubeData {
                 dragVector = direction, liftForce = new Vector3((float)liftX, (float)liftY, (float)liftZ),
                 area = (float)area, areaDrag = (float)areaDrag, depth = (float)depth,
                 crossSectionalArea = (float)section, exposedArea = (float)exposure,
                 dragCoeff = (float)coefficient, taperDot = (float)taper
             };
+            if (!Finite(candidate.dragVector.x) || !Finite(candidate.dragVector.y) || !Finite(candidate.dragVector.z) ||
+                !Finite(candidate.liftForce.x) || !Finite(candidate.liftForce.y) || !Finite(candidate.liftForce.z) ||
+                !Finite(candidate.area) || !Finite(candidate.areaDrag) || !Finite(candidate.depth) ||
+                !Finite(candidate.crossSectionalArea) || !Finite(candidate.exposedArea) ||
+                !Finite(candidate.dragCoeff) || !Finite(candidate.taperDot))
+                throw new ArithmeticException("SetDrag produced a nonfinite output.");
+            return candidate;
         }
+
+        static bool Finite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
         static DragCubeList.CubeData Snapshot(DragCubeList cubes) => new DragCubeList.CubeData {
             dragVector = cubes.DragVector, liftForce = cubes.LiftForce, area = cubes.Area,
             areaDrag = cubes.AreaDrag, depth = cubes.Depth, crossSectionalArea = cubes.CrossSectionalArea,
