@@ -9,6 +9,9 @@ The search admits at most 4,096 coarse intervals and 64 refinements. Its guarant
 of crossings entirely between adjacent coarse samples is not observed. This is a useful surface-altitude or configured
 radial-shell boundary, not SOI, terrain, atmosphere, collision, closest-approach, or arbitrary root detection.
 
+Tests retain that limitation as an explicit counterexample: one full-orbit scan interval starts and ends below the
+configured radius while containing both an outward and inward crossing, and the search returns no event.
+
 The analytic fixture starts at periapsis on a Kerbin ellipse with the qualification station's approximate semi-major
 axis and eccentricity. Crossing the semi-major-axis radius occurs at eccentric anomaly pi/2, so the expected time is
 known independently. Tests vary scan intervals, work batch sizes, and presentation cadences; all must refine the same

@@ -14,6 +14,12 @@ static class Program
         double c = Math.Cos(phase), s = Math.Sin(phase);
         return new CoastingBody(id, new Vec(radius * c, radius * s, 0), new Vec(-speed * s, speed * c, 0));
     }
+    static CoastingBody Shifted(int id, double mu, double semiMajor, double eccentricity, double seconds)
+    {
+        CoastingBody state = new CoastingEngine(0, mu, new[] { Periapsis(id, mu, semiMajor, eccentricity) }, 1)
+            .SampleBodyAt(id, seconds);
+        return new CoastingBody(id, state.Position, state.Velocity);
+    }
     static RadiusCrossingEvent Run(int count, int batch, double scan, double publication, out double elapsedMilliseconds)
     {
         const double mu = 3.5316e12, semiMajor = 732639.5703, eccentricity = .00888570, epoch = 123456789;
@@ -56,6 +62,28 @@ static class Program
             inwardExpected + 100, semiMajor, RadiusCrossingDirection.Inward, 113, 1e-7));
         Check(inward != null && inward.BodyId == 3 && Math.Abs(inward.TimeSeconds - inwardExpected) <= 2e-7,
             "inward crossing missed analytic eccentric-anomaly time");
+        double outwardAfterPeriapsis = (Math.PI / 2 - eccentricity) / meanMotion;
+        var staggered = new CoastingEngine(epoch, kerbinMu, new[] {
+            Shifted(8, kerbinMu, semiMajor, eccentricity, 0),
+            Shifted(4, kerbinMu, semiMajor, eccentricity, 100)
+        }, 2);
+        RadiusCrossingEvent earliest = CoastingEventScheduler.FindFirst(staggered, new RadiusCrossingSearch(epoch,
+            epoch + outwardAfterPeriapsis + 50, semiMajor, RadiusCrossingDirection.Outward, 113, 1e-7));
+        Check(earliest != null && earliest.BodyId == 4 &&
+            Math.Abs(earliest.TimeSeconds - (epoch + outwardAfterPeriapsis - 100)) <= 2e-7,
+            "scheduler did not choose the earliest staggered crossing");
+        var tied = new CoastingEngine(epoch, kerbinMu, new[] {
+            Periapsis(5, kerbinMu, semiMajor, eccentricity), Periapsis(2, kerbinMu, semiMajor, eccentricity)
+        }, 1);
+        RadiusCrossingEvent tie = CoastingEventScheduler.FindFirst(tied, new RadiusCrossingSearch(epoch,
+            epoch + outwardAfterPeriapsis + 50, semiMajor, RadiusCrossingDirection.Outward, 113, 1e-7));
+        Check(tie != null && tie.BodyId == 2, "equal-time crossing did not use stable body-ID tie break");
+        double ellipsePeriod = 2 * Math.PI / meanMotion;
+        var missed = new CoastingEngine(epoch, kerbinMu,
+            new[] { Periapsis(7, kerbinMu, semiMajor, eccentricity) }, 1);
+        Check(CoastingEventScheduler.FindFirst(missed, new RadiusCrossingSearch(epoch, epoch + ellipsePeriod,
+            semiMajor, RadiusCrossingDirection.Outward, ellipsePeriod)) == null,
+            "coarse scan unexpectedly claimed a crossing whose outward/inward pair was contained inside one interval");
         double count64, count512;
         Run(64, 7, 113, 0, out count64); Run(512, 64, 113, 0, out count512);
         Check(one.Evaluations > 2 && count64 >= 0 && count512 >= 0, "event search or benchmark did not execute");
