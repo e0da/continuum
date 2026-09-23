@@ -23,6 +23,9 @@ namespace KspContinuum
         public long stockStopwatchTicks;
         public long stopwatchFrequency;
         public int patchGraphInspections;
+        public long patchGraphStopwatchTicks;
+        public int measuredPatchGraphInspections;
+        public long measuredPatchGraphStopwatchTicks;
         public double maximumRelativeError;
         public bool stockUpdateAerodynamicsRemainedAuthoritative = true;
         public bool stockForceApplicationRemainedAuthoritative = true;

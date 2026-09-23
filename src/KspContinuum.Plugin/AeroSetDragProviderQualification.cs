@@ -66,15 +66,17 @@ namespace KspContinuum
             try
             {
                 long started = Stopwatch.GetTimestamp();
-                if (!owner.TargetOwnedForStep())
+                int requiredShadow = RequiredWarmupMatches + RequiredMeasuredMatches;
+                bool measured = owner.report.matchedCompleteOutputs >= RequiredWarmupMatches &&
+                    owner.report.matchedCompleteOutputs < requiredShadow;
+                if (!owner.TargetOwnedForStep(measured))
                 { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
                 __state.Candidate = Calculate(__instance, vector, machNumber);
                 CubeData(__instance) = __state.Candidate;
-                int requiredShadow = RequiredWarmupMatches + RequiredMeasuredMatches;
                 if (owner.report.matchedCompleteOutputs < requiredShadow)
                 {
                     __state.Shadow = true;
-                    __state.Measured = owner.report.matchedCompleteOutputs >= RequiredWarmupMatches;
+                    __state.Measured = measured;
                     long candidateStopped = Stopwatch.GetTimestamp();
                     if (__state.Measured) owner.report.candidateStopwatchTicks += candidateStopped - started;
                     __state.StockStarted = Stopwatch.GetTimestamp(); return true;
@@ -201,12 +203,21 @@ namespace KspContinuum
                 patches.Transpilers.Count == 0 && patches.Finalizers.Count == 0 &&
                 patches.Prefixes[0].owner == Owner && patches.Postfixes[0].owner == Owner;
         }
-        bool TargetOwnedForStep()
+        bool TargetOwnedForStep(bool measured)
         {
             float fixedTime = Time.fixedTime;
             if (fixedTime == patchGraphFixedTime) return true;
             report.patchGraphInspections++;
-            if (!TargetStillOwned(target)) return false;
+            long started = Stopwatch.GetTimestamp();
+            bool owned = TargetStillOwned(target);
+            long elapsed = Stopwatch.GetTimestamp() - started;
+            report.patchGraphStopwatchTicks += elapsed;
+            if (measured)
+            {
+                report.measuredPatchGraphInspections++;
+                report.measuredPatchGraphStopwatchTicks += elapsed;
+            }
+            if (!owned) return false;
             patchGraphFixedTime = fixedTime; return true;
         }
         void Stop(string reason)
