@@ -12,13 +12,22 @@ namespace KspContinuum
     {
         sealed class Entry { public Part part; public PartBuoyancy buoyancy; public bool disabledByOwner; }
         const string Owner = "continuum.dry-buoyancy-batch";
+        public const string Stock = "stock";
+        public const string FullPublication = "full-publication-batch";
+        public const string ResidentDomain = "resident-dry-domain";
         readonly MethodInfo target = AccessTools.DeclaredMethod(typeof(PartBuoyancy), "FixedUpdate");
         readonly List<Entry> entries = new List<Entry>();
         Vessel vessel;
         int partCount;
-        bool installed, disposed;
+        readonly string strategy;
+        bool installed, disposed, domainOwned;
         public DryBuoyancyReport Report { get; private set; }
-        public DryBuoyancyRuntime() { Report = new DryBuoyancyReport(); }
+        public DryBuoyancyRuntime(string strategy = FullPublication)
+        {
+            if (strategy != FullPublication && strategy != ResidentDomain) throw new ArgumentException("Unknown dry buoyancy strategy.", "strategy");
+            this.strategy = strategy; Report = new DryBuoyancyReport { strategy = strategy };
+            if (strategy == ResidentDomain) Report.limitation = "Opt-in KSP 1.12.5 high-orbit domain experiment. It admits settled dry components once, disables their callbacks and performs no per-part validation or publication until vessel-level exit. Stock diagnostic and dry publication fields remain stale inside the domain; topology replacement with unchanged part count is not detected.";
+        }
 
         public void Start()
         {
@@ -50,13 +59,18 @@ namespace KspContinuum
             Report.fixedSteps++;
             try
             {
-                if (!EligibleVessel() || !entries.All(EligiblePart))
-                { Report.fallbacks += entries.Count; Restore(); return; }
+                if (!EligibleVessel()) { Report.fallbacks += entries.Count; Restore(); return; }
+                if (strategy == ResidentDomain && domainOwned)
+                { Report.bypassed += entries.Count; return; }
+                if (!entries.All(EligiblePart)) { Report.fallbacks += entries.Count; Restore(); return; }
                 foreach (Entry entry in entries)
                 {
-                    PublishDry(entry);
-                    if (!VerifyDry(entry)) { Report.errors++; Restore(); return; }
-                    Report.dryPublications++; Report.verifiedPublications++;
+                    if (strategy == FullPublication)
+                    {
+                        PublishDry(entry);
+                        if (!VerifyDry(entry)) { Report.errors++; Restore(); return; }
+                        Report.dryPublications++; Report.verifiedPublications++;
+                    }
                 }
                 foreach (Entry entry in entries)
                 {
@@ -65,6 +79,7 @@ namespace KspContinuum
                 }
                 if (entries.Any(entry => !entry.disabledByOwner || entry.buoyancy.enabled))
                 { Report.errors++; Restore(); return; }
+                domainOwned = true; Report.domainAdmissions++;
                 Report.bypassed += entries.Count;
             }
             catch (Exception error)
@@ -142,6 +157,7 @@ namespace KspContinuum
                     Report.errors++; if (string.IsNullOrEmpty(Report.detail)) Report.detail = error.GetType().Name + ": " + error.Message;
                 }
             }
+            domainOwned = false;
         }
 
         public void Dispose()
@@ -149,9 +165,13 @@ namespace KspContinuum
             if (disposed) return; disposed = true; Restore();
             Report.cleanupStatus = entries.Any(entry => entry.disabledByOwner) ? "cleanup-error" : "restored-owned-enables";
             installed = false;
-            if (Report.status == "installed") Report.status = Report.cleanupStatus == "restored-owned-enables" && Report.errors == 0 &&
-                Report.bypassed > 0 && Report.dryPublications == Report.bypassed && Report.verifiedPublications == Report.bypassed
-                ? "complete" : "invalid";
+            if (Report.status == "installed")
+            {
+                bool publicationsValid = strategy == ResidentDomain ||
+                    Report.dryPublications == Report.bypassed && Report.verifiedPublications == Report.bypassed;
+                Report.status = Report.cleanupStatus == "restored-owned-enables" && Report.errors == 0 &&
+                    Report.bypassed > 0 && Report.domainAdmissions > 0 && publicationsValid ? "complete" : "invalid";
+            }
         }
     }
 }

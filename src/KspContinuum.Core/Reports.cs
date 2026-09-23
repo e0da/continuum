@@ -116,13 +116,13 @@ namespace KspContinuum
     [Serializable] public sealed class DryBuoyancyReport
     {
         public string schema = "ksp-continuum-dry-buoyancy/v1";
-        public string strategy = "playerloop-batch-disable";
+        public string strategy = "full-publication-batch";
         public string status = "not-started";
         public string limitation = "Opt-in stock-callback admission for the active loaded vessel in a high orbital dry regime. It republishes dry contact/force state but leaves stock diagnostic geometry and depth fields at their last dry values. Stock remains authoritative for initialization, water proximity and every ambiguous state.";
         public string installationStatus = "not-installed", cleanupStatus = "not-attempted", detail;
         public string[] foreignOwners = new string[0];
         public int ownedComponents;
-        public long fixedSteps, bypassed, dryPublications, verifiedPublications, fallbacks, errors;
+        public long fixedSteps, domainAdmissions, bypassed, dryPublications, verifiedPublications, fallbacks, errors;
     }
 
     [Serializable] public sealed class PhysicsSubstitutionCanaryReport

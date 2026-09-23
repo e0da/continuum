@@ -186,5 +186,20 @@ stock-output substitute. Existing Harmony ownership is checked at installation; 
 detected. A verified publication establishes internal consistency after Continuum writes it, not equality with an
 independently executed stock trajectory.
 
+The corrected full-publication batch also failed to show a repeatable enclosing-parent improvement across separate
+launches. Its first on/off comparison was 4.41218/4.44056 ms active-parent mean (0.64% lower with the batch); the
+reversed comparison was 4.21881/3.94583 ms (6.92% higher with the batch). The two stock baselines differed by about
+11%, overwhelming the candidate effect and making more one-window-per-launch comparisons a poor experiment.
+
+`--continuum-dry-buoyancy-sweep` therefore runs six windows inside one process:
+stock, full-publication, resident-domain, stock, resident-domain, and full-publication. Every window gets an independent
+300-frame receipt and owned PlayerLoop lifetime, with restoration between windows. `resident-dry-domain` performs the
+full per-part check only when entering the high dry orbit domain. While vessel-level eligibility remains true it leaves
+the owned callbacks disabled and performs no per-part validation or publication. This deliberately tests the value of
+resident Continuum state and coarse domain scheduling; dry publications and diagnostics remain stale, and same-count
+topology replacement is outside this experiment. Stock callbacks are restored before an ineligible script traversal.
+The sweep can auto-run from the qualification CLI or be started and polled through the loopback control plane without
+quitting KSP.
+
 This boundary probe is not Continuum's permanent object-callback architecture. The follow-up is vessel- or island-level
 domain selection over Continuum-owned state, with KSP reconciliation at explicit boundaries.

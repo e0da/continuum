@@ -33,6 +33,11 @@ namespace KspContinuum
         string lastVesselId;
         int structuralRigidbodies = -1, structuralJoints = -1, structuralColliders = -1;
         const int FrameCount = 300;
+        readonly string dryBuoyancyStrategy;
+        readonly bool forcePlayerLoop;
+
+        public Probe(string dryBuoyancyStrategy = null, bool forcePlayerLoop = false)
+        { this.dryBuoyancyStrategy = dryBuoyancyStrategy; this.forcePlayerLoop = forcePlayerLoop; }
 
         public IEnumerator Run(Action<ProbeReport> complete)
         {
@@ -78,12 +83,16 @@ namespace KspContinuum
                     callbackAttribution = new FixedCallbackAttribution(); callbackAttribution.Start();
                     report.callbackAttribution = callbackAttribution.Report;
                 }
-                if (Array.IndexOf(arguments, "--continuum-dry-buoyancy") >= 0)
+                bool explicitStock = dryBuoyancyStrategy == DryBuoyancyRuntime.Stock;
+                string requestedDryStrategy = explicitStock ? null : dryBuoyancyStrategy;
+                if (!explicitStock && requestedDryStrategy == null && Array.IndexOf(arguments, "--continuum-dry-buoyancy") >= 0)
+                    requestedDryStrategy = DryBuoyancyRuntime.FullPublication;
+                if (requestedDryStrategy != null)
                 {
-                    dryBuoyancy = new DryBuoyancyRuntime(); dryBuoyancy.Start(); report.dryBuoyancy = dryBuoyancy.Report;
+                    dryBuoyancy = new DryBuoyancyRuntime(requestedDryStrategy); dryBuoyancy.Start(); report.dryBuoyancy = dryBuoyancy.Report;
                     if (dryBuoyancy.Report.status != "installed") throw new InvalidOperationException("Dry buoyancy admission did not install: " + dryBuoyancy.Report.status);
                 }
-                if (Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null || dryBuoyancy != null)
+                if (forcePlayerLoop || Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null || dryBuoyancy != null)
                 {
                     IPlayerLoopBracketObserver observer = writerCensus == null ? null : writerCensus.Census;
                     if (substitutionCanary != null) observer = new CompositePlayerLoopObserver(observer, substitutionCanary);
