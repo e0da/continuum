@@ -11,6 +11,7 @@ namespace KspContinuum
         {
             public Rigidbody body;
             public bool wasSleeping;
+            public bool wasKinematic;
             public Vector3 anchorLocalCenter;
         }
 
@@ -56,6 +57,7 @@ namespace KspContinuum
             foreach (BodyEntry entry in bodies)
             {
                 entry.wasSleeping = entry.body.IsSleeping();
+                entry.wasKinematic = entry.body.isKinematic;
                 entry.anchorLocalCenter = inverse * (entry.body.worldCenterOfMass - origin);
                 if (!entry.body.isKinematic) dynamic++;
             }
@@ -81,7 +83,7 @@ namespace KspContinuum
             if (!installed || scope != typeof(FixedLoop.PhysicsFixedUpdate).FullName) return;
             try
             {
-                if (!EligibleVessel() || vessel.parts.Count != partCount || !ObjectsPresent())
+                if (!EligibleVessel() || vessel.parts.Count != partCount || !ObjectsPresent() || !BodyModesMatch())
                 { Report.fallbacks++; Reject("qualified-domain-changed"); Restore(); return; }
                 foreach (BodyEntry entry in bodies)
                     if (!entry.body.isKinematic) { entry.body.Sleep(); Report.forcedSleeps++; }
@@ -140,6 +142,13 @@ namespace KspContinuum
             return anchor != null;
         }
 
+        bool BodyModesMatch()
+        {
+            foreach (BodyEntry entry in bodies)
+                if (entry.body == null || entry.body.isKinematic != entry.wasKinematic) return false;
+            return true;
+        }
+
         void Reject(string reason)
         { Report.status = "abstained"; Report.reason = reason; }
 
@@ -152,13 +161,14 @@ namespace KspContinuum
                 try
                 {
                     if (entry.body == null) { bodiesClean = false; continue; }
-                    if (!entry.body.isKinematic && !entry.wasSleeping) entry.body.WakeUp();
-                    if (!entry.body.isKinematic && entry.wasSleeping) entry.body.Sleep();
+                    if (entry.body.isKinematic != entry.wasKinematic) { bodiesClean = false; continue; }
+                    if (!entry.wasKinematic && !entry.wasSleeping) entry.body.WakeUp();
+                    if (!entry.wasKinematic && entry.wasSleeping) entry.body.Sleep();
                 }
                 catch { bodiesClean = false; }
             }
             Report.jointsRestored = jointsClean; Report.bodyActivityRestored = bodiesClean;
-            Report.sourceTopologyStable = ObjectsPresent() && vessel != null && vessel.parts != null && vessel.parts.Count == partCount;
+            Report.sourceTopologyStable = ObjectsPresent() && BodyModesMatch() && vessel != null && vessel.parts != null && vessel.parts.Count == partCount;
             Report.cleanupStatus = jointsClean && bodiesClean ? "restored-joints-and-activity" : "cleanup-error";
             installed = false;
         }
