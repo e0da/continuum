@@ -117,7 +117,7 @@ static class Program
                 Near(0, json.RootElement.GetProperty("markers")[0].GetProperty("blocks").GetArrayLength());
             }
             using (var json = JsonDocument.Parse(ReportJson.Encode(new ProbeReport { dryBuoyancy = new DryBuoyancyReport {
-                status = "complete", calls = 110, bypassed = 109, fallbacks = 1 } })))
+                status = "complete", ownedComponents = 110, fixedSteps = 1, bypassed = 109, fallbacks = 1 } })))
             {
                 if (json.RootElement.GetProperty("dryBuoyancy").GetProperty("bypassed").GetInt64() != 109)
                     throw new Exception("Dry buoyancy report changed");

@@ -1,29 +1,28 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
+using FixedLoop = UnityEngine.PlayerLoop.FixedUpdate;
 
 namespace KspContinuum
 {
-    internal sealed class DryBuoyancyRuntime : IDisposable
+    internal sealed class DryBuoyancyRuntime : IDisposable, IPlayerLoopBracketObserver
     {
-        const string Owner = "continuum.dry-buoyancy-admission";
-        static DryBuoyancyRuntime activeOwner;
-        readonly Harmony harmony = new Harmony(Owner);
+        sealed class Entry { public Part part; public PartBuoyancy buoyancy; public bool disabledByOwner; }
+        const string Owner = "continuum.dry-buoyancy-batch";
         readonly MethodInfo target = AccessTools.DeclaredMethod(typeof(PartBuoyancy), "FixedUpdate");
-        Vessel cachedVessel;
-        float cachedFixedTime = float.NaN;
-        DryBuoyancyVesselState cachedVesselState;
+        readonly List<Entry> entries = new List<Entry>();
+        Vessel vessel;
+        int partCount;
         bool installed, disposed;
-
         public DryBuoyancyReport Report { get; private set; }
-
         public DryBuoyancyRuntime() { Report = new DryBuoyancyReport(); }
 
         public void Start()
         {
-            if (disposed || installed || activeOwner != null) throw new InvalidOperationException("Dry buoyancy admission supports one owner.");
+            if (disposed || installed) throw new InvalidOperationException("Dry buoyancy batch supports one lifetime.");
             if (Versioning.version_major != 1 || Versioning.version_minor != 12 || Versioning.Revision != 5)
             { Report.status = "unavailable"; Report.detail = "KSP 1.12.5 is required."; return; }
             if (target == null) { Report.status = "unavailable"; Report.detail = "PartBuoyancy.FixedUpdate not found."; return; }
@@ -31,111 +30,122 @@ namespace KspContinuum
             string[] foreign = existing == null ? new string[0] : existing.Owners.Where(owner => owner != Owner).Distinct().OrderBy(owner => owner).ToArray();
             Report.foreignOwners = foreign;
             if (foreign.Length != 0) { Report.status = "abstained"; Report.detail = "Foreign Harmony ownership is present."; return; }
-            activeOwner = this;
-            try
+            vessel = FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
+            if (vessel == null || vessel.parts == null) { Report.status = "unavailable"; Report.detail = "Active vessel is unavailable."; return; }
+            partCount = vessel.parts.Count;
+            foreach (Part part in vessel.parts)
             {
-                harmony.Patch(target, new HarmonyMethod(AccessTools.DeclaredMethod(typeof(DryBuoyancyRuntime), "Prefix")) { priority = Priority.First });
-                Patches readback = Harmony.GetPatchInfo(target);
-                if (readback == null || !readback.Owners.Contains(Owner)) throw new InvalidOperationException("Owned prefix missing after installation.");
-                installed = true; Report.status = "installed"; Report.installationStatus = "owned-prefix-readback"; Report.cleanupStatus = "installed";
+                if (part == null) continue;
+                PartBuoyancy buoyancy = part.GetComponent<PartBuoyancy>();
+                if (buoyancy != null && buoyancy.enabled) entries.Add(new Entry { part = part, buoyancy = buoyancy });
             }
-            catch (Exception error)
-            {
-                Report.status = "unavailable"; Report.detail = error.GetType().Name + ": " + error.Message; Remove();
-            }
+            if (entries.Count == 0) { Report.status = "unavailable"; Report.detail = "No initially enabled buoyancy components were found."; return; }
+            installed = true; Report.status = "installed"; Report.installationStatus = "initial-enabled-component-census";
+            Report.cleanupStatus = "installed"; Report.ownedComponents = entries.Count;
         }
 
-        static bool Prefix(PartBuoyancy __instance, Part ___part)
+        public void Before(string scope, int frame, double time)
         {
-            DryBuoyancyRuntime owner = activeOwner;
-            if (owner == null || !owner.installed) return true;
-            owner.Report.calls++;
+            if (!installed || scope != typeof(FixedLoop.ScriptRunBehaviourFixedUpdate).FullName) return;
+            Report.fixedSteps++;
             try
             {
-                Vessel vessel = ___part == null ? null : ___part.vessel;
-                CelestialBody mainBody = vessel == null ? null : vessel.mainBody;
-                DryBuoyancyVesselState vesselState = owner.VesselState(vessel, mainBody);
-                var partState = new DryBuoyancyPartState {
-                    bodyInitialized = __instance.body != null,
-                    bodyMatchesVessel = ReferenceEquals(__instance.body, mainBody),
-                    splashed = __instance.splashed,
-                    settledDry = !__instance.IsInvoking() && !__instance.wasSplashed && __instance.splashedCounter == 0 &&
-                        !___part.WaterContact && __instance.submergedPortion == 0 && ___part.submergedPortion == 0 &&
-                        __instance.drag == 0 && __instance.lastBuoyantForce == Vector3.zero,
-                    depthMeters = __instance.depth
-                };
-                if (DryBuoyancyAdmission.Decide(vesselState, partState) == DryBuoyancyDisposition.SkipStock)
+                if (!EligibleVessel() || !entries.All(EligiblePart))
+                { Report.fallbacks += entries.Count; Restore(); return; }
+                foreach (Entry entry in entries)
                 {
-                    // Preserve the stock dry-state publications consumed by force integration. Geometry/depth
-                    // diagnostics deliberately remain at their last dry values in this experimental regime.
-                    __instance.dead = false;
-                    __instance.body = mainBody;
-                    __instance.centerOfBuoyancy = ___part.partTransform.position + ___part.partTransform.rotation * ___part.CenterOfBuoyancy;
-                    __instance.centerOfDisplacement = ___part.partTransform.position + ___part.partTransform.rotation * ___part.CenterOfDisplacement;
-                    ___part.WaterContact = false;
-                    ___part.submergedPortion = __instance.submergedPortion = 0;
-                    __instance.drag = 0;
-                    __instance.splashedCounter = 0;
-                    __instance.lastBuoyantForce = Vector3.zero;
-                    __instance.lastForcePosition = __instance.centerOfBuoyancy;
-                    ___part.submergedDragScalar = __instance.dragScalar;
-                    ___part.submergedLiftScalar = __instance.liftScalar;
-                    __instance.wasSplashed = false;
-                    owner.Report.dryPublications++;
-                    if (!__instance.dead && ReferenceEquals(__instance.body, mainBody) && !___part.WaterContact &&
-                        __instance.submergedPortion == 0 && ___part.submergedPortion == 0 && __instance.drag == 0 &&
-                        __instance.splashedCounter == 0 && __instance.lastBuoyantForce == Vector3.zero && !__instance.wasSplashed)
-                        owner.Report.verifiedPublications++;
-                    else { owner.Report.errors++; return true; }
-                    owner.Report.bypassed++; return false;
+                    PublishDry(entry);
+                    if (!VerifyDry(entry)) { Report.errors++; Restore(); return; }
+                    Report.dryPublications++; Report.verifiedPublications++;
                 }
-                owner.Report.fallbacks++; return true;
+                foreach (Entry entry in entries)
+                {
+                    if (!entry.buoyancy.enabled) continue;
+                    entry.buoyancy.enabled = false; entry.disabledByOwner = true;
+                }
+                if (entries.Any(entry => !entry.disabledByOwner || entry.buoyancy.enabled))
+                { Report.errors++; Restore(); return; }
+                Report.bypassed += entries.Count;
             }
             catch (Exception error)
-            {
-                owner.Report.errors++; owner.Report.detail = error.GetType().Name + ": " + error.Message;
-                return true;
-            }
+            { Report.errors++; Report.detail = error.GetType().Name + ": " + error.Message; Restore(); }
         }
 
-        DryBuoyancyVesselState VesselState(Vessel vessel, CelestialBody mainBody)
+        public void After(string scope, int frame, double time) { }
+        public void Fault(string scope, Exception error)
         {
-            float fixedTime = Time.fixedTime;
-            if (ReferenceEquals(cachedVessel, vessel) && cachedFixedTime == fixedTime) return cachedVesselState;
-            cachedVessel = vessel; cachedFixedTime = fixedTime;
-            Vector3 size = vessel == null ? Vector3.zero : vessel.vesselSize;
-            cachedVesselState = new DryBuoyancyVesselState {
-                flightReady = HighLogic.LoadedSceneIsFlight && FlightGlobals.ready,
-                active = vessel != null && ReferenceEquals(vessel, FlightGlobals.ActiveVessel),
-                loaded = vessel != null && vessel.loaded,
-                packed = vessel == null || vessel.packed,
-                orbiting = vessel != null && vessel.situation == Vessel.Situations.ORBITING,
-                bodyPresent = mainBody != null,
-                bodyHasOcean = mainBody != null && mainBody.ocean,
-                altitudeMeters = vessel == null ? double.NaN : vessel.altitude,
-                vesselBoundMeters = size.magnitude,
-                radialSpeedMetersPerSecond = vessel == null ? double.NaN : vessel.verticalSpeed,
-                fixedDeltaSeconds = TimeWarp.fixedDeltaTime
-            };
-            return cachedVesselState;
+            if (scope != typeof(FixedLoop.ScriptRunBehaviourFixedUpdate).FullName) return;
+            Report.errors++; Report.detail = error == null ? "PlayerLoop fault." : error.GetType().Name + ": " + error.Message; Restore();
         }
 
-        void Remove()
+        bool EligibleVessel()
         {
-            try
+            if (!HighLogic.LoadedSceneIsFlight || !FlightGlobals.ready || vessel == null || vessel.parts == null ||
+                !ReferenceEquals(vessel, FlightGlobals.ActiveVessel) || vessel.parts.Count != partCount) return false;
+            CelestialBody body = vessel.mainBody; Vector3 size = vessel.vesselSize;
+            return DryBuoyancyAdmission.Decide(new DryBuoyancyVesselState {
+                flightReady = true, active = true, loaded = vessel.loaded, packed = vessel.packed,
+                orbiting = vessel.situation == Vessel.Situations.ORBITING, bodyPresent = body != null,
+                bodyHasOcean = body != null && body.ocean, altitudeMeters = vessel.altitude, vesselBoundMeters = size.magnitude,
+                radialSpeedMetersPerSecond = vessel.verticalSpeed, fixedDeltaSeconds = TimeWarp.fixedDeltaTime
+            }, new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, settledDry = true }) == DryBuoyancyDisposition.SkipStock;
+        }
+
+        bool EligiblePart(Entry entry)
+        {
+            if (entry == null || entry.part == null || entry.buoyancy == null || entry.part.vessel != vessel) return false;
+            PartBuoyancy value = entry.buoyancy;
+            bool available = entry.disabledByOwner ? !value.enabled : value.enabled;
+            return available && DryBuoyancyAdmission.Decide(new DryBuoyancyVesselState {
+                flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true, bodyHasOcean = true,
+                altitudeMeters = DryBuoyancyAdmission.MinimumClearanceMeters + 1, vesselBoundMeters = 0,
+                radialSpeedMetersPerSecond = 0, fixedDeltaSeconds = TimeWarp.fixedDeltaTime
+            }, new DryBuoyancyPartState {
+                bodyInitialized = value.body != null, bodyMatchesVessel = ReferenceEquals(value.body, vessel.mainBody),
+                splashed = value.splashed, depthMeters = value.depth,
+                settledDry = !value.IsInvoking() && !value.wasSplashed && value.splashedCounter == 0 &&
+                    !entry.part.WaterContact && value.submergedPortion == 0 && entry.part.submergedPortion == 0 &&
+                    value.drag == 0 && value.lastBuoyantForce == Vector3.zero
+            }) == DryBuoyancyDisposition.SkipStock;
+        }
+
+        static void PublishDry(Entry entry)
+        {
+            Part part = entry.part; PartBuoyancy value = entry.buoyancy;
+            value.dead = false; value.body = part.vessel.mainBody;
+            value.centerOfBuoyancy = part.partTransform.position + part.partTransform.rotation * part.CenterOfBuoyancy;
+            value.centerOfDisplacement = part.partTransform.position + part.partTransform.rotation * part.CenterOfDisplacement;
+            part.WaterContact = false; part.submergedPortion = value.submergedPortion = 0;
+            value.drag = 0; value.splashedCounter = 0; value.lastBuoyantForce = Vector3.zero;
+            value.lastForcePosition = value.centerOfBuoyancy;
+            part.submergedDragScalar = value.dragScalar; part.submergedLiftScalar = value.liftScalar; value.wasSplashed = false;
+        }
+
+        static bool VerifyDry(Entry entry)
+        {
+            Part part = entry.part; PartBuoyancy value = entry.buoyancy;
+            return !value.dead && ReferenceEquals(value.body, part.vessel.mainBody) && !part.WaterContact &&
+                value.submergedPortion == 0 && part.submergedPortion == 0 && value.drag == 0 && value.splashedCounter == 0 &&
+                value.lastBuoyantForce == Vector3.zero && !value.wasSplashed;
+        }
+
+        void Restore()
+        {
+            foreach (Entry entry in entries)
             {
-                harmony.UnpatchAll(Owner);
-                Patches readback = target == null ? null : Harmony.GetPatchInfo(target);
-                Report.cleanupStatus = readback != null && readback.Owners.Contains(Owner) ? "cleanup-error" : "removed-owned-prefix";
+                if (!entry.disabledByOwner) continue;
+                if (entry.buoyancy == null) { Report.errors++; entry.disabledByOwner = false; continue; }
+                entry.buoyancy.enabled = true; entry.disabledByOwner = false;
+                if (!entry.buoyancy.enabled) Report.errors++;
             }
-            catch (Exception error) { Report.cleanupStatus = "cleanup-error"; Report.detail = error.GetType().Name + ": " + error.Message; }
-            finally { installed = false; if (ReferenceEquals(activeOwner, this)) activeOwner = null; }
         }
 
         public void Dispose()
         {
-            if (disposed) return; disposed = true; Remove();
-            if (Report.status == "installed") Report.status = Report.cleanupStatus == "removed-owned-prefix" && Report.errors == 0 &&
+            if (disposed) return; disposed = true; Restore();
+            Report.cleanupStatus = entries.Any(entry => entry.disabledByOwner) ? "cleanup-error" : "restored-owned-enables";
+            installed = false;
+            if (Report.status == "installed") Report.status = Report.cleanupStatus == "restored-owned-enables" && Report.errors == 0 &&
                 Report.bypassed > 0 && Report.dryPublications == Report.bypassed && Report.verifiedPublications == Report.bypassed
                 ? "complete" : "invalid";
         }
