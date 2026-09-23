@@ -115,8 +115,7 @@ namespace KspContinuum
             }
             if (current != warpCandidate || current.mainBody != warpCandidateBody)
             { ResetWarpCandidate(); return; }
-            if (TimeWarp.CurrentRateIndex <= 0 || TimeWarp.WarpMode != TimeWarp.Modes.HIGH ||
-                !TimeWarp.CurrentRateIsTargetRate) return;
+            if (TimeWarp.CurrentRateIndex <= 0 || TimeWarp.WarpMode != TimeWarp.Modes.HIGH) return;
             if (!Eligible(current)) return;
             double ut = Planetarium.GetUniversalTime();
             double atmosphere = current.mainBody.atmosphere ? current.mainBody.atmosphereDepth : 0;
