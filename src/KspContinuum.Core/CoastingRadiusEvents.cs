@@ -47,9 +47,9 @@ namespace KspContinuum
             RadiusCrossingEvent first = null; int evaluations = 0;
             for (int i = 0; i < engine.SeedBodyCount; i++)
             {
-                CoastingBody seed = engine.SeedBody(i); double predicted;
-                if (!TryPredict(seed, engine.SeedEpochSeconds, engine.GravitationalParameter, search, out predicted)) continue;
-                RadiusCrossingEvent candidate = Refine(engine, seed.Id, predicted, search, ref evaluations);
+                CoastingBody seed = engine.SeedBody(i); double predicted, period;
+                if (!TryPredict(seed, engine.SeedEpochSeconds, engine.GravitationalParameter, search, out predicted, out period)) continue;
+                RadiusCrossingEvent candidate = Refine(engine, seed.Id, predicted, period, search, ref evaluations);
                 if (candidate == null) continue;
                 if (first == null || candidate.TimeSeconds < first.TimeSeconds ||
                     candidate.TimeSeconds == first.TimeSeconds && candidate.BodyId < first.BodyId) first = candidate;
@@ -57,9 +57,10 @@ namespace KspContinuum
             return first == null ? null : new RadiusCrossingEvent(first.BodyId, first.TimeSeconds, first.Body, evaluations);
         }
 
-        static bool TryPredict(CoastingBody seed, double epoch, double mu, RadiusCrossingSearch search, out double time)
+        static bool TryPredict(CoastingBody seed, double epoch, double mu, RadiusCrossingSearch search,
+            out double time, out double period)
         {
-            time = 0; Vec r = seed.Position, v = seed.Velocity;
+            time = 0; period = 0; Vec r = seed.Position, v = seed.Velocity;
             double radius = Norm(r), speedSquared = Dot(v, v), rv = Dot(r, v);
             if (radius == 0) return false;
             double energy = speedSquared * .5 - mu / radius;
@@ -79,6 +80,7 @@ namespace KspContinuum
             if (search.Direction == RadiusCrossingDirection.Inward) crossingAnomaly = TwoPi - crossingAnomaly;
             double crossingMean = crossingAnomaly - eccentricity * Math.Sin(crossingAnomaly);
             double meanMotion = Math.Sqrt(mu / (semiMajor * semiMajor * semiMajor));
+            period = TwoPi / meanMotion;
             double seedAdvance = meanMotion * (search.StartTimeSeconds - epoch);
             if (double.IsNaN(seedAdvance) || double.IsInfinity(seedAdvance) ||
                 Math.Abs(seedAdvance) > TwoPi * MaximumSeedRevolutions) return false;
@@ -89,7 +91,7 @@ namespace KspContinuum
             return !double.IsNaN(time) && !double.IsInfinity(time) && time <= search.EndTimeSeconds;
         }
 
-        static RadiusCrossingEvent Refine(CoastingEngine engine, int bodyId, double predicted,
+        static RadiusCrossingEvent Refine(CoastingEngine engine, int bodyId, double predicted, double period,
             RadiusCrossingSearch search, ref int evaluations)
         {
             double halfWidth = Math.Max(search.TimeToleranceSeconds * 4, 1e-5), low = predicted, high = predicted;
@@ -102,6 +104,7 @@ namespace KspContinuum
                 double a = Norm(before.Position) - search.RadiusMeters, b = Norm(after.Position) - search.RadiusMeters;
                 if (Crossed(a, b, search.Direction)) { bracketed = true; break; }
                 halfWidth *= 2;
+                if (halfWidth > period * .25) break;
             }
             if (!bracketed) return null;
             for (int iteration = 0; iteration < 64 && high - low > search.TimeToleranceSeconds; iteration++)

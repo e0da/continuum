@@ -9,7 +9,8 @@ the predicted boundary. Presentation publications never become event or integrat
 The scheduler admits finite bound elliptic seeds with nonzero eccentricity and a requested radius strictly between
 periapsis and apoapsis. Eccentricity below `1e-8`, circular, parabolic, hyperbolic, and boundary-tangent cases abstain.
 Search start is bounded to one million revolutions from the immutable seed epoch, and tolerance must advance
-representable time. Refinement is limited to 32 bracket expansions and 64 bisections. This is a useful
+representable time. Refinement is limited to 32 bracket expansions, a quarter-period half-width, and 64 bisections;
+failure to isolate the predicted crossing abstains instead of searching into a later revolution. This is a useful
 surface-altitude or configured radial-shell boundary, not SOI,
 terrain, atmosphere, collision, closest-approach, or arbitrary root detection.
 
