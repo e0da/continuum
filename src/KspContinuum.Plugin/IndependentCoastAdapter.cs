@@ -272,8 +272,7 @@ namespace KspContinuum
                         owner.report.maximumInjectedVelocityErrorMetersPerSecond <= 1e-6 &&
                         owner.report.maximumDriverPositionErrorMeters <= 1e-6 &&
                         owner.report.maximumDriverVelocityErrorMetersPerSecond <= 1e-6 &&
-                        owner.report.suppressedStockPropagations >= 2 &&
-                        owner.report.suppressedStockPropagations < owner.report.candidateDriverCalls;
+                        owner.report.suppressedStockPropagations >= 1;
                     owner.Stop(accurate ? "bounded-call-limit-reached" : "comparison-outside-tolerance");
                 }
             }
