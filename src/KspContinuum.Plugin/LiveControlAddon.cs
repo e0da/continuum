@@ -17,6 +17,7 @@ namespace KspContinuum
         GameScenes lastScene;
         bool hasScene;
         bool quitRequested;
+        string lastSweepObservation;
 
         public void Start()
         {
@@ -54,18 +55,49 @@ namespace KspContinuum
                 lastVessel = vessel;
                 lastScene = scene;
                 hasScene = true;
+                lastSweepObservation = null;
             }
             server.DrainOne(command => Handle(command, vessel));
+            PublishSweepChange();
         }
 
         string Handle(string command, Vessel vessel)
         {
             long started = Stopwatch.GetTimestamp();
-            LiveControlReply reply = control.Execute(LiveControlRequest.Parse(command), Time.frameCount, observedFixedCallbacks,
+            LiveControlRequest request = LiveControlRequest.Parse(command);
+            LiveControlReply reply = control.Execute(request, Time.frameCount, observedFixedCallbacks,
                 () => Capture(vessel), StartSweep, SweepStatus, RequestQuit);
             reply.observerNanoseconds = (long)((Stopwatch.GetTimestamp() - started) *
                 (1000000000.0 / Stopwatch.Frequency));
+            if (request.operation == LiveControlOperation.SubscribeSweep && reply.status == "ok")
+            {
+                server.EnablePush();
+                lastSweepObservation = SweepKey(reply.sweep);
+            }
             return ReportJson.Encode(reply);
+        }
+
+        void PublishSweepChange()
+        {
+            if (!server.PushEnabled) return;
+            LiveSweepStatus status = SweepStatus();
+            string key = SweepKey(status);
+            if (key == lastSweepObservation) return;
+            if (server.PublishLatest(ReportJson.Encode(control.CreateSweepObservation(status,
+                Time.frameCount, observedFixedCallbacks)), Terminal(status.state)))
+                lastSweepObservation = key;
+        }
+
+        static string SweepKey(LiveSweepStatus status)
+        {
+            return status.state + "\n" + status.reason + "\n" + status.directory + "\n" +
+                status.window + "\n" + status.windowIndex.ToString(CultureInfo.InvariantCulture);
+        }
+
+        static bool Terminal(string state)
+        {
+            return state == "complete" || state == "invalid" || state == "error" ||
+                state == "interrupted" || state == "unavailable";
         }
 
         static LiveSweepStatus StartSweep()

@@ -88,6 +88,61 @@ static class Program
         pump.GetAwaiter().GetResult();
     }
 
+    static void PushedSweepConnection(LoopbackSnapshotServer server, LiveControlPlane control,
+        Func<LiveVesselSnapshot> capture)
+    {
+        using var client = new TcpClient();
+        client.Connect("127.0.0.1", server.Port);
+        client.ReceiveTimeout = 5000;
+        using NetworkStream stream = client.GetStream();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        Task pump = Task.Run(() => {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            int handled = 0;
+            while (handled < 2)
+            {
+                if (server.DrainOne(command => {
+                    LiveControlRequest request = LiveControlRequest.Parse(command);
+                    LiveControlReply reply = control.Execute(request, 40 + handled, 9, capture,
+                        null, () => new LiveSweepStatus { state = "running", window = "stock-01", windowIndex = 0 });
+                    if (request.operation == LiveControlOperation.SubscribeSweep && reply.status == "ok")
+                    {
+                        server.EnablePush();
+                        server.PublishLatest(ReportJson.Encode(control.CreateSweepObservation(
+                            new LiveSweepStatus { state = "running", window = "clear-cache-04", windowIndex = 1 }, 41, 9)), false);
+                        server.PublishLatest(ReportJson.Encode(control.CreateSweepObservation(
+                            new LiveSweepStatus { state = "running", window = "stock-02", windowIndex = 4 }, 42, 10)), false);
+                        server.PublishLatest(ReportJson.Encode(control.CreateSweepObservation(
+                            new LiveSweepStatus { state = "complete", directory = "/runtime/report",
+                                window = "full-publication-02", windowIndex = 5 }, 43, 11)), true);
+                        server.PublishLatest(ReportJson.Encode(control.CreateSweepObservation(
+                            new LiveSweepStatus { state = "running", window = "new-run", windowIndex = 0 }, 44, 12)), false);
+                    }
+                    handled++;
+                    return ReportJson.Encode(reply);
+                })) { }
+                else { deadline.Token.ThrowIfCancellationRequested(); Thread.Yield(); }
+            }
+        });
+        byte[] subscribe = Encoding.ASCII.GetBytes(
+            "sweep-subscribe 1.2.0 pushed1 " + Session + " 6 dry-buoyancy\n");
+        stream.Write(subscribe);
+        using (var reply = JsonDocument.Parse(reader.ReadLine() ?? throw new Exception("Missing subscribe reply")))
+            Check(reply.RootElement.GetProperty("requestId").GetString() == "pushed1" &&
+                reply.RootElement.GetProperty("status").GetString() == "ok", "subscription reply precedes observations");
+        using (var observation = JsonDocument.Parse(reader.ReadLine() ?? throw new Exception("Missing pushed observation")))
+            Check(observation.RootElement.GetProperty("status").GetString() == "observation" &&
+                observation.RootElement.GetProperty("sweep").GetProperty("state").GetString() == "complete" &&
+                observation.RootElement.GetProperty("identity").GetProperty("observedFixedCallbacks").GetInt64() == 11,
+                "slow consumer receives coalesced terminal observation");
+        byte[] hello = Encoding.ASCII.GetBytes("hello 1.2.0 pushed2\n");
+        stream.Write(hello);
+        using (var reply = JsonDocument.Parse(reader.ReadLine() ?? throw new Exception("Missing duplex reply")))
+            Check(reply.RootElement.GetProperty("requestId").GetString() == "pushed2" &&
+                reply.RootElement.GetProperty("status").GetString() == "ok", "command reply remains correlated after push");
+        pump.GetAwaiter().GetResult();
+    }
+
     static void Main()
     {
         var control = new LiveControlPlane(Session);
@@ -97,7 +152,7 @@ static class Program
         LiveControlReply hello = Execute(control, "hello 1.0.0 hello1", 20, 3, Capture);
         Check(hello.status == "ok" && hello.identity.epoch == 1 && hello.snapshot == null &&
             hello.requestId == "hello1" && hello.protocolVersion == "1.0.0", "hello identity");
-        Check(hello.capabilities.Length == 4 && captures == 0, "live control capabilities");
+        Check(hello.capabilities.Length == 5 && captures == 0, "live control capabilities");
         LiveSweepStatus StartSweep() => new LiveSweepStatus { state = "running", window = "stock-01", windowIndex = 0 };
         LiveSweepStatus SweepStatus() => new LiveSweepStatus { state = "complete", directory = "/runtime/report", window = "full-publication-02", windowIndex = 5 };
         LiveControlReply started = control.Execute(LiveControlRequest.Parse("sweep-start 1.1.0 sweep1 " + Session + " 1 dry-buoyancy"),
@@ -108,6 +163,11 @@ static class Program
             20, 3, Capture, StartSweep, SweepStatus);
         Check(completed.status == "ok" && completed.sweep.state == "complete" && completed.sweep.windowIndex == 5,
             "poll named sweep");
+        LiveControlReply subscribed = control.Execute(LiveControlRequest.Parse(
+            "sweep-subscribe 1.2.0 sweep3 " + Session + " 1 dry-buoyancy"),
+            20, 3, Capture, StartSweep, SweepStatus);
+        Check(subscribed.status == "ok" && subscribed.protocolVersion == "1.2.0" &&
+            subscribed.sweep.state == "complete", "subscribe named sweep");
         using (var json = JsonDocument.Parse(ReportJson.Encode(completed)))
         {
             JsonElement sweep = json.RootElement.GetProperty("sweep");
@@ -156,6 +216,7 @@ static class Program
         Check(captures == beforeStale, "socket stale request did not touch source");
         control.Observe("Flight", Vessel);
         PersistentConnection(server, control, Capture);
+        PushedSweepConnection(server, control, Capture);
         wire = Exchange(server, new string('x', 257), _ => throw new Exception("Oversized frame reached game thread"), false);
         using (var json = JsonDocument.Parse(wire))
             Check(json.RootElement.GetProperty("reason").GetString() == "invalid-frame", "bounded frame");
