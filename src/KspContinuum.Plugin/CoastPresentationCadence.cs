@@ -41,15 +41,16 @@ namespace KspContinuum
             {
                 startTime = universalTime; endTime = universalTime + intervalSeconds;
                 if (!(endTime > startTime)) throw new InvalidOperationException("Publication interval did not advance time.");
-                start = sample(startTime); end = sample(endTime); EngineSampleCount += 2; initialized = true;
+                start = sample(startTime); EngineSampleCount++;
+                end = sample(endTime); EngineSampleCount++; initialized = true;
             }
             else if (universalTime >= endTime)
             {
-                if (universalTime == endTime) { startTime = endTime; start = end; EngineSampleCount++; }
-                else { startTime = universalTime; start = sample(startTime); EngineSampleCount += 2; }
+                if (universalTime == endTime) { startTime = endTime; start = end; }
+                else { startTime = universalTime; start = sample(startTime); EngineSampleCount++; }
                 endTime = startTime + intervalSeconds;
                 if (!(endTime > startTime)) throw new InvalidOperationException("Publication interval did not advance time.");
-                end = sample(endTime);
+                end = sample(endTime); EngineSampleCount++;
             }
             lastTime = universalTime;
             double h = endTime - startTime, u = (universalTime - startTime) / h;

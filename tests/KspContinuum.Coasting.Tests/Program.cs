@@ -39,11 +39,12 @@ static class Program
         Check(firstPresentation.Position.X == 100 && middlePresentation.Position.X == 100.5,
             "Hermite presentation did not preserve linear motion");
         Check(cadenceSamples == 2 && cadence.EngineSampleCount == 2, "callback cadence leaked into engine sample cadence");
-        Check(cadence.Evaluate(102, linear).Position.X == 102 && cadenceSamples == 3, "cadence missed its endpoint");
+        Check(cadence.Evaluate(102, linear).Position.X == 102 && cadenceSamples == 3 && cadence.EngineSampleCount == 3,
+            "cadence missed its endpoint or miscounted its new sample");
         Check(cadence.Evaluate(102.1, linear).Position.X == 102.1 && cadenceSamples == 3,
             "intermediate callback sampled the engine");
-        Check(cadence.Evaluate(106.5, linear).Position.X == 106.5 && cadenceSamples == 5,
-            "cadence did not re-anchor after a skipped interval");
+        Check(cadence.Evaluate(106.5, linear).Position.X == 106.5 && cadenceSamples == 5 && cadence.EngineSampleCount == 5,
+            "cadence did not re-anchor or count samples after a skipped interval");
         bool backwardsRejected = false;
         try { cadence.Evaluate(106.4, linear); } catch (InvalidOperationException) { backwardsRejected = true; }
         Check(backwardsRejected, "backwards presentation time accepted");
