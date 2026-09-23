@@ -143,20 +143,46 @@ One installed paired observation used source `da653dc950447d3f99aeb6dd3d186806e0
 Outermost-per-method means in the attributed run were 0.70957 ms for `FlightIntegrator.FixedUpdate`, 0.67048 ms for `FlightInputHandler.FixedUpdate`, 0.26942 ms for `FlightIntegrator.UpdateThermodynamics`, and 0.22355 ms for the recursive `FlightIntegrator.Integrate` entry. `Integrate` made 42,728 total calls but only 218 outermost calls; its raw 626.19 ms inclusive total demonstrates why recursive totals cannot rank providers. Six `ModuleDeployableSolarPanel.FixedUpdate` calls per step averaged 0.05971 ms each, but its base `ModuleDeployablePart.FixedUpdate` row is nested and must not be added. These rows identify concrete optimization candidates while retaining overlap and instrumentation limits.
 
 No solar, body or convection occlusion seam ran inside this fixed-update window. Stock `FlightIntegrator.Update`, outside the measured subtree, owns steady `UpdateOcclusion(false)` work; absence here does not establish that thermal occlusion was idle or cheap. The separate script-update scope was about 1.21 ms p50 in the preceding observation, but this experiment does not attribute it. Update-scope attribution is a later experiment, not part of this fixed-callback result.
-# Experimental dry-orbit buoyancy admission
-
-`--continuum-dry-buoyancy` installs an opt-in Harmony prefix on stock
-`PartBuoyancy.FixedUpdate` during the existing scale-profile window. It skips the stock callback only for initialized,
-settled dry parts of the active loaded vessel in a high `ORBITING` regime around an ocean body. Eligibility is recomputed once per vessel per fixed
-tick, uses a 10 km minimum clearance plus a two-tick swept descent bound, and falls back to stock for every ambiguous,
-wet, near-surface, packed, inactive, or nonfinite state.
-
-The candidate first observes stock's dry contact and force outputs, then republishes and verifies those outputs on every bypass. It falls back while a delayed call is pending or prior wet-state cleanup remains. Diagnostic geometry and depth
-fields retain their last dry values while the callback is bypassed, so this is an experimental physical-equivalence
-candidate rather than a complete stock-output substitute. It is disabled by default. The run abstains if another
-Harmony owner already patches the target, records bypass/fallback/error counts in `dryBuoyancy`, and verifies removal of
-its owned prefix before the profiling receipt is exported.
+## Experimental dry-orbit buoyancy admission
 
 The 196-part station attribution observed 23,980 stock buoyancy calls across 218 fixed steps (110 per step) and 51.8151
-ms of instrumented inclusive time, or 0.23768 ms per step. That is only an upper bound: callback timing overhead is
-material at this cadence. A clean flag-off/flag-on installed comparison is required before claiming any frame-time gain.
+ms of instrumented inclusive time, or 0.23768 ms per step. That was only an upper bound because callback timing overhead
+is material at this cadence.
+
+The first `--continuum-dry-buoyancy` candidate used one Harmony prefix per part callback. It ran only for initialized,
+settled dry parts of the active loaded vessel in a high `ORBITING` regime around an ocean body. The paired installed
+experiment used source `810e40a`, package SHA-256
+`4b9e47a4ffdc6e66666ac6b1f20ba4fc8f9bf80df131059bc72706dc2e9ccd9e`, plugin SHA-256
+`12fb9edbbd120c4afaecbcee7f6205edc32a938546ffc58d125c14c578dd1a75`, and the unchanged station checkpoint. All four
+runs completed and exited 0. Both candidate runs verified every dry publication, recorded zero fallback or callback
+errors, and removed their owned prefix.
+
+| Order | Prefix | Component bypasses | Script p50 / p95 (ms) | Physics p50 / p95 (ms) | Active fixed parent mean (ms) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | Off | 0 | 2.9456 / 3.62945 | 1.1558 / 1.45595 | 4.20405 |
+| 2 | On | 22,550 | 2.9063 / 3.6597 | 1.2139 / 1.52186 | 4.23730 |
+| 3 | On | 20,790 | 2.9040 / 3.87878 | 1.2059 / 1.5440 | 4.28663 |
+| 4 | Off | 0 | 2.9460 / 3.5857 | 1.1408 / 1.4203 | 4.18168 |
+
+The prefix reduced script p50 by about 0.04 ms, but the enclosing active fixed-step parent mean was about 0.8% and 2.5%
+slower than its neighboring baselines. This experiment demonstrates no end-to-end gain. The component callbacks and
+per-part prefix dispatch remained in the hot path.
+
+The current strategy, identified as `playerloop-batch-disable` in new receipts, moves admission to the existing
+PlayerLoop boundary. Before each `ScriptRunBehaviourFixedUpdate` traversal it revalidates the vessel and every owned
+component, republishes and verifies dry integration state as one batch, and disables only the initially enabled
+`PartBuoyancy` behaviours that Continuum owns. [Unity does not update disabled behaviours](https://docs.unity3d.com/2019.4/Documentation/ScriptReference/Behaviour-enabled.html). Any ineligible state, loop
+fault, or teardown restores and reads back every owned enable independently before stock script traversal continues.
+The batch report distinguishes fixed steps, owned components, component-step bypasses, publications, fallbacks, errors,
+and cleanup. Its work runs before the script child timer begins, so only the enclosing active fixed-step parent can
+establish a net gain.
+
+Both strategies use a 10 km minimum clearance plus a two-tick swept descent bound and fall back for ambiguous, wet,
+near-surface, packed, inactive, delayed-call, prior-wet, or nonfinite state. Diagnostic geometry and depth fields retain
+their last dry values, so this remains an opt-in KSP 1.12.5 physical-equivalence experiment rather than a complete
+stock-output substitute. Existing Harmony ownership is checked at installation; a foreign patch added later is not
+detected. A verified publication establishes internal consistency after Continuum writes it, not equality with an
+independently executed stock trajectory.
+
+This boundary probe is not Continuum's permanent object-callback architecture. The follow-up is vessel- or island-level
+domain selection over Continuum-owned state, with KSP reconciliation at explicit boundaries.
