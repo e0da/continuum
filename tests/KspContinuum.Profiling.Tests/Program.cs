@@ -53,6 +53,17 @@ static class Program
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[] { 1 }, blocks = new int[] { 0 }, available = new bool[] { true } })));
         Check(Reject(() => ProfilingSummary.Marker(new MarkerReport { nanoseconds = new long[0], blocks = new int[] { 1 }, available = new bool[] { true } })));
 
+        var attribution = new CallbackAttributionAccumulator(1000);
+        int slow = attribution.Register(new CallbackAttributionRow { category = "unity-fixed-callback", assembly = "Game", declaringType = "Slow", method = "FixedUpdate" });
+        int fast = attribution.Register(new CallbackAttributionRow { category = "stock-provider-seam", assembly = "Game", declaringType = "Fast", method = "Work" });
+        attribution.Record(fast, 2); attribution.Record(slow, 7); attribution.Record(slow, 3);
+        CallbackAttributionRow[] attributed = attribution.Finish(20);
+        Check(attributed.Length == 2 && attributed[0].declaringType == "Slow" && attributed[0].calls == 2);
+        Near(attributed[0].inclusiveMilliseconds, 10); Near(attributed[0].meanMilliseconds, 5);
+        Near(attributed[0].maximumMilliseconds, 7); Near(attributed[0].fractionOfActiveWindow, .5);
+        Check(attributed[1].calls == 1 && attributed[1].inclusiveTicks == 2);
+        Check(Reject(() => attribution.Record(slow, 1)));
+
         var baselinePerformance = Observation("scalar", new[] { 2.0, 4.0, 3.0 }, new long[] { 100, 120, 110 });
         var candidatePerformance = Observation("simd", new[] { 1.0, 2.0, 1.5 }, new long[] { 50, 60, 55 });
         PerformanceObservations.Validate(baselinePerformance);

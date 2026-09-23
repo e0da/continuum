@@ -109,6 +109,7 @@ namespace KspContinuum
         public WriterCensusReport writerCensus;
         public ForceObservationReport partForces;
         public PhysicsSubstitutionCanaryReport substitutionCanary;
+        public CallbackAttributionReport callbackAttribution;
     }
 
     [Serializable] public sealed class PhysicsSubstitutionCanaryReport

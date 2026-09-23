@@ -105,6 +105,11 @@ namespace KspContinuum
                  report.substitutionCanary.restorationStatus != "native-node-restored" ||
                  report.substitutionCanary.candidateCallbacks < 1 || report.substitutionCanary.candidateCallbacks > 4))
             { reason = "physics-substitution-canary-invalid"; return false; }
+            if (Array.IndexOf(Environment.GetCommandLineArgs(), "--continuum-callback-attribution") >= 0 &&
+                (report.callbackAttribution == null || report.callbackAttribution.status != "observed" ||
+                 report.callbackAttribution.cleanupStatus != "removed-owned-patches" || report.callbackAttribution.patchedMethods < 1 ||
+                 report.callbackAttribution.callbacks == null || report.callbackAttribution.callbacks.Length < 1))
+            { reason = "callback-attribution-invalid"; return false; }
             return true;
         }
 
