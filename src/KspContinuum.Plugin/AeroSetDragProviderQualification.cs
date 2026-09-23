@@ -13,7 +13,8 @@ namespace KspContinuum
         const string Flag = "--continuum-live-setdrag-provider";
         const string QuitFlag = "--continuum-setdrag-quit-after-qualification";
         const string Owner = "continuum.live-setdrag-provider";
-        const int RequiredShadowMatches = 128;
+        const int RequiredWarmupMatches = 32;
+        const int RequiredMeasuredMatches = 256;
         const int MaximumSubstitutions = 256;
         static readonly AccessTools.FieldRef<DragCubeList, DragCubeList.CubeData> CubeData =
             AccessTools.FieldRefAccess<DragCubeList, DragCubeList.CubeData>("cubeData");
@@ -22,10 +23,12 @@ namespace KspContinuum
         MethodInfo target;
         AeroSetDragSubstitutionReport report;
         bool requested, active, exported, quitAfterQualification;
+        float patchGraphFixedTime = float.NaN;
 
         struct CallState
         {
             public bool Shadow;
+            public bool Measured;
             public DragCubeList.CubeData Candidate;
             public long StockStarted;
         }
@@ -36,8 +39,8 @@ namespace KspContinuum
             requested = true;
             quitAfterQualification = Array.IndexOf(Environment.GetCommandLineArgs(), QuitFlag) >= 0;
             report = new AeroSetDragSubstitutionReport {
-                requiredShadowMatches = RequiredShadowMatches, maximumSubstitutions = MaximumSubstitutions,
-                status = "active"
+                requiredWarmupMatches = RequiredWarmupMatches, requiredMeasuredMatches = RequiredMeasuredMatches,
+                maximumSubstitutions = MaximumSubstitutions, stopwatchFrequency = Stopwatch.Frequency, status = "active"
             };
             active = true;
             try
@@ -60,17 +63,55 @@ namespace KspContinuum
             __state = new CallState();
             AeroSetDragProviderQualification owner = instance;
             if (owner == null || !owner.active) return true;
-            if (!TargetStillOwned(owner.target)) { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
             try
             {
-                long started = Stopwatch.GetTimestamp();
-                __state.Candidate = Calculate(__instance, vector, machNumber);
-                owner.report.candidateStopwatchTicks += Stopwatch.GetTimestamp() - started;
-                if (owner.report.matchedCompleteOutputs < RequiredShadowMatches)
+                int requiredShadow = RequiredWarmupMatches + RequiredMeasuredMatches;
+                bool shadow = owner.report.matchedCompleteOutputs < requiredShadow;
+                bool measured = owner.report.matchedCompleteOutputs >= RequiredWarmupMatches &&
+                    owner.report.matchedCompleteOutputs < requiredShadow;
+                long graphBefore = owner.report.measuredPatchGraphStopwatchTicks;
+                if (shadow && !owner.TargetOwnedForStep(measured))
+                { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
+                if (!shadow && owner.report.suppressedOriginalCalls == 0)
                 {
-                    __state.Shadow = true; __state.StockStarted = Stopwatch.GetTimestamp(); return true;
+                    owner.report.authorityAdmissionAttested = TargetStillOwned(owner.target);
+                    if (!owner.report.authorityAdmissionAttested)
+                    { owner.Stop("authority-admission-patch-graph-changed"); owner.report.stockFallbacks++; return true; }
                 }
-                CubeData(__instance) = __state.Candidate;
+                if (measured)
+                {
+                    long admissionTicks, guardedTicks;
+                    DragCubeList.CubeData admission, guarded;
+                    if ((owner.report.shadowMeasuredComparisons & 1) == 0)
+                    {
+                        admission = TimedCalculateAndPublish(__instance, vector, machNumber, out admissionTicks);
+                        guarded = TimedCalculateAndPublish(__instance, vector, machNumber, out guardedTicks);
+                    }
+                    else
+                    {
+                        guarded = TimedCalculateAndPublish(__instance, vector, machNumber, out guardedTicks);
+                        admission = TimedCalculateAndPublish(__instance, vector, machNumber, out admissionTicks);
+                    }
+                    double strategyError;
+                    if (!Equivalent(admission, guarded, out strategyError))
+                    { owner.Stop("strategy-output-mismatch"); owner.report.stockFallbacks++; return true; }
+                    __state.Candidate = admission;
+                    CubeData(__instance) = admission;
+                    owner.report.admissionStrategyStopwatchTicks += admissionTicks;
+                    owner.report.candidateStopwatchTicks += guardedTicks +
+                        (owner.report.measuredPatchGraphStopwatchTicks - graphBefore);
+                }
+                else
+                {
+                    __state.Candidate = Calculate(__instance, vector, machNumber);
+                    CubeData(__instance) = __state.Candidate;
+                }
+                if (shadow)
+                {
+                    __state.Shadow = true;
+                    __state.Measured = measured;
+                    __state.StockStarted = Stopwatch.GetTimestamp(); return true;
+                }
                 owner.report.suppressedOriginalCalls++;
                 if (owner.report.suppressedOriginalCalls >= MaximumSubstitutions)
                     owner.Stop("bounded-substitution-limit-reached");
@@ -82,49 +123,92 @@ namespace KspContinuum
             }
         }
 
+        static DragCubeList.CubeData TimedCalculateAndPublish(DragCubeList cubes, Vector3 vector, float mach, out long elapsed)
+        {
+            long started = Stopwatch.GetTimestamp();
+            DragCubeList.CubeData candidate = Calculate(cubes, vector, mach);
+            CubeData(cubes) = candidate;
+            elapsed = Stopwatch.GetTimestamp() - started;
+            return candidate;
+        }
+
         static void Postfix(DragCubeList __instance, CallState __state)
         {
             AeroSetDragProviderQualification owner = instance;
             if (owner == null || !__state.Shadow) return;
-            owner.report.stockStopwatchTicks += Stopwatch.GetTimestamp() - __state.StockStarted;
+            if (__state.Measured) owner.report.stockStopwatchTicks += Stopwatch.GetTimestamp() - __state.StockStarted;
             owner.report.shadowComparisons++;
             double error;
             if (!Equivalent(__state.Candidate, Snapshot(__instance), out error))
             { owner.report.maximumRelativeError = Math.Max(owner.report.maximumRelativeError, error); owner.Stop("complete-output-mismatch"); return; }
             owner.report.maximumRelativeError = Math.Max(owner.report.maximumRelativeError, error);
             owner.report.matchedCompleteOutputs++;
+            if (__state.Measured) owner.report.shadowMeasuredComparisons++;
+            else owner.report.shadowWarmupComparisons++;
         }
 
         static DragCubeList.CubeData Calculate(DragCubeList cubes, Vector3 input, float mach)
         {
+            if (cubes.None) return Snapshot(cubes);
             Vector3 direction = -input;
             if (cubes.RotateDragVector) direction = cubes.DragVectorRotation * direction;
+            double magnitudeSquared = direction.sqrMagnitude;
+            if (!Finite(magnitudeSquared) || (magnitudeSquared != 0 && Math.Abs(magnitudeSquared - 1) > 1e-4))
+                throw new ArgumentException("Direction must be finite and unit length or zero.");
             PhysicsGlobals.SurfaceCurvesList curves = cubes.SurfaceCurves;
-            float[] weightedDrag = cubes.WeightedDrag;
-            var areas = Faces(cubes.AreaOccluded); var drags = Faces(weightedDrag); var depths = Faces(cubes.WeightedDepth);
-            var dragCd = new AeroFaceValues(
-                cubes.DragCurveCd.Evaluate(weightedDrag[0]), cubes.DragCurveCd.Evaluate(weightedDrag[1]),
-                cubes.DragCurveCd.Evaluate(weightedDrag[2]), cubes.DragCurveCd.Evaluate(weightedDrag[3]),
-                cubes.DragCurveCd.Evaluate(weightedDrag[4]), cubes.DragCurveCd.Evaluate(weightedDrag[5]));
-            var bodyLift = new AeroFaceValues(
-                cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, direction.x)), cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, -direction.x)),
-                cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, direction.y)), cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, -direction.y)),
-                cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, direction.z)), cubes.BodyLiftCurve.liftCurve.Evaluate(Math.Max(0, -direction.z)));
-            AeroCompleteSetDragResult result = AeroCompleteSetDrag.Evaluate(new Vec(direction.x, direction.y, direction.z),
-                areas, drags, depths, dragCd, bodyLift, curves.dragCurveTail.Evaluate(mach),
-                curves.dragCurveSurface.Evaluate(mach), curves.dragCurveMultiplier.Evaluate(mach),
-                curves.dragCurveTip.Evaluate(mach), cubes.DragCurveCdPower.Evaluate(mach));
-            return new DragCubeList.CubeData {
-                dragVector = Vector(result.DragVector), liftForce = Vector(result.LiftForce),
-                area = (float)result.AreaSquareMeters, areaDrag = (float)result.AreaDragSquareMeters,
-                depth = (float)result.DepthMeters, crossSectionalArea = (float)result.CrossSectionalAreaSquareMeters,
-                exposedArea = (float)result.ExposedAreaSquareMeters, dragCoeff = (float)result.DragCoefficient,
-                taperDot = (float)result.TaperDot
+            float[] areas = cubes.AreaOccluded, drags = cubes.WeightedDrag, depths = cubes.WeightedDepth;
+            double tail = curves.dragCurveTail.Evaluate(mach), surface = curves.dragCurveSurface.Evaluate(mach);
+            double multiplier = curves.dragCurveMultiplier.Evaluate(mach), tip = curves.dragCurveTip.Evaluate(mach);
+            double power = cubes.DragCurveCdPower.Evaluate(mach);
+            if (!Finite(tail) || !Finite(surface) || !Finite(multiplier) || !Finite(tip) || !Finite(power) || multiplier == 0)
+                throw new ArgumentException("Curve samples must be finite and the surface multiplier must be nonzero.");
+            double area = 0, areaDrag = 0, section = 0, exposure = 0, dotSum = 0;
+            double depth = 0, taper = 0, liftX = 0, liftY = 0, liftZ = 0;
+            for (int face = 0; face < 6; face++)
+            {
+                int axis = face >> 1;
+                double sign = (face & 1) == 0 ? 1 : -1;
+                double dot = (axis == 0 ? direction.x : axis == 1 ? direction.y : direction.z) * sign;
+                double faceArea = areas[face], drag = drags[face];
+                double directionalArea = faceArea * (dot <= 0
+                    ? surface + (tail - surface) * Math.Max(0, Math.Min(1, -dot))
+                    : surface + (tip - surface) * Math.Max(0, Math.Min(1, dot))) * multiplier;
+                area += directionalArea;
+                double dragCd = drag < 1 ? Math.Pow(cubes.DragCurveCd.Evaluate((float)drag), power) : drag;
+                areaDrag += directionalArea * dragCd;
+                section += faceArea * Math.Max(0, Math.Min(1, dot));
+                double inverseDrag = drag > .01 && drag < 1 ? 1 / drag : 1;
+                exposure += directionalArea / multiplier * inverseDrag;
+                if (dot <= 0) continue;
+                dotSum += dot;
+                double weightedLift = -dot * faceArea * drag * cubes.BodyLiftCurve.liftCurve.Evaluate((float)dot) * sign;
+                if (!double.IsNaN(weightedLift))
+                {
+                    if (axis == 0) liftX += weightedLift;
+                    else if (axis == 1) liftY += weightedLift;
+                    else liftZ += weightedLift;
+                }
+                depth += dot * depths[face]; taper += dot * inverseDrag;
+            }
+            if (dotSum > 0) { depth /= dotSum; taper /= dotSum; }
+            double coefficient = area > 0 ? areaDrag / area : 0;
+            if (area <= 0) areaDrag = 0;
+            var candidate = new DragCubeList.CubeData {
+                dragVector = direction, liftForce = new Vector3((float)liftX, (float)liftY, (float)liftZ),
+                area = (float)area, areaDrag = (float)areaDrag, depth = (float)depth,
+                crossSectionalArea = (float)section, exposedArea = (float)exposure,
+                dragCoeff = (float)coefficient, taperDot = (float)taper
             };
+            if (!Finite(candidate.dragVector.x) || !Finite(candidate.dragVector.y) || !Finite(candidate.dragVector.z) ||
+                !Finite(candidate.liftForce.x) || !Finite(candidate.liftForce.y) || !Finite(candidate.liftForce.z) ||
+                !Finite(candidate.area) || !Finite(candidate.areaDrag) || !Finite(candidate.depth) ||
+                !Finite(candidate.crossSectionalArea) || !Finite(candidate.exposedArea) ||
+                !Finite(candidate.dragCoeff) || !Finite(candidate.taperDot))
+                throw new ArithmeticException("SetDrag produced a nonfinite output.");
+            return candidate;
         }
 
-        static AeroFaceValues Faces(float[] values) => new AeroFaceValues(values[0], values[1], values[2], values[3], values[4], values[5]);
-        static Vector3 Vector(Vec value) => new Vector3((float)value.X, (float)value.Y, (float)value.Z);
+        static bool Finite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
         static DragCubeList.CubeData Snapshot(DragCubeList cubes) => new DragCubeList.CubeData {
             dragVector = cubes.DragVector, liftForce = cubes.LiftForce, area = cubes.Area,
             areaDrag = cubes.AreaDrag, depth = cubes.Depth, crossSectionalArea = cubes.CrossSectionalArea,
@@ -160,6 +244,23 @@ namespace KspContinuum
                 patches.Transpilers.Count == 0 && patches.Finalizers.Count == 0 &&
                 patches.Prefixes[0].owner == Owner && patches.Postfixes[0].owner == Owner;
         }
+        bool TargetOwnedForStep(bool measured)
+        {
+            float fixedTime = Time.fixedTime;
+            if (fixedTime == patchGraphFixedTime) return true;
+            report.patchGraphInspections++;
+            long started = Stopwatch.GetTimestamp();
+            bool owned = TargetStillOwned(target);
+            long elapsed = Stopwatch.GetTimestamp() - started;
+            report.patchGraphStopwatchTicks += elapsed;
+            if (measured)
+            {
+                report.measuredPatchGraphInspections++;
+                report.measuredPatchGraphStopwatchTicks += elapsed;
+            }
+            if (!owned) return false;
+            patchGraphFixedTime = fixedTime; return true;
+        }
         void Stop(string reason)
         {
             if (!active) return; active = false; report.reason = reason;
@@ -168,6 +269,12 @@ namespace KspContinuum
         public void Update() { if (requested && !active && !exported) Finish(); }
         void Finish()
         {
+            if (report != null && report.status == "complete" && target != null)
+            {
+                report.authorityExitAttested = TargetStillOwned(target);
+                if (!report.authorityExitAttested)
+                { report.status = "abstained"; report.reason = "authority-exit-patch-graph-changed"; }
+            }
             Cleanup(); Export();
             if (quitAfterQualification)
                 Application.Quit(report != null && report.status == "complete" &&

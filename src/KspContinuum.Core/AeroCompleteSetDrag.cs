@@ -7,11 +7,17 @@ namespace KspContinuum
         public readonly double PositiveX, NegativeX, PositiveY, NegativeY, PositiveZ, NegativeZ;
         public AeroFaceValues(double positiveX, double negativeX, double positiveY, double negativeY,
             double positiveZ, double negativeZ)
+            : this(positiveX, negativeX, positiveY, negativeY, positiveZ, negativeZ, true) { }
+        AeroFaceValues(double positiveX, double negativeX, double positiveY, double negativeY,
+            double positiveZ, double negativeZ, bool validate)
         {
-            PositiveX = Require(positiveX); NegativeX = Require(negativeX);
-            PositiveY = Require(positiveY); NegativeY = Require(negativeY);
-            PositiveZ = Require(positiveZ); NegativeZ = Require(negativeZ);
+            PositiveX = validate ? Require(positiveX) : positiveX; NegativeX = validate ? Require(negativeX) : negativeX;
+            PositiveY = validate ? Require(positiveY) : positiveY; NegativeY = validate ? Require(negativeY) : negativeY;
+            PositiveZ = validate ? Require(positiveZ) : positiveZ; NegativeZ = validate ? Require(negativeZ) : negativeZ;
         }
+        internal static AeroFaceValues Trusted(double positiveX, double negativeX, double positiveY, double negativeY,
+            double positiveZ, double negativeZ) => new AeroFaceValues(positiveX, negativeX, positiveY, negativeY,
+                positiveZ, negativeZ, false);
         public double At(int face)
         {
             switch (face)
@@ -69,15 +75,24 @@ namespace KspContinuum
 
             double area = 0, areaDrag = 0, section = 0, exposure = 0, positiveDotSum = 0;
             double depth = 0, taper = 0, liftX = 0, liftY = 0, liftZ = 0;
-            Axis(0, direction.X, ref area, ref areaDrag, ref section, ref exposure, ref positiveDotSum,
-                ref depth, ref taper, ref liftX, ref liftY, ref liftZ, areaOccluded, weightedDrag,
-                weightedDepth, dragCd, bodyLift, tail, surface, multiplier, tip, dragCdPower);
-            Axis(1, direction.Y, ref area, ref areaDrag, ref section, ref exposure, ref positiveDotSum,
-                ref depth, ref taper, ref liftX, ref liftY, ref liftZ, areaOccluded, weightedDrag,
-                weightedDepth, dragCd, bodyLift, tail, surface, multiplier, tip, dragCdPower);
-            Axis(2, direction.Z, ref area, ref areaDrag, ref section, ref exposure, ref positiveDotSum,
-                ref depth, ref taper, ref liftX, ref liftY, ref liftZ, areaOccluded, weightedDrag,
-                weightedDepth, dragCd, bodyLift, tail, surface, multiplier, tip, dragCdPower);
+            Accumulate(direction.X, 1, 0, areaOccluded.PositiveX, weightedDrag.PositiveX, weightedDepth.PositiveX,
+                dragCd.PositiveX, bodyLift.PositiveX, ref area, ref areaDrag, ref section, ref exposure,
+                ref positiveDotSum, ref depth, ref taper, ref liftX, ref liftY, ref liftZ, tail, surface, multiplier, tip, dragCdPower);
+            Accumulate(-direction.X, -1, 0, areaOccluded.NegativeX, weightedDrag.NegativeX, weightedDepth.NegativeX,
+                dragCd.NegativeX, bodyLift.NegativeX, ref area, ref areaDrag, ref section, ref exposure,
+                ref positiveDotSum, ref depth, ref taper, ref liftX, ref liftY, ref liftZ, tail, surface, multiplier, tip, dragCdPower);
+            Accumulate(direction.Y, 1, 1, areaOccluded.PositiveY, weightedDrag.PositiveY, weightedDepth.PositiveY,
+                dragCd.PositiveY, bodyLift.PositiveY, ref area, ref areaDrag, ref section, ref exposure,
+                ref positiveDotSum, ref depth, ref taper, ref liftX, ref liftY, ref liftZ, tail, surface, multiplier, tip, dragCdPower);
+            Accumulate(-direction.Y, -1, 1, areaOccluded.NegativeY, weightedDrag.NegativeY, weightedDepth.NegativeY,
+                dragCd.NegativeY, bodyLift.NegativeY, ref area, ref areaDrag, ref section, ref exposure,
+                ref positiveDotSum, ref depth, ref taper, ref liftX, ref liftY, ref liftZ, tail, surface, multiplier, tip, dragCdPower);
+            Accumulate(direction.Z, 1, 2, areaOccluded.PositiveZ, weightedDrag.PositiveZ, weightedDepth.PositiveZ,
+                dragCd.PositiveZ, bodyLift.PositiveZ, ref area, ref areaDrag, ref section, ref exposure,
+                ref positiveDotSum, ref depth, ref taper, ref liftX, ref liftY, ref liftZ, tail, surface, multiplier, tip, dragCdPower);
+            Accumulate(-direction.Z, -1, 2, areaOccluded.NegativeZ, weightedDrag.NegativeZ, weightedDepth.NegativeZ,
+                dragCd.NegativeZ, bodyLift.NegativeZ, ref area, ref areaDrag, ref section, ref exposure,
+                ref positiveDotSum, ref depth, ref taper, ref liftX, ref liftY, ref liftZ, tail, surface, multiplier, tip, dragCdPower);
             if (positiveDotSum > 0) { depth /= positiveDotSum; taper /= positiveDotSum; }
             double coefficient = area > 0 ? areaDrag / area : 0;
             if (area <= 0) areaDrag = 0;
@@ -88,37 +103,20 @@ namespace KspContinuum
                 depth, section, exposure, coefficient, taper);
         }
 
-        static void Axis(int axis, double component, ref double area, ref double areaDrag, ref double section,
+        static void Accumulate(double dot, double sign, int axis, double faceArea, double drag, double faceDepth,
+            double dragCd, double bodyLift, ref double area, ref double areaDrag, ref double section,
             ref double exposure, ref double dotSum, ref double depth, ref double taper, ref double liftX,
-            ref double liftY, ref double liftZ, AeroFaceValues areas, AeroFaceValues drags,
-            AeroFaceValues depths, AeroFaceValues dragCd, AeroFaceValues bodyLift, double tail, double surface,
-            double multiplier, double tip, double power)
+            ref double liftY, ref double liftZ, double tail, double surface, double multiplier, double tip, double power)
         {
-            Accumulate(axis * 2, component, axis, ref area, ref areaDrag, ref section, ref exposure, ref dotSum,
-                ref depth, ref taper, ref liftX, ref liftY, ref liftZ, areas, drags, depths, dragCd, bodyLift,
-                tail, surface, multiplier, tip, power);
-            Accumulate(axis * 2 + 1, -component, axis, ref area, ref areaDrag, ref section, ref exposure, ref dotSum,
-                ref depth, ref taper, ref liftX, ref liftY, ref liftZ, areas, drags, depths, dragCd, bodyLift,
-                tail, surface, multiplier, tip, power);
-        }
-
-        static void Accumulate(int face, double dot, int axis, ref double area, ref double areaDrag,
-            ref double section, ref double exposure, ref double dotSum, ref double depth, ref double taper,
-            ref double liftX, ref double liftY, ref double liftZ, AeroFaceValues areas, AeroFaceValues drags,
-            AeroFaceValues depths, AeroFaceValues dragCd, AeroFaceValues bodyLift, double tail, double surface,
-            double multiplier, double tip, double power)
-        {
-            double drag = drags.At(face);
-            double directionalArea = areas.At(face) * (dot < 0 ? Mix(surface, tail, -dot) : Mix(surface, tip, dot)) * multiplier;
+            double directionalArea = faceArea * (dot < 0 ? Mix(surface, tail, -dot) : Mix(surface, tip, dot)) * multiplier;
             area += directionalArea;
-            areaDrag += directionalArea * (drag < 1 ? Math.Pow(dragCd.At(face), power) : drag);
-            section += areas.At(face) * Clamp(dot);
+            areaDrag += directionalArea * (drag < 1 ? Math.Pow(dragCd, power) : drag);
+            section += faceArea * Clamp(dot);
             double inverseDrag = drag > .01 && drag < 1 ? 1 / drag : 1;
             exposure += directionalArea / multiplier * inverseDrag;
             if (dot <= 0) return;
-            dotSum += dot; depth += dot * depths.At(face); taper += dot * inverseDrag;
-            double force = -dot * areas.At(face) * drag * bodyLift.At(face);
-            double signed = (face & 1) == 0 ? force : -force;
+            dotSum += dot; depth += dot * faceDepth; taper += dot * inverseDrag;
+            double signed = -dot * faceArea * drag * bodyLift * sign;
             if (axis == 0) liftX += signed; else if (axis == 1) liftY += signed; else liftZ += signed;
         }
         static double Mix(double left, double right, double amount) => left + (right - left) * Clamp(amount);
