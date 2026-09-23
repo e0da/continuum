@@ -12,14 +12,20 @@ all body centers in the root body's rotating frame on admission and periodically
 of internal drift invalidates the run. Cleanup restores the captured awake/asleep state and verifies that all captured
 joints remain present. The receipt is embedded as `sleepingIsland` in the ordinary `markers/v2` report.
 
-Run a stock capture and a candidate capture from separate fresh processes and the same immutable station checkpoint.
-The candidate adds `--continuum-sleeping-island`; both runs retain `--continuum-scale-profile --continuum-playerloop`
-and the same part-count/checkpoint flags. Alternate process order across at least three pairs. Compare the complete
-FixedUpdate parent and native `PhysicsFixedUpdate`, with unchanged part, rigidbody, joint, collider, and loaded-vessel
-counts. A lower native child plus lower complete parent is the performance result; callback cadence alone is not.
+The installed diagnostic used separate fresh stock and candidate processes from the same immutable 196-part station
+checkpoint. The stock run measured a 1.5803 ms mean native `PhysicsFixedUpdate` and a 4.5224 ms mean complete
+`FixedUpdate`. The candidate measured 2.2046 ms and 5.4187 ms respectively: about 39.5% slower in the native scope and
+19.8% slower in the complete parent. It completed 230 steps with the 110-body, 144-joint, 328-collider graph retained,
+and observed at most 7.8e-6 m of internal drift. The source save remained unchanged.
+
+This is a negative result. Reasserting sleep on every body immediately before every native physics step costs more than
+it saves in this station workload, so the candidate will not be merged or hardened. Review also found that the probe's
+qualification needed exact repeated collider-identity checks, sleep-state restoration readback, and explicit attitude,
+translation, and wheel-control admission checks. Those gaps do not explain away the measured slowdown and are left
+unimplemented because the experiment already rejects its performance hypothesis.
 
 This experiment does not create a compound body, delete joints, integrate forces, support contacts, or preserve thrust,
 staging, docking, robotics, wheel, damage, or arbitrary module behavior. It deliberately suppresses native motion for a
-settled quiet island and restores the graph after the bounded capture. A win would justify implementing Continuum-owned
-sleep/wake state and then a semantic compound cluster. It would not establish a general vessel replacement or predict
-the synthetic compound fixture's speedup.
+settled quiet island and restores the graph after the bounded capture. The result rules out per-step sleep assertion as
+the next station optimization. It does not test a semantic compound cluster, which would remove native bodies and joints
+and therefore changes the scaling term this experiment preserved.
