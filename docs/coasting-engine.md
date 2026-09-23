@@ -25,7 +25,8 @@ below `1e-6` meters per second against its analytic return state. A quarter-peri
 analytic position and velocity within the same bounds, excluding a no-motion implementation. For elliptic seeds, the
 solver now reduces elapsed time to the signed remainder of the computed orbital period before solving the anomaly.
 A circular fixture samples 10,000 years forward and backward and matches direct samples at the reduced phase within
-1 mm and 1 micrometer per second. Work for one sample is independent of the number of completed revolutions. Floating
+1 mm and 1 micrometer per second. A modest eccentric fixture also matches its reduced phase within 1 mm. Work for one
+sample is independent of the number of completed revolutions. Floating
 point rounding of the computed period still affects phase over long spans; this does not prove general 10,000-year
 trajectory accuracy. These bounds qualify this fixture and solver setting. Hyperbolic, near-parabolic,
 extreme-scale, multi-body,

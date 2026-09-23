@@ -57,6 +57,7 @@ static class Program
         directCadence.Evaluate(10.1, time => { directSamples++; return new CoastingBody(8, new Vec(time, 0, 0), new Vec(1, 0, 0)); });
         Check(directSamples == 2 && directCadence.EngineSampleCount == 2, "direct comparator did not sample every callback");
         const double mu = 3.986004418e14, radius = 7e6, epoch = 123456789;
+        const double tenThousandYears = 10000 * 365.25 * 86400;
         double period = 2 * Math.PI * Math.Sqrt(radius * radius * radius / mu), target = epoch + period;
         List<CoastingBody> fixture = Fixture(mu, radius);
         double speed = Math.Sqrt(mu / radius);
@@ -76,6 +77,13 @@ static class Program
             "eccentric half-period position missed analytic apoapsis");
         Check(Norm(Difference(oppositeApsis.Velocity, new Vec(0, -apoapsisSpeed, 0))) < 1e-8,
             "eccentric half-period velocity missed analytic apoapsis");
+        double ellipseAlpha = 2 / periapsis - periapsisSpeed * periapsisSpeed / kerbinMu;
+        double ellipseSolverPeriod = 2 * Math.PI / (Math.Sqrt(kerbinMu) * ellipseAlpha * Math.Sqrt(ellipseAlpha));
+        CoastingBody ellipseLongCoast = new CoastingEngine(0, kerbinMu, ellipse, 1).SampleAt(tenThousandYears).Bodies[0];
+        CoastingBody ellipseSamePhase = new CoastingEngine(0, kerbinMu, ellipse, 1)
+            .SampleAt(Math.IEEERemainder(tenThousandYears, ellipseSolverPeriod)).Bodies[0];
+        Check(Norm(Difference(ellipseLongCoast.Position, ellipseSamePhase.Position)) < 1e-3,
+            "10,000-year eccentric coast lost its reduced orbital phase");
         var finePresentation = new CoastingEngine(epoch, mu, fixture, 1).AdvanceTo(target, 17);
         var sparsePresentation = new CoastingEngine(epoch, mu, fixture, 7).AdvanceTo(target, 311);
         var noPresentation = new CoastingEngine(epoch, mu, fixture, 64).AdvanceTo(target);
@@ -88,7 +96,6 @@ static class Program
         double velocityError = Norm(Difference(final.Velocity, initial.Velocity));
         Check(positionError < 1e-3, "one-period position error exceeded one millimeter: " + positionError.ToString("R"));
         Check(velocityError < 1e-6, "one-period velocity error exceeded one micrometer per second: " + velocityError.ToString("R"));
-        double tenThousandYears = 10000 * 365.25 * 86400;
         double alpha = 2 / radius - speed * speed / mu;
         double solverPeriod = 2 * Math.PI / (Math.Sqrt(mu) * alpha * Math.Sqrt(alpha));
         double reducedTime = Math.IEEERemainder(tenThousandYears, solverPeriod);
