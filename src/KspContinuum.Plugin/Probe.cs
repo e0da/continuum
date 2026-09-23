@@ -25,6 +25,7 @@ namespace KspContinuum
         ActiveVesselPhysicsSubstitutionCanary substitutionCanary;
         PartForceObservation partForces;
         FixedCallbackAttribution callbackAttribution;
+        DryBuoyancyRuntime dryBuoyancy;
         Action<ProbeReport> completion;
         bool started, finished;
         int completed;
@@ -76,6 +77,11 @@ namespace KspContinuum
                 {
                     callbackAttribution = new FixedCallbackAttribution(); callbackAttribution.Start();
                     report.callbackAttribution = callbackAttribution.Report;
+                }
+                if (Array.IndexOf(arguments, "--continuum-dry-buoyancy") >= 0)
+                {
+                    dryBuoyancy = new DryBuoyancyRuntime(); dryBuoyancy.Start(); report.dryBuoyancy = dryBuoyancy.Report;
+                    if (dryBuoyancy.Report.status != "installed") throw new InvalidOperationException("Dry buoyancy admission did not install: " + dryBuoyancy.Report.status);
                 }
                 if (Array.IndexOf(arguments, "--continuum-playerloop") >= 0 || writerCensus != null || callbackAttribution != null)
                 {
@@ -219,6 +225,14 @@ namespace KspContinuum
                 catch (Exception error) { errors.Add("CallbackAttribution: " + error.GetType().Name); }
                 if (callbackAttribution.Report.cleanupStatus == "cleanup-error") errors.Add("CallbackAttribution: cleanup-error");
                 callbackAttribution = null;
+            }
+            if (dryBuoyancy != null)
+            {
+                try { dryBuoyancy.Dispose(); }
+                catch (Exception error) { errors.Add("DryBuoyancy: " + error.GetType().Name); }
+                if (dryBuoyancy.Report.cleanupStatus == "cleanup-error") errors.Add("DryBuoyancy: cleanup-error");
+                if (dryBuoyancy.Report.status != "complete") errors.Add("DryBuoyancy: " + dryBuoyancy.Report.status);
+                dryBuoyancy = null;
             }
             if (partForces != null)
             {

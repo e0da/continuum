@@ -1,0 +1,40 @@
+using System;
+
+namespace KspContinuum
+{
+    public enum DryBuoyancyDisposition { RunStock, SkipStock }
+
+    public struct DryBuoyancyVesselState
+    {
+        public bool flightReady, active, loaded, packed, orbiting, bodyPresent;
+        public double altitudeMeters, vesselBoundMeters, radialSpeedMetersPerSecond, fixedDeltaSeconds;
+    }
+
+    public struct DryBuoyancyPartState
+    {
+        public bool bodyInitialized, bodyMatchesVessel, splashed;
+        public double depthMeters;
+    }
+
+    public static class DryBuoyancyAdmission
+    {
+        public const double MinimumClearanceMeters = 10000.0;
+
+        public static DryBuoyancyDisposition Decide(DryBuoyancyVesselState vessel, DryBuoyancyPartState part)
+        {
+            if (!vessel.flightReady || !vessel.active || !vessel.loaded || vessel.packed || !vessel.orbiting || !vessel.bodyPresent)
+                return DryBuoyancyDisposition.RunStock;
+            if (!part.bodyInitialized || !part.bodyMatchesVessel || part.splashed || !Finite(part.depthMeters) || part.depthMeters > 0)
+                return DryBuoyancyDisposition.RunStock;
+            if (!Finite(vessel.altitudeMeters) || !Finite(vessel.vesselBoundMeters) || vessel.vesselBoundMeters < 0 ||
+                !Finite(vessel.radialSpeedMetersPerSecond) || !Finite(vessel.fixedDeltaSeconds) || vessel.fixedDeltaSeconds <= 0)
+                return DryBuoyancyDisposition.RunStock;
+
+            double approach = Math.Max(0, -vessel.radialSpeedMetersPerSecond) * vessel.fixedDeltaSeconds * 2;
+            double clearance = Math.Max(MinimumClearanceMeters, vessel.vesselBoundMeters + approach);
+            return vessel.altitudeMeters > clearance ? DryBuoyancyDisposition.SkipStock : DryBuoyancyDisposition.RunStock;
+        }
+
+        static bool Finite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
+    }
+}

@@ -21,6 +21,27 @@ static class Program
     static Box B(double mass, double x) { return new Box(mass, x, 1, 1, 1); }
     static void Main()
     {
+        var dryVessel = new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true,
+            bodyPresent = true, altitudeMeters = 100000, vesselBoundMeters = 100, radialSpeedMetersPerSecond = 0, fixedDeltaSeconds = .02 };
+        var dryPart = new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true };
+        if (DryBuoyancyAdmission.Decide(dryVessel, dryPart) != DryBuoyancyDisposition.SkipStock) throw new Exception("High orbit rejected");
+        count++;
+        var unsafeVessels = new[] {
+            new DryBuoyancyVesselState(),
+            new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true,
+                altitudeMeters = 1000, vesselBoundMeters = 100, fixedDeltaSeconds = .02 },
+            new DryBuoyancyVesselState { flightReady = true, active = true, loaded = true, orbiting = true, bodyPresent = true,
+                altitudeMeters = 100000, vesselBoundMeters = double.NaN, fixedDeltaSeconds = .02 }
+        };
+        foreach (var unsafeVessel in unsafeVessels) { if (DryBuoyancyAdmission.Decide(unsafeVessel, dryPart) != DryBuoyancyDisposition.RunStock) throw new Exception("Unsafe vessel admitted"); count++; }
+        foreach (var unsafePart in new[] {
+            new DryBuoyancyPartState(),
+            new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, splashed = true },
+            new DryBuoyancyPartState { bodyInitialized = true, bodyMatchesVessel = true, depthMeters = .01 }
+        }) { if (DryBuoyancyAdmission.Decide(dryVessel, unsafePart) != DryBuoyancyDisposition.RunStock) throw new Exception("Unsafe part admitted"); count++; }
+        var swept = dryVessel; swept.altitudeMeters = 10001; swept.radialSpeedMetersPerSecond = -300000;
+        if (DryBuoyancyAdmission.Decide(swept, dryPart) != DryBuoyancyDisposition.RunStock) throw new Exception("Swept approach admitted");
+        count++;
         var a = AssemblyModel.Combine(new[] { B(1, -1), B(3, 1) });
         Near(4, a.Mass); Near(0.5, a.CenterX);
         Near(4.0 / 6, a.Inertia.X); Near(4.0 / 6 + 3, a.Inertia.Y); Near(a.Inertia.Y, a.Inertia.Z);
@@ -94,6 +115,13 @@ static class Program
                     throw new Exception("Report integer lost precision");
                 count++;
                 Near(0, json.RootElement.GetProperty("markers")[0].GetProperty("blocks").GetArrayLength());
+            }
+            using (var json = JsonDocument.Parse(ReportJson.Encode(new ProbeReport { dryBuoyancy = new DryBuoyancyReport {
+                status = "complete", calls = 110, bypassed = 109, fallbacks = 1 } })))
+            {
+                if (json.RootElement.GetProperty("dryBuoyancy").GetProperty("bypassed").GetInt64() != 109)
+                    throw new Exception("Dry buoyancy report changed");
+                count++;
             }
             using (var json = JsonDocument.Parse(ReportJson.Encode(new NativeBoundaryMonoReport {
                 schema = "continuum-native-boundary-mono/v1", samplesPerCase = 101, warmupsPerCase = 12,
