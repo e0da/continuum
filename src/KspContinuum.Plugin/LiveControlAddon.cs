@@ -16,6 +16,7 @@ namespace KspContinuum
         Vessel lastVessel;
         GameScenes lastScene;
         bool hasScene;
+        bool quitRequested;
 
         public void Start()
         {
@@ -41,6 +42,7 @@ namespace KspContinuum
         public void Update()
         {
             if (server == null) return;
+            if (quitRequested) { quitRequested = false; Application.Quit(0); return; }
             if (Thread.CurrentThread.ManagedThreadId != mainThreadId)
                 throw new InvalidOperationException("Live control capture must run on Unity's main thread.");
             Vessel vessel = FlightGlobals.ready ? FlightGlobals.ActiveVessel : null;
@@ -60,10 +62,37 @@ namespace KspContinuum
         {
             long started = Stopwatch.GetTimestamp();
             LiveControlReply reply = control.Execute(LiveControlRequest.Parse(command), Time.frameCount, observedFixedCallbacks,
-                () => Capture(vessel));
+                () => Capture(vessel), StartSweep, SweepStatus, RequestQuit);
             reply.observerNanoseconds = (long)((Stopwatch.GetTimestamp() - started) *
                 (1000000000.0 / Stopwatch.Frequency));
             return ReportJson.Encode(reply);
+        }
+
+        static LiveSweepStatus StartSweep()
+        {
+            string reason;
+            bool accepted = ScalingQualification.TryStartDryBuoyancySweep(out reason);
+            LiveSweepStatus status = SweepStatus();
+            status.reason = accepted ? null : reason;
+            return status;
+        }
+
+        static LiveSweepStatus SweepStatus()
+        {
+            return new LiveSweepStatus {
+                state = ScalingQualification.GetDryBuoyancySweepState(),
+                directory = ScalingQualification.GetDryBuoyancySweepDirectory(),
+                window = ScalingQualification.GetDryBuoyancySweepWindow(),
+                windowIndex = ScalingQualification.GetDryBuoyancySweepWindowIndex()
+            };
+        }
+
+        string RequestQuit()
+        {
+            string state = ScalingQualification.GetDryBuoyancySweepState();
+            if (state == "waiting-for-orbit" || state == "running") return "experiment-busy";
+            quitRequested = true;
+            return null;
         }
 
         static LiveVesselSnapshot Capture(Vessel vessel)

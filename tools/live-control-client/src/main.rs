@@ -13,9 +13,11 @@ const MAX_SAMPLES: usize = 10_000;
 struct Options {
     address: String,
     samples: usize,
-    output: PathBuf,
-    ready: PathBuf,
+    output: Option<PathBuf>,
+    ready: Option<PathBuf>,
     timeout: Duration,
+    sweep: bool,
+    quit: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,6 +29,17 @@ struct Reply {
     identity: Option<Identity>,
     snapshot: Option<serde_json::Value>,
     observer_nanoseconds: Option<u64>,
+    sweep: Option<SweepStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SweepStatus {
+    state: String,
+    reason: Option<String>,
+    directory: Option<String>,
+    window: Option<String>,
+    window_index: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +98,12 @@ fn main() {
 
 fn run(arguments: Vec<String>) -> Result<(), String> {
     let options = parse_options(&arguments)?;
+    if options.quit {
+        return run_quit(&options);
+    }
+    if options.sweep {
+        return run_sweep(&options);
+    }
     let started_wall = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "system clock precedes Unix epoch".to_string())?
@@ -115,7 +134,7 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
         }
         if sequence == 0 {
             write_new(
-                &options.ready,
+                options.ready.as_ref().ok_or("missing readiness path")?,
                 &ReadyReceipt {
                     schema: "ksp-continuum-live-control-ready/v1",
                     status: "ready",
@@ -151,9 +170,83 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
         epoch: identity.epoch,
         samples,
     };
-    write_new(&options.output, &receipt, "receipt")?;
-    println!("{}", options.output.display());
+    let output = options.output.as_ref().ok_or("missing output path")?;
+    write_new(output, &receipt, "receipt")?;
+    println!("{}", output.display());
     Ok(())
+}
+
+fn run_quit(options: &Options) -> Result<(), String> {
+    let mut stream = connect(options)?;
+    let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+    let hello = exchange(&mut stream, &mut reader, "hello 1.1.0 quit-hello")?;
+    require_ok(&hello, "quit-hello", false)?;
+    let identity = hello.identity.ok_or("hello reply omitted identity")?;
+    let command = format!(
+        "quit-when-idle 1.1.0 quit-request {} {}",
+        identity.session_id, identity.epoch
+    );
+    let reply = exchange(&mut stream, &mut reader, &command)?;
+    require_ok(&reply, "quit-request", false)
+}
+
+fn run_sweep(options: &Options) -> Result<(), String> {
+    let mut stream = connect(options)?;
+    let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+    let hello = exchange(&mut stream, &mut reader, "hello 1.1.0 sweep-hello")?;
+    require_ok(&hello, "sweep-hello", false)?;
+    let identity = hello.identity.ok_or("hello reply omitted identity")?;
+    let start = format!(
+        "sweep-start 1.1.0 sweep-start {} {} dry-buoyancy",
+        identity.session_id, identity.epoch
+    );
+    let reply = exchange(&mut stream, &mut reader, &start)?;
+    require_ok(&reply, "sweep-start", false)?;
+    print_sweep(reply.sweep.as_ref().ok_or("start reply omitted sweep")?);
+    let mut previous = String::new();
+    loop {
+        std::thread::sleep(Duration::from_millis(250));
+        let command = format!(
+            "sweep-status 1.1.0 sweep-status {} {} dry-buoyancy",
+            identity.session_id, identity.epoch
+        );
+        let reply = exchange(&mut stream, &mut reader, &command)?;
+        require_ok(&reply, "sweep-status", false)?;
+        let sweep = reply.sweep.as_ref().ok_or("status reply omitted sweep")?;
+        let current = format!(
+            "{}:{}:{}",
+            sweep.state,
+            sweep.window_index,
+            sweep.window.as_deref().unwrap_or("")
+        );
+        if current != previous {
+            print_sweep(sweep);
+            previous = current;
+        }
+        match sweep.state.as_str() {
+            "complete" => return Ok(()),
+            "invalid" | "error" | "interrupted" | "unavailable" => {
+                return Err(format!(
+                    "sweep ended {}: {}",
+                    sweep.state,
+                    sweep.reason.as_deref().unwrap_or("unspecified")
+                ));
+            }
+            "waiting-for-orbit" | "running" | "idle" => {}
+            other => return Err(format!("unknown sweep state {other}")),
+        }
+    }
+}
+
+fn print_sweep(sweep: &SweepStatus) {
+    println!(
+        "state={} windowIndex={} window={} directory={} reason={}",
+        sweep.state,
+        sweep.window_index,
+        sweep.window.as_deref().unwrap_or("-"),
+        sweep.directory.as_deref().unwrap_or("-"),
+        sweep.reason.as_deref().unwrap_or("-")
+    );
 }
 
 fn write_new<T: Serialize>(path: &PathBuf, value: &T, kind: &str) -> Result<(), String> {
@@ -234,8 +327,20 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
     let mut output = None;
     let mut ready = None;
     let mut timeout_ms = 5_000u64;
+    let mut sweep = false;
+    let mut quit = false;
     let mut index = 0;
     while index < arguments.len() {
+        if arguments[index] == "--dry-buoyancy-sweep" {
+            sweep = true;
+            index += 1;
+            continue;
+        }
+        if arguments[index] == "--quit-when-idle" {
+            quit = true;
+            index += 1;
+            continue;
+        }
         let value = arguments.get(index + 1).ok_or_else(usage)?;
         match arguments[index].as_str() {
             "--address" => address = value.clone(),
@@ -253,9 +358,13 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
     if timeout_ms == 0 || timeout_ms > 60_000 {
         return Err("--timeout-ms must be between 1 and 60000".into());
     }
-    let output = output.ok_or_else(usage)?;
-    let ready = ready.ok_or_else(usage)?;
-    if output == ready {
+    if sweep && quit {
+        return Err("choose one live command".into());
+    }
+    if !sweep && !quit && (output.is_none() || ready.is_none()) {
+        return Err(usage());
+    }
+    if output.is_some() && output == ready {
         return Err("--ready and --output must be different paths".into());
     }
     Ok(Options {
@@ -264,6 +373,8 @@ fn parse_options(arguments: &[String]) -> Result<Options, String> {
         output,
         ready,
         timeout: Duration::from_millis(timeout_ms),
+        sweep,
+        quit,
     })
 }
 
@@ -275,7 +386,7 @@ fn nanos(duration: Duration) -> Result<u64, String> {
 }
 
 fn usage() -> String {
-    "usage: continuum-live-control-client [--address HOST:PORT] [--samples 1..10000] --ready READY.json --output RECEIPT.json [--timeout-ms 1..60000]".into()
+    "usage: continuum-live-control-client [--address HOST:PORT] [--timeout-ms 1..60000] (--dry-buoyancy-sweep | --quit-when-idle | [--samples 1..10000] --ready READY.json --output RECEIPT.json)".into()
 }
 
 #[cfg(test)]
@@ -295,6 +406,19 @@ mod tests {
             "r".into(),
         ];
         assert!(parse_options(&args).unwrap_err().contains("between 1 and"));
+    }
+
+    #[test]
+    fn live_commands_do_not_require_receipt_paths() {
+        let sweep = parse_options(&["--dry-buoyancy-sweep".into()]).unwrap();
+        assert!(sweep.sweep && !sweep.quit && sweep.output.is_none());
+        let quit = parse_options(&["--quit-when-idle".into()]).unwrap();
+        assert!(quit.quit && !quit.sweep && quit.ready.is_none());
+        assert!(
+            parse_options(&["--dry-buoyancy-sweep".into(), "--quit-when-idle".into()])
+                .unwrap_err()
+                .contains("choose one")
+        );
     }
 
     #[test]
