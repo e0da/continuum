@@ -89,9 +89,17 @@ static class Program
             RadiusCrossingDirection.Outward)) == null, "non-crossing circular orbit produced an event");
         Check(!CoastingEventScheduler.GuardReached(epoch + 90, epoch + 100, 5),
             "warp guard fired before its lead window");
-        Check(CoastingEventScheduler.GuardReached(epoch + 95, epoch + 100, 5) &&
-            CoastingEventScheduler.GuardReached(epoch + 101, epoch + 100, 5),
-            "warp guard missed its boundary or an already reached event");
+        Check(CoastingEventScheduler.ClassifyGuard(epoch + 90, epoch + 100, 5) ==
+            CoastingEventGuardState.BeforeGuard, "pre-guard state was not classified explicitly");
+        Check(CoastingEventScheduler.GuardReached(epoch + 95, epoch + 100, 5),
+            "warp guard missed its opening boundary");
+        Check(CoastingEventScheduler.ClassifyGuard(epoch + 99, epoch + 100, 5) ==
+            CoastingEventGuardState.GuardOpen, "open guard state was not classified explicitly");
+        Check(!CoastingEventScheduler.GuardReached(epoch + 100, epoch + 100, 5) &&
+            !CoastingEventScheduler.GuardReached(epoch + 101, epoch + 100, 5),
+            "warp guard treated a reached or overshot event as a pre-event stop");
+        Check(CoastingEventScheduler.ClassifyGuard(epoch + 101, epoch + 100, 5) ==
+            CoastingEventGuardState.ReachedOrPassed, "overshoot was not classified as a missed event");
         var report = new CoastingAdapterReport {
             eventConfigured = true, eventFound = true, eventKind = manyCrossings.Kind,
             eventDirection = "outward", eventUniversalTime = manyCrossings.TimeSeconds,

@@ -115,9 +115,14 @@ namespace KspContinuum
                 if (stopRequested) { ReleaseToStock(); Finish(); return; }
                 if (!active && engine == null) TrySeed();
                 if (!active && forecast != null && forecast.IsCompleted) AdmitForecast();
-                if (active && predictedEvent != null && CoastingEventScheduler.GuardReached(
-                    Planetarium.GetUniversalTime(), predictedEvent.TimeSeconds, eventGuard))
-                { StopForEvent(); return; }
+                if (active && predictedEvent != null)
+                {
+                    double now = Planetarium.GetUniversalTime();
+                    CoastingEventGuardState guard = CoastingEventScheduler.ClassifyGuard(
+                        now, predictedEvent.TimeSeconds, eventGuard);
+                    if (guard == CoastingEventGuardState.ReachedOrPassed) { MissedEvent(now); return; }
+                    if (guard == CoastingEventGuardState.GuardOpen) { StopForEvent(now); return; }
+                }
                 if (active && (!Eligible(vessel) || vessel.mainBody != referenceBody || vessel.orbit.referenceBody != referenceBody))
                     Stop("admission-ended");
                 if (active && !TargetsOwned()) Stop("patch-graph-changed");
@@ -234,16 +239,21 @@ namespace KspContinuum
             report.forecastCompletedBeforePresentation = now < result.Advance.Final.TimeSeconds;
             if (!report.forecastCompletedBeforePresentation)
             { Fail("forecast-did-not-lead-presentation"); forecast = null; StopWarpAfterFailure(); return; }
-            if (predictedEvent != null && CoastingEventScheduler.GuardReached(now, predictedEvent.TimeSeconds, eventGuard))
-            { Fail("event-guard-window-missed"); forecast = null; StopWarpAfterFailure(); return; }
+            if (predictedEvent != null)
+            {
+                CoastingEventGuardState guard = CoastingEventScheduler.ClassifyGuard(now, predictedEvent.TimeSeconds, eventGuard);
+                if (guard == CoastingEventGuardState.ReachedOrPassed)
+                { Fail("event-crossing-overshot-before-admission"); forecast = null; StopWarpAfterFailure(); return; }
+                if (guard == CoastingEventGuardState.GuardOpen)
+                { Fail("event-guard-window-missed"); forecast = null; StopWarpAfterFailure(); return; }
+            }
             report.authorityAdmissionAttested = TargetsOwned();
             if (!report.authorityAdmissionAttested) { Fail("authority-admission-failed"); forecast = null; return; }
             active = true; report.status = "active";
         }
 
-        void StopForEvent()
+        void StopForEvent(double ut)
         {
-            double ut = Planetarium.GetUniversalTime();
             report.warpStopRequested = true; report.warpStopRequestUniversalTime = ut;
             report.warpRateIndexBeforeStopRequest = TimeWarp.CurrentRateIndex;
             Stop("event-guard-reached");
@@ -257,10 +267,19 @@ namespace KspContinuum
             Finish();
         }
 
-        void StopWarpAfterFailure()
+        void MissedEvent(double ut)
+        {
+            Fail("event-crossing-overshot");
+            ReleaseToStock();
+            StopWarpAfterFailure(ut);
+            Finish();
+        }
+
+        void StopWarpAfterFailure(double? observedUniversalTime = null)
         {
             if (!eventConfigured || report.warpStopRequested) return;
-            report.warpStopRequested = true; report.warpStopRequestUniversalTime = Planetarium.GetUniversalTime();
+            report.warpStopRequested = true; report.warpStopRequestUniversalTime =
+                observedUniversalTime.HasValue ? observedUniversalTime.Value : Planetarium.GetUniversalTime();
             report.warpRateIndexBeforeStopRequest = TimeWarp.CurrentRateIndex;
             try { TimeWarp.SetRate(0, true); report.warpRateIndexAfterStopRequest = TimeWarp.CurrentRateIndex; }
             catch (Exception error) { report.errors++; report.reason += ":warp-stop-failed:" + error.GetType().Name; }

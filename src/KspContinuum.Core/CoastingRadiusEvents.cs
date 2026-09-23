@@ -3,6 +3,7 @@ using System;
 namespace KspContinuum
 {
     public enum RadiusCrossingDirection { Inward, Outward }
+    public enum CoastingEventGuardState { BeforeGuard, GuardOpen, ReachedOrPassed }
 
     public sealed class RadiusCrossingSearch
     {
@@ -58,11 +59,16 @@ namespace KspContinuum
         }
 
         public static bool GuardReached(double currentTimeSeconds, double eventTimeSeconds, double leadSeconds)
+        { return ClassifyGuard(currentTimeSeconds, eventTimeSeconds, leadSeconds) == CoastingEventGuardState.GuardOpen; }
+
+        public static CoastingEventGuardState ClassifyGuard(double currentTimeSeconds, double eventTimeSeconds,
+            double leadSeconds)
         {
             AssemblyModel.Finite(currentTimeSeconds); AssemblyModel.Finite(eventTimeSeconds);
             AssemblyModel.Positive(leadSeconds);
-            if (eventTimeSeconds <= currentTimeSeconds) return true;
-            return eventTimeSeconds - currentTimeSeconds <= leadSeconds;
+            if (currentTimeSeconds >= eventTimeSeconds) return CoastingEventGuardState.ReachedOrPassed;
+            return eventTimeSeconds - currentTimeSeconds <= leadSeconds ?
+                CoastingEventGuardState.GuardOpen : CoastingEventGuardState.BeforeGuard;
         }
 
         static bool TryPredict(CoastingBody seed, double epoch, double mu, RadiusCrossingSearch search,
