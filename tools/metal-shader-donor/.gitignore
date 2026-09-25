@@ -6,6 +6,8 @@
 /Assets/GeneratedHarness.unity.meta
 /Assets/UI-Default.shader
 /Assets/UI-Default.shader.meta
+/Assets/MetalShaders/
+/Assets/MetalShaders.meta
 /Packages/packages-lock.json
 /ProjectSettings/*
 !/ProjectSettings/ProjectVersion.txt

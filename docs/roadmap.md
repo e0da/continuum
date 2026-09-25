@@ -1,6 +1,6 @@
 # Continuum direction and goal index
 
-Reviewed 2026-09-23. [Linear owns the live roadmap, milestones, priorities and issue state](https://linear.app/e0da/project/continuum-3e8d50ef8c85). This page connects those outcomes to shipped documentation and preserves the full product direction. Current work prioritizes independent simulation time and trajectory evaluation, the KSP presentation adapter, and measurements that distinguish engine work from host synchronization.
+Reviewed 2026-09-23. [Linear owns the live roadmap, milestones, priorities and issue state](https://linear.app/e0da/project/continuum-3e8d50ef8c85). This page connects those outcomes to shipped documentation and preserves the full product direction. Current work prioritizes independent simulation time and trajectory evaluation, the KSP presentation adapter, and matched measurements that distinguish simulation, synchronization and rendering costs.
 
 Continuum owns its simulation model, time, scheduling and data. KSP is a client and adapter; its per-part callbacks and render loop do not define how Continuum must compute. Faster stock callbacks demonstrate integration seams, but are not the architectural destination. Continuum is the engine; [Gimbal is the game/experience layer](continuum-gimbal-boundary.md). `KspContinuum` remains the adapter namespace.
 
@@ -38,6 +38,7 @@ The coordinator advances independent worker lanes concurrently and integrates th
 | Rust execution | Connect the measured x86 in-process boundary to one captured KSP workload through persistent pinned views, dirty refresh and selective publication | [E0D-1873](https://linear.app/e0da/issue/E0D-1873) |
 | Structural reduction | Populate the conservative classifier from a real vessel; then validate one admitted compound candidate's collider and mass properties | [E0D-1874](https://linear.app/e0da/issue/E0D-1874) |
 | Performance observation | Record workload identity plus capture, pack, compute, synchronization, publication and total timings in a regression-friendly report used by one existing benchmark | [E0D-1875](https://linear.app/e0da/issue/E0D-1875) |
+| Metal rendering | Inventory missing shader families, graft a bounded matching-Unity batch in an isolated KSP copy, render a real flight scene, then compare the same 1080p workload under OpenGL and Metal | [E0D-1886](https://linear.app/e0da/issue/E0D-1886) |
 
 Independent coast and its presentation adapter are the active implementation priorities. The other lanes remain preserved follow-ons; same-tick solar and aerodynamic micro-optimizations are not prerequisites. Structural graph classification can support later live dynamics before geometry baking. Live graph mutation follows dynamics ownership. The smallest useful first replacement may be managed C#; Rust/GPU integration is an independent measured strategy, not a gate on showing KSP use our computation.
 
