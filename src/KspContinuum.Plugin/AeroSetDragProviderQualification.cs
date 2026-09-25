@@ -12,17 +12,19 @@ namespace KspContinuum
     {
         const string Flag = "--continuum-live-setdrag-provider";
         const string QuitFlag = "--continuum-setdrag-quit-after-qualification";
+        const string StressFlag = "--continuum-setdrag-stress-candidate";
         const string Owner = "continuum.live-setdrag-provider";
         const int RequiredWarmupMatches = 32;
         const int RequiredMeasuredMatches = 256;
         const int MaximumSubstitutions = 256;
+        const int StressAuditStride = 4096;
         static readonly AccessTools.FieldRef<DragCubeList, DragCubeList.CubeData> CubeData =
             AccessTools.FieldRefAccess<DragCubeList, DragCubeList.CubeData>("cubeData");
         static AeroSetDragProviderQualification instance;
         Harmony harmony;
         MethodInfo target;
         AeroSetDragSubstitutionReport report;
-        bool requested, active, exported, quitAfterQualification;
+        bool requested, active, exported, quitAfterQualification, stressRequested, stressWindow;
         float patchGraphFixedTime = float.NaN;
 
         struct CallState
@@ -35,13 +37,17 @@ namespace KspContinuum
 
         public void Start()
         {
-            if (Array.IndexOf(Environment.GetCommandLineArgs(), Flag) < 0) return;
+            string[] arguments = Environment.GetCommandLineArgs();
+            stressRequested = Array.IndexOf(arguments, StressFlag) >= 0;
+            if (!stressRequested && Array.IndexOf(arguments, Flag) < 0) return;
             requested = true;
-            quitAfterQualification = Array.IndexOf(Environment.GetCommandLineArgs(), QuitFlag) >= 0;
+            quitAfterQualification = Array.IndexOf(arguments, QuitFlag) >= 0;
             report = new AeroSetDragSubstitutionReport {
                 requiredWarmupMatches = RequiredWarmupMatches, requiredMeasuredMatches = RequiredMeasuredMatches,
-                maximumSubstitutions = MaximumSubstitutions, stopwatchFrequency = Stopwatch.Frequency, status = "active"
+                maximumSubstitutions = stressRequested ? 500000 : MaximumSubstitutions,
+                stopwatchFrequency = Stopwatch.Frequency, status = "active", atmosphericStressWindow = stressRequested
             };
+            if (stressRequested) report.strategy = "direct-six-face/stress-audit-every-4096-calls/v1";
             active = true;
             try
             {
@@ -65,6 +71,26 @@ namespace KspContinuum
             if (owner == null || !owner.active) return true;
             try
             {
+                if (owner.stressRequested && owner.report.matchedCompleteOutputs >= RequiredWarmupMatches + RequiredMeasuredMatches)
+                {
+                    if (!owner.stressWindow) return true;
+                    if ((owner.report.stressOriginalCalls % StressAuditStride) == 0 && !owner.TargetOwnedForStep(false))
+                    { owner.Stop("patch-graph-changed"); owner.report.stockFallbacks++; return true; }
+                    if (owner.report.suppressedOriginalCalls >= owner.report.maximumSubstitutions)
+                    { owner.Stop("stress-call-limit-reached"); owner.report.stockFallbacks++; return true; }
+                    DragCubeList.CubeData candidate = Calculate(__instance, vector, machNumber);
+                    CubeData(__instance) = candidate;
+                    owner.report.stressOriginalCalls++;
+                    if ((owner.report.stressOriginalCalls & 1023) == 0)
+                    {
+                        __state.Candidate = candidate;
+                        __state.Shadow = true;
+                        owner.report.stressShadowComparisons++;
+                        return true;
+                    }
+                    owner.report.suppressedOriginalCalls++;
+                    return false;
+                }
                 int requiredShadow = RequiredWarmupMatches + RequiredMeasuredMatches;
                 bool shadow = owner.report.matchedCompleteOutputs < requiredShadow;
                 bool measured = owner.report.matchedCompleteOutputs >= RequiredWarmupMatches &&
@@ -142,6 +168,9 @@ namespace KspContinuum
             if (!Equivalent(__state.Candidate, Snapshot(__instance), out error))
             { owner.report.maximumRelativeError = Math.Max(owner.report.maximumRelativeError, error); owner.Stop("complete-output-mismatch"); return; }
             owner.report.maximumRelativeError = Math.Max(owner.report.maximumRelativeError, error);
+            if (owner.stressRequested && owner.stressWindow &&
+                owner.report.matchedCompleteOutputs >= RequiredWarmupMatches + RequiredMeasuredMatches)
+            { owner.report.stressMatchedOutputs++; return; }
             owner.report.matchedCompleteOutputs++;
             if (__state.Measured) owner.report.shadowMeasuredComparisons++;
             else owner.report.shadowWarmupComparisons++;
@@ -267,6 +296,32 @@ namespace KspContinuum
             report.status = reason == "bounded-substitution-limit-reached" ? "complete" : "abstained";
         }
         public void Update() { if (requested && !active && !exported) Finish(); }
+        public static bool StressReady => instance != null && instance.active && instance.stressRequested &&
+            instance.report.matchedCompleteOutputs >= RequiredWarmupMatches + RequiredMeasuredMatches;
+        public static bool BeginStressWindow()
+        {
+            if (!StressReady || instance.stressWindow) return false;
+            instance.report.authorityAdmissionAttested = TargetStillOwned(instance.target);
+            if (!instance.report.authorityAdmissionAttested) { instance.Stop("authority-admission-patch-graph-changed"); return false; }
+            instance.stressWindow = true;
+            return true;
+        }
+        public static bool EndStressWindow()
+        {
+            AeroSetDragProviderQualification owner = instance;
+            if (owner == null || !owner.stressRequested) return false;
+            owner.stressWindow = false;
+            if (owner.active)
+            {
+                owner.report.authorityExitAttested = TargetStillOwned(owner.target);
+                bool valid = owner.report.authorityExitAttested && owner.report.suppressedOriginalCalls > 0 &&
+                    owner.report.stressMatchedOutputs > 0 && owner.report.stockFallbacks == 0;
+                owner.Stop(valid ? "verified-stress-window" : "stress-window-invalid");
+                if (valid) owner.report.status = "complete";
+            }
+            owner.Finish();
+            return owner.report.status == "complete" && owner.report.cleanupStatus == "removed-owned-patches";
+        }
         void Finish()
         {
             if (report != null && report.status == "complete" && target != null)

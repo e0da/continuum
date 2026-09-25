@@ -153,6 +153,10 @@ competing patch on `SetDrag` stops substitution and leaves subsequent calls to s
 and body-lift application, ocean handling, and Unity integration remain stock-owned. A mod such as KSP Community Fixes
 that inlines this reduction in a broader `UpdateAerodynamics` replacement can bypass the `SetDrag` seam entirely; the
 bounded provider makes no compatibility claim for that configuration.
+
+The separate opt-in `--continuum-setdrag-stress-candidate` mode extends the verified provider across one complete
+4x atmospheric profiling window. Its whole-game measurements and ownership-audit limitation are in
+[profiling](profiling.md#atmospheric-4x-setdrag-experiment).
 Add `--continuum-setdrag-quit-after-qualification` for an automated run that exits with code 0 only after a complete
 receipt and verified patch removal; abstention or cleanup failure exits with code 2.
 When combined with the existing scale-checkpoint loader flags, this provider-owned termination mode leaves the orbital
