@@ -210,6 +210,23 @@ namespace KspContinuum
             frame.rigidbodies = structuralRigidbodies; frame.joints = structuralJoints; frame.colliders = structuralColliders;
             frame.body = vessel.mainBody == null ? null : vessel.mainBody.bodyName;
             frame.situation = vessel.situation.ToString();
+            if (vessel.mainBody != null)
+            {
+                frame.bodyRadiusMeters = vessel.mainBody.Radius;
+                frame.bodyMuMetersCubedPerSecondSquared = vessel.mainBody.gravParameter;
+            }
+            if (vessel.orbit != null)
+            {
+                Vector3d position = vessel.orbit.pos;
+                Vector3d velocity = vessel.orbit.vel;
+                double radius = position.magnitude;
+                if (radius > 0 && !double.IsNaN(radius) && !double.IsInfinity(radius))
+                {
+                    frame.orbitalRadiusMeters = radius;
+                    frame.orbitalSpeedMetersPerSecond = velocity.magnitude;
+                    frame.radialSpeedMetersPerSecond = Vector3d.Dot(position, velocity) / radius;
+                }
+            }
             return frame;
         }
 
