@@ -17,7 +17,7 @@ namespace KspContinuum
         bool active, capturing, finished, strategySweep, quitAfterQualification;
         float eligibleSince;
         int expectedParts = -1;
-        bool physicsWarp, atmosphericStress, warpRequested;
+        bool physicsWarp, atmosphericStress, setDragStressCandidate, warpRequested;
         Guid? atmosphericVesselId;
         float warpRequestedAt;
         int stableWarpFrames;
@@ -87,6 +87,9 @@ namespace KspContinuum
                 strategySweep = Array.IndexOf(arguments, "--continuum-dry-buoyancy-sweep") >= 0;
                 physicsWarp = Array.IndexOf(arguments, "--continuum-physics-warp-pressure") >= 0;
                 atmosphericStress = Array.IndexOf(arguments, "--continuum-atmospheric-stress") >= 0;
+                setDragStressCandidate = Array.IndexOf(arguments, "--continuum-setdrag-stress-candidate") >= 0;
+                if (setDragStressCandidate && !atmosphericStress)
+                { Finish("setdrag-stress-requires-atmospheric-stress", 2); return; }
                 if (atmosphericStress) physicsWarp = true;
                 if (physicsWarp && strategySweep) { Finish("physics-warp-does-not-support-strategy-sweep", 2); return; }
                 foreach (string argument in arguments) if (argument.StartsWith("--continuum-scale-parts=", StringComparison.Ordinal))
@@ -126,6 +129,13 @@ namespace KspContinuum
                 }
                 stableWarpFrames++;
                 if (stableWarpFrames < 3) return;
+                if (setDragStressCandidate && !AeroSetDragProviderQualification.StressReady)
+                {
+                    if (Time.realtimeSinceStartup - warpRequestedAt > 30) Finish("setdrag-stress-not-ready", 2);
+                    return;
+                }
+                if (setDragStressCandidate && !AeroSetDragProviderQualification.BeginStressWindow())
+                { Finish("setdrag-stress-admission-failed", 2); return; }
                 capturing = true; probe = new Probe(); StartCoroutine(Capture()); return;
             }
             if (TimeWarp.CurrentRate != 1 || TimeWarp.CurrentRateIndex != 0) { eligibleSince = 0; return; }
@@ -211,6 +221,8 @@ namespace KspContinuum
                 File.WriteAllText(Path.Combine(directory, "markers.json"), ReportJson.Encode(report));
                 string reason; bool valid = atmosphericStress ? AtmosphericStressComplete(report, out reason) :
                     Stable(report, physicsWarp ? RequestedPhysicsWarp : 1, out reason);
+                if (setDragStressCandidate && !AeroSetDragProviderQualification.EndStressWindow())
+                { valid = false; reason = "setdrag-stress-provider-invalid"; }
                 bool sourceUnchanged = !ScaleCheckpointLoadState.Requested || ScaleCheckpointLoadState.SourceUnchanged();
                 if (!sourceUnchanged)
                 { valid = false; reason = "source-checkpoint-changed"; }
