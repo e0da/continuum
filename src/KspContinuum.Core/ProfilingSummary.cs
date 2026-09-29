@@ -23,6 +23,8 @@ namespace KspContinuum
         public int gcGeneration0, gcGeneration1, gcGeneration2;
         public double boundaryWallSeconds, fixedDeltaSeconds, timeScale;
         public double? universalTime, warpRate, throttleCommand;
+        public double? bodyRadiusMeters, bodyMuMetersCubedPerSecondSquared;
+        public double? orbitalRadiusMeters, orbitalSpeedMetersPerSecond, radialSpeedMetersPerSecond;
         public bool? packed, loaded, paused;
         public string scene, body, situation;
         public bool contextAligned;

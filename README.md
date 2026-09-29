@@ -1,10 +1,10 @@
 # Continuum
 
-An experimental simulation engine developed through a KSP 1 adapter, captured workloads, and portable physics experiments. The goal is faster, believable physics, including flex and breakage. Rigid grouping is one experiment, not a commitment to making every ship rigid. `KspContinuum` remains the addon namespace; Gimbal is the game and experience layer.
+An experimental KSP 1 mechanics and performance lab with an addon, captured workloads, and portable physics experiments. Gimbal's native Rust runtime and Space Race game are the primary product path. Continuum can inform them through measured algorithms and fixtures without becoming a required runtime dependency. Rigid grouping remains one experiment, not a commitment to making every ship rigid. `KspContinuum` remains the addon namespace.
 
 **Status: experimental measurement, input, and worker infrastructure.** The isolated physics benchmark has passed in headless KSP 1.12.5, and an installed orbital coast has exercised the live background worker plus next-step stock comparison. This is a research harness, not a gameplay fix or a replacement physics engine. Stock-vessel speedup and mod compatibility remain unverified.
 
-The [roadmap and goal index](docs/roadmap.md) links the current Linear plan and every retained research/experience direction. A023 has now substituted an empty native physics callback and restored it; useful replacement dynamics and measured KSP performance improvement are the next outcomes. The Rust CPU/Metal results are synthetic kernel measurements, not game-framerate evidence.
+The [roadmap and goal index](docs/roadmap.md) retains the KSP experiments and their evidence while Gimbal advances independently. A023 substituted an empty native physics callback and restored it; useful replacement dynamics and measured KSP performance improvement remain open research outcomes. The Rust CPU/Metal results are synthetic kernel measurements, not game-framerate evidence.
 
 ## What exists
 
@@ -94,7 +94,7 @@ Native structural dependencies are fetched by pinned digest into ignored build a
 
 ## Research direction
 
-The [Continuum and Gimbal boundary](docs/continuum-gimbal-boundary.md) defines Continuum as the reusable engine, Gimbal as the game and experience layer, Gimbal KSP as a compatibility game mode, and this KSP addon as the strangler bridge and behavioral oracle. That direction does not change the current experimental status or bypass the replacement evidence gates below.
+The [Continuum and Gimbal boundary](docs/continuum-gimbal-boundary.md) now puts Gimbal's native Rust runtime and Space Race game first. This repository remains a KSP mechanics/performance reference and integration lab. KSP compatibility, Metal rendering, and live substitution are optional research paths with their own evidence gates.
 
 The longer-term experiment is a shadow solver: capture a vessel's inputs, run a separate solver without controlling the vessel, and compare its outputs with stock. First measure whether rigid-body solving, KSP's force calculations, part callbacks, or another subsystem dominates. A native CPU solver, an external process, GPU compute, and [learned or stochastic candidates](docs/learned-compute.md) remain measurable strategies rather than assumed winners. [Aerodynamic strategies](docs/aerodynamics.md) define a stock/FAR oracle boundary, multiresolution geometry and the first truth-capture experiment. [Behavioral qualification](docs/aero-behavior.md) defines rocket, plane and reentry envelopes for stock, FAR and Realism Overhaul composition profiles.
 
