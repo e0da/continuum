@@ -20,12 +20,19 @@ public static class BuildShaderBundle
         {
             if (AssetDatabase.LoadAssetAtPath<Shader>(path) == null)
                 throw new Exception("Unable to import shader " + path);
-            AssetImporter.GetAtPath(path).assetBundleName = "continuum-metal-ui";
         }
         var output = Environment.GetEnvironmentVariable("CONTINUUM_SHADER_BUNDLE_OUTPUT");
         if (string.IsNullOrWhiteSpace(output))
             throw new Exception("Set CONTINUUM_SHADER_BUNDLE_OUTPUT to an existing directory");
-        var manifest = BuildPipeline.BuildAssetBundles(output, BuildAssetBundleOptions.None, BuildTarget.StandaloneOSX);
+        var builds = new[]
+        {
+            new AssetBundleBuild
+            {
+                assetBundleName = "continuum-metal-ui",
+                assetNames = paths
+            }
+        };
+        var manifest = BuildPipeline.BuildAssetBundles(output, builds, BuildAssetBundleOptions.None, BuildTarget.StandaloneOSX);
         if (manifest == null)
             throw new Exception("Shader bundle build failed");
         Debug.Log("Built Metal shader bundle with " + paths.Length + " shaders");
