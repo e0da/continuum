@@ -38,6 +38,7 @@ These lanes preserve specific KSP research questions and issue history; their or
 | Rust execution | Connect the measured x86 in-process boundary to one captured KSP workload through persistent pinned views, dirty refresh and selective publication | [E0D-1873](https://linear.app/e0da/issue/E0D-1873) |
 | Structural reduction | Populate the conservative classifier from a real vessel; then validate one admitted compound candidate's collider and mass properties | [E0D-1874](https://linear.app/e0da/issue/E0D-1874) |
 | Performance observation | Record workload identity plus capture, pack, compute, synchronization, publication and total timings in a regression-friendly report used by one existing benchmark | [E0D-1875](https://linear.app/e0da/issue/E0D-1875) |
+| Metal rendering research | The matching-Unity donor and graft tools support a selected shader batch; the two-shader KSP menu capture remained black and diagnostic KSP-specific substitutions stalled. Visible flight rendering and a matched 1080p OpenGL/Metal comparison remain unqualified. See [shader experiments](metal-shader-swap.md). | [E0D-1886](https://linear.app/e0da/issue/E0D-1886) |
 
 The smallest useful KSP replacement may be managed C#; Rust/GPU integration remains a measured strategy. Structural graph classification can support later live dynamics before geometry baking, and live graph mutation follows dynamics ownership. These experiments can donate fixtures or algorithms to Gimbal without imposing KSP's host architecture on it.
 

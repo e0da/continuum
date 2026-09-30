@@ -2,9 +2,9 @@ using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 
 if (!(args.Length == 3 && args[0] == "inspect") &&
-    !(args.Length == 6 && args[0] == "graft"))
+    !(args.Length == 6 && (args[0] == "graft" || args[0] == "graft-list")))
 {
-    Console.Error.WriteLine("Usage: inspect <classdata.tpk> <assets-or-bundle> | graft <classdata.tpk> <target-assets> <donor-bundle> <output-assets> <shader-name>");
+    Console.Error.WriteLine("Usage: inspect <classdata.tpk> <assets-or-bundle> | graft <classdata.tpk> <target-assets> <donor-bundle> <output-assets> <shader-name> | graft-list <classdata.tpk> <target-assets> <donor-bundle> <output-assets> <names-file>");
     return 2;
 }
 
@@ -30,7 +30,12 @@ if (args[0] == "inspect")
 var targetPath = args[2];
 var bundlePath = args[3];
 var outputPath = args[4];
-var shaderName = args[5];
+var names = args[0] == "graft"
+    ? [args[5]]
+    : File.ReadAllLines(args[5]).Select(line => line.Trim())
+        .Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray();
+if (names.Length == 0 || names.Distinct(StringComparer.Ordinal).Count() != names.Length)
+    throw new InvalidOperationException("Expected at least one distinct shader name");
 if (Path.GetFullPath(targetPath) == Path.GetFullPath(outputPath) || File.Exists(outputPath))
     throw new InvalidOperationException("Output must be a new file, separate from the source");
 
@@ -40,22 +45,31 @@ if (target.file.Metadata.UnityVersion != donor.file.Metadata.UnityVersion)
     throw new InvalidOperationException("Target and donor Unity asset versions differ");
 manager.LoadClassDatabaseFromPackage(target.file.Metadata.UnityVersion);
 
-var targetMatches = target.file.GetAssetsOfType(AssetClassID.Shader)
-    .Where(asset => Name(manager.GetBaseField(target, asset)) == shaderName).ToArray();
-var donorMatches = donor.file.GetAssetsOfType(AssetClassID.Shader)
-    .Where(asset => Name(manager.GetBaseField(donor, asset)) == shaderName).ToArray();
-if (targetMatches.Length != 1 || donorMatches.Length != 1)
-    throw new InvalidOperationException("Expected exactly one target and donor shader with that name");
+var targetShaders = target.file.GetAssetsOfType(AssetClassID.Shader)
+    .GroupBy(asset => Name(manager.GetBaseField(target, asset)), StringComparer.Ordinal)
+    .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+var donorShaders = donor.file.GetAssetsOfType(AssetClassID.Shader)
+    .GroupBy(asset => Name(manager.GetBaseField(donor, asset)), StringComparer.Ordinal)
+    .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+var replacements = new List<(AssetFileInfo targetAsset, AssetTypeValueField donorField)>();
+foreach (var shaderName in names)
+{
+    if (!targetShaders.TryGetValue(shaderName, out var targetMatches) || targetMatches.Length != 1 ||
+        !donorShaders.TryGetValue(shaderName, out var donorMatches) || donorMatches.Length != 1)
+        throw new InvalidOperationException($"Expected exactly one target and donor shader named {shaderName}");
+    var targetField = manager.GetBaseField(target, targetMatches[0]);
+    var donorField = manager.GetBaseField(donor, donorMatches[0]);
+    if (!Platforms(targetField).SequenceEqual([15]) || !Platforms(donorField).Contains(14))
+        throw new InvalidOperationException($"Expected OpenGL-only target and Metal donor for {shaderName}");
+    replacements.Add((targetMatches[0], donorField));
+}
 
-var targetField = manager.GetBaseField(target, targetMatches[0]);
-var donorField = manager.GetBaseField(donor, donorMatches[0]);
-if (!Platforms(targetField).SequenceEqual([15]) || !Platforms(donorField).Contains(14))
-    throw new InvalidOperationException("Expected an OpenGL-only target and a Metal donor");
-
-targetMatches[0].SetNewData(donorField);
+foreach (var replacement in replacements)
+    replacement.targetAsset.SetNewData(replacement.donorField);
 using (var writer = new AssetsFileWriter(outputPath))
     target.file.Write(writer);
-Console.WriteLine($"Grafted {shaderName} into path ID {targetMatches[0].PathId}");
+foreach (var replacement in replacements)
+    Console.WriteLine($"Grafted {Name(replacement.donorField)} into path ID {replacement.targetAsset.PathId}");
 return 0;
 
 static bool IsBundle(string path)
